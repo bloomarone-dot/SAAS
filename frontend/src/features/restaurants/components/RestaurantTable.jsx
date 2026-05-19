@@ -1,4 +1,7 @@
+import { useMemo, useState } from "react";
+
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { nextSort, SortButton, sortRows } from "@/utils/sort";
 
 export function RestaurantTable({
   restaurants,
@@ -7,6 +10,19 @@ export function RestaurantTable({
   onAdd,
   onClearFilters,
 }) {
+  const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
+  const sortedRestaurants = useMemo(
+    () =>
+      sortRows(restaurants, sort, {
+        name: (restaurant) => restaurant.name,
+        slug: (restaurant) => restaurant.slug,
+        currency: (restaurant) => restaurant.currency,
+        status: (restaurant) => Number(restaurant.is_active),
+        created_at: (restaurant) => restaurant.created_at,
+      }),
+    [restaurants, sort]
+  );
+
   if (!restaurants.length) {
     return (
       <div className="overflow-hidden border border-[#eadfd7] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
@@ -81,16 +97,16 @@ export function RestaurantTable({
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="bg-[#fffaf5] text-xs font-black uppercase text-[#9a3412]">
             <tr>
-              <th className="px-6 py-4">Nom</th>
-              <th className="px-6 py-4">Slug</th>
-              <th className="px-6 py-4">Devise</th>
-              <th className="px-6 py-4">Statut</th>
-              <th className="px-6 py-4">Création</th>
+              <th className="px-6 py-4"><SortButton label="Nom" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+              <th className="px-6 py-4"><SortButton label="Slug" column="slug" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+              <th className="px-6 py-4"><SortButton label="Devise" column="currency" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+              <th className="px-6 py-4"><SortButton label="Statut" column="status" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+              <th className="px-6 py-4"><SortButton label="Création" column="created_at" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4 text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#ffead5]">
-            {restaurants.map((restaurant) => (
+            {sortedRestaurants.map((restaurant) => (
               <tr key={restaurant.id} className="text-[#64708b] hover:bg-[#fffaf5]">
                 <td className="px-6 py-4 font-black text-[#07133d]">{restaurant.name}</td>
                 <td className="px-6 py-4">{restaurant.slug}</td>

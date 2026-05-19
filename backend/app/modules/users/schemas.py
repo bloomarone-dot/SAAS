@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from app.modules.shared.models import Permission, Role
+from app.modules.permissions.models import Permission, Role
 from app.modules.shared.schemas import OrmModel
 
 
@@ -22,6 +22,7 @@ class UserPublic(OrmModel):
     is_owner: bool
     is_active: bool
     permissions: list[Permission] = Field(default_factory=list)
+    explicit_permissions: list[Permission] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -45,9 +46,21 @@ class UserPermissionsUpdateIn(BaseModel):
     permissions: list[Permission]
 
 
-class PermissionPublic(BaseModel):
-    """Permission affichable dans l'interface d'administration."""
+class UserUpdateIn(BaseModel):
+    """Payload de modification des informations et droits d'un utilisateur."""
 
-    key: Permission
-    label: str
+    email: Optional[str] = Field(default=None, max_length=191)
+    username: Optional[str] = Field(default=None, min_length=3, max_length=50)
+    first_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    role: Optional[Role] = None
+    branch_id: Optional[str] = None
+    permissions: Optional[list[Permission]] = None
+
+
+class UserStatusUpdateIn(BaseModel):
+    """Payload d'activation ou de desactivation d'un compte utilisateur."""
+
+    is_active: bool
 

@@ -7,8 +7,12 @@ from app.database import Base, SessionLocal, engine
 import app.modules.models  # noqa: F401
 from app.modules.auth import router as auth
 from app.modules.branches import router as branches
+from app.modules.catalog import router as catalog
+from app.modules.dashboard import router as dashboard
+from app.modules.permissions import router as permissions
 from app.modules.restaurants import router as restaurants
-from app.modules.shared.models import Role
+from app.modules.permissions.models import Role
+from app.modules.stock import router as stock
 from app.modules.users.models import User
 from app.modules.users import router as users
 from app.security import hash_password
@@ -70,4 +74,8 @@ async def root():
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(restaurants.router, prefix="/api/v1")
 app.include_router(branches.router, prefix="/api/v1")
+app.include_router(catalog.router, prefix="/api/v1")
+app.include_router(dashboard.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
+app.include_router(permissions.router, prefix="/api/v1")
+app.include_router(stock.router, prefix="/api/v1")

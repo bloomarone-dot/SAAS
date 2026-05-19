@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { APP_MENUS } from "@/config/menu";
 import { DashboardIcon } from "./icons";
 
@@ -9,17 +11,18 @@ export function DashboardLayout({
   onLogout,
   children,
 }) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
   const roleMeta = getRoleMeta(role);
 
   return (
     <div className="flex min-h-screen bg-white text-[#101828]">
-      <aside className="hidden w-[252px] shrink-0 border-r border-slate-200/80 bg-white px-5 py-8 lg:flex lg:flex-col">
-        <div className="mb-9 flex items-center gap-3">
+      <aside className={`hidden shrink-0 border-r border-slate-200/80 bg-white py-8 transition-all duration-200 lg:flex lg:flex-col ${isCollapsed ? "w-[86px] px-4" : "w-[252px] px-5"}`}>
+        <div className={`mb-9 flex items-center gap-3 ${isCollapsed ? "justify-center" : ""}`}>
           <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-[#f04438] text-[#f04438]">
             <DashboardIcon name="Store" size={22} />
           </div>
-          <div>
+          <div className={isCollapsed ? "hidden" : ""}>
             <h1 className="text-lg font-black leading-tight text-slate-950">Resto SaaS</h1>
             <p className="text-xs font-semibold text-slate-500">Smart Restaurant</p>
           </div>
@@ -31,19 +34,22 @@ export function DashboardLayout({
               key={item.key}
               type="button"
               onClick={() => onNavigate(item.key)}
+              title={isCollapsed ? item.label : undefined}
               className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition-all ${
+                isCollapsed ? "justify-center" : ""
+              } ${
                 activeView === item.key
                   ? "bg-[#fff4ed] text-[#f04438]"
                   : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
               }`}
             >
               <DashboardIcon name={item.icon} size={17} />
-              {item.label}
+              {!isCollapsed && item.label}
             </button>
           ))}
         </div>
 
-        <div className="mt-auto rounded-lg border border-slate-200 bg-slate-50 px-4 py-4">
+        <div className={`mt-auto rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 ${isCollapsed ? "hidden" : ""}`}>
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
             <p className="text-xs font-bold text-slate-700">{roleMeta.mode}</p>
@@ -51,17 +57,17 @@ export function DashboardLayout({
           <p className="mt-1 text-xs text-slate-500">{roleMeta.sync}</p>
         </div>
 
-        <div className="mt-6 flex items-center gap-3">
+        <div className={`mt-6 flex items-center gap-3 ${isCollapsed ? "justify-center" : ""}`}>
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-400 text-sm font-black text-white">
             {user.first_name?.[0]}
           </div>
-          <div className="min-w-0 flex-1">
+          <div className={`min-w-0 flex-1 ${isCollapsed ? "hidden" : ""}`}>
             <p className="truncate text-sm font-black text-slate-950">
               {user.first_name} {user.last_name}
             </p>
             <p className="text-xs font-semibold text-slate-500">{roleMeta.userRole}</p>
           </div>
-          <button type="button" onClick={onLogout} className="text-slate-500 hover:text-[#f04438]">
+          <button type="button" onClick={onLogout} title="Déconnexion" className={`text-slate-500 hover:text-[#f04438] ${isCollapsed ? "hidden" : ""}`}>
             <DashboardIcon name="LogOut" size={16} />
           </button>
         </div>
@@ -73,7 +79,12 @@ export function DashboardLayout({
             <h1 className="text-lg font-black text-slate-950">Resto SaaS</h1>
           </div>
 
-          <button className="hidden text-slate-600 lg:block">
+          <button
+            type="button"
+            onClick={() => setIsCollapsed((value) => !value)}
+            className="hidden text-slate-600 transition-colors hover:text-[#f04438] lg:block"
+            title={isCollapsed ? "Déplier le menu" : "Réduire le menu"}
+          >
             <DashboardIcon name="Menu" size={20} />
           </button>
 

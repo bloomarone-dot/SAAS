@@ -10,10 +10,10 @@ import {
 
 export function AdminDashboard({ overrides = {} }) {
   const kpis = [
-    { label: "Chiffre d'affaires", value: "12,450,000 FCFA", trend: "18.5% vs mois dernier", icon: "ShoppingCart", tone: "pink" },
-    { label: "Commandes", value: "1,248", trend: "12.3% vs mois dernier", icon: "ClipboardList", tone: "blue" },
-    { label: "Restaurants", value: overrides.Restaurants ?? "5", trend: "Actifs", icon: "Package", tone: "green" },
-    { label: "Utilisateurs", value: overrides.Utilisateurs ?? "28", trend: "Actifs", icon: "Users", tone: "purple" },
+    { label: "Chiffre d'affaires", value: overrides["Chiffre d'affaires"] ?? "0 FCFA", trend: "Données réelles", icon: "ShoppingCart", tone: "pink" },
+    { label: "Commandes", value: overrides.Commandes ?? "0", trend: "Données réelles", icon: "ClipboardList", tone: "blue" },
+    { label: "Restaurants", value: overrides.Restaurants ?? "0", trend: "Actifs", icon: "Package", tone: "green" },
+    { label: "Utilisateurs", value: overrides.Utilisateurs ?? "0", trend: `${overrides["Utilisateurs actifs"] ?? "0"} actifs`, icon: "Users", tone: "purple" },
   ];
 
   return (

@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { nextSort, SortButton, sortRows } from "@/utils/sort";
 
 export function SuperadminOwners({ restaurants }) {
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState({ key: "createdAt", direction: "desc" });
   const owners = useMemo(
     () =>
       restaurants.map((restaurant) => ({
@@ -26,6 +28,13 @@ export function SuperadminOwners({ restaurants }) {
       owner.email.toLowerCase().includes(value)
     );
   });
+  const sortedOwners = sortRows(filteredOwners, sort, {
+    owner: (owner) => owner.email,
+    restaurant: (owner) => owner.restaurant,
+    tenant: (owner) => owner.tenant,
+    status: (owner) => owner.status,
+    createdAt: (owner) => owner.createdAt,
+  });
 
   return (
     <AdminSurface
@@ -45,11 +54,20 @@ export function SuperadminOwners({ restaurants }) {
       </Toolbar>
 
       <DataTable
-        columns={["Propriétaire", "Restaurant", "Tenant", "Statut", "Création", "Action"]}
+        columns={[
+          { label: "Propriétaire", key: "owner" },
+          { label: "Restaurant", key: "restaurant" },
+          { label: "Tenant", key: "tenant" },
+          { label: "Statut", key: "status" },
+          { label: "Création", key: "createdAt" },
+          { label: "Action" },
+        ]}
+        sort={sort}
+        onSort={(key) => setSort((current) => nextSort(current, key))}
         emptyTitle="Aucun propriétaire trouvé"
         emptyText="Les propriétaires apparaîtront ici après création des restaurants."
       >
-        {filteredOwners.map((owner) => (
+        {sortedOwners.map((owner) => (
           <tr key={`${owner.id}-${owner.restaurant}`} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
             <td className="px-5 py-4">
               <p className="font-black text-[#07133d]">Administrateur propriétaire</p>
@@ -75,6 +93,7 @@ export function SuperadminOwners({ restaurants }) {
 
 export function SuperadminSubscriptions({ restaurants }) {
   const [plan, setPlan] = useState("all");
+  const [sort, setSort] = useState({ key: "restaurant", direction: "asc" });
   const rows = restaurants.map((restaurant, index) => ({
     id: restaurant.id,
     restaurant: restaurant.name,
@@ -85,6 +104,13 @@ export function SuperadminSubscriptions({ restaurants }) {
   }));
 
   const filteredRows = rows.filter((row) => plan === "all" || row.plan === plan);
+  const sortedRows = sortRows(filteredRows, sort, {
+    restaurant: (row) => row.restaurant,
+    plan: (row) => row.plan,
+    amount: (row) => Number(String(row.amount).replace(/\D/g, "")),
+    status: (row) => row.status,
+    renewal: (row) => row.renewal,
+  });
 
   return (
     <AdminSurface
@@ -110,11 +136,20 @@ export function SuperadminSubscriptions({ restaurants }) {
       </Toolbar>
 
       <DataTable
-        columns={["Restaurant", "Plan", "Montant", "Statut", "Renouvellement", "Action"]}
+        columns={[
+          { label: "Restaurant", key: "restaurant" },
+          { label: "Plan", key: "plan" },
+          { label: "Montant", key: "amount" },
+          { label: "Statut", key: "status" },
+          { label: "Renouvellement", key: "renewal" },
+          { label: "Action" },
+        ]}
+        sort={sort}
+        onSort={(key) => setSort((current) => nextSort(current, key))}
         emptyTitle="Aucun abonnement"
         emptyText="Les abonnements seront visibles après configuration des offres."
       >
-        {filteredRows.map((row) => (
+        {sortedRows.map((row) => (
           <tr key={row.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
             <td className="px-5 py-4 font-black text-[#07133d]">{row.restaurant}</td>
             <td className="px-5 py-4">
@@ -325,7 +360,7 @@ function MetricCard({ icon, label, value }) {
   );
 }
 
-function DataTable({ columns, emptyTitle, emptyText, children }) {
+function DataTable({ columns, sort, onSort, emptyTitle, emptyText, children }) {
   const hasRows = Array.isArray(children) ? children.length > 0 : Boolean(children);
 
   return (
@@ -334,11 +369,18 @@ function DataTable({ columns, emptyTitle, emptyText, children }) {
         <table className="w-full min-w-[860px] text-left text-sm">
           <thead className="bg-[#fffaf5] text-xs font-black uppercase text-[#9a3412]">
             <tr>
-              {columns.map((column) => (
-                <th key={column} className="px-5 py-4 last:text-right">
-                  {column}
+              {columns.map((column) => {
+                const config = typeof column === "string" ? { label: column } : column;
+                return (
+                <th key={config.label} className="px-5 py-4 last:text-right">
+                  {config.key ? (
+                    <SortButton label={config.label} column={config.key} sort={sort} onSort={onSort} />
+                  ) : (
+                    config.label
+                  )}
                 </th>
-              ))}
+              );
+              })}
             </tr>
           </thead>
           <tbody>

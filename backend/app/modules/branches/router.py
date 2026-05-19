@@ -5,7 +5,7 @@ from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
 from app.modules.branches.models import Branch
 from app.modules.branches.schemas import BranchCreateIn, BranchPublic
-from app.modules.shared.models import Permission
+from app.modules.permissions.models import Permission
 from app.modules.users.models import User
 
 

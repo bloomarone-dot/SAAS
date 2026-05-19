@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))
+PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30"))
 
 
 def hash_password(password: str) -> str:
@@ -57,6 +58,22 @@ def create_access_token(subject: str) -> str:
     return f"{signing_input}.{_b64encode(signature)}"
 
 
+def create_password_reset_token(subject: str) -> str:
+    """Cree un token temporaire dedie a la reinitialisation de mot de passe."""
+    header = {"alg": "HS256", "typ": "JWT"}
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": subject, "purpose": "password_reset", "exp": int(expires_at.timestamp())}
+
+    signing_input = ".".join(
+        [
+            _b64encode(json.dumps(header, separators=(",", ":")).encode()),
+            _b64encode(json.dumps(payload, separators=(",", ":")).encode()),
+        ]
+    )
+    signature = hmac.new(SECRET_KEY.encode(), signing_input.encode(), hashlib.sha256).digest()
+    return f"{signing_input}.{_b64encode(signature)}"
+
+
 def decode_access_token(token: str) -> dict | None:
     """Valide la signature et l'expiration du token d'acces."""
     try:
@@ -72,4 +89,12 @@ def decode_access_token(token: str) -> dict | None:
     if int(payload.get("exp", 0)) < int(datetime.now(timezone.utc).timestamp()):
         return None
 
+    return payload
+
+
+def decode_password_reset_token(token: str) -> dict | None:
+    """Valide un token de reinitialisation et son usage."""
+    payload = decode_access_token(token)
+    if not payload or payload.get("purpose") != "password_reset":
+        return None
     return payload

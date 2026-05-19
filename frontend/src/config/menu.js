@@ -144,7 +144,7 @@ export const APP_MENUS = {
   ],
   ADMIN: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    { key: "restaurants", label: "Restaurants", icon: "Store" },
+    { key: "branches", label: "Branches", icon: "MapPin" },
     { key: "staff", label: "Utilisateurs", icon: "Users" },
     { key: "sales", label: "Ventes", icon: "TrendingUp" },
     { key: "orders", label: "Commandes", icon: "ClipboardList" },

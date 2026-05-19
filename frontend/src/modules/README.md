@@ -6,6 +6,8 @@ Organisation cible par domaine metier:
 - `restaurants`: provisioning et gestion des restaurants / tenants.
 - `auth`: connexion, session et permissions.
 - `users`: personnel, roles et permissions restaurant.
-- `operations`: service, cuisine, caisse, stock et comptabilite.
+- `admin`: branches, personnel, permissions et catalogue menu du proprietaire.
+- `stock`: stock, inventaires, mouvements, achats, pertes, exports et comptabilite stock.
+- `operations`: service, cuisine et caisse.
 
 Les modules historiques sous `features/*` restent compatibles pendant la migration.

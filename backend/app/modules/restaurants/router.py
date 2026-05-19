@@ -11,7 +11,7 @@ from app.modules.restaurants.schemas import (
     RestaurantPublic,
     RestaurantSettingsIn,
 )
-from app.modules.shared.models import Permission, Role
+from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
 from app.security import hash_password
 

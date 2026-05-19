@@ -4,7 +4,8 @@ from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.modules.shared.models import Permission, ROLE_DEFAULT_PERMISSIONS, Role, new_id
+from app.modules.permissions.models import Permission, ROLE_DEFAULT_PERMISSIONS, Role
+from app.modules.shared.models import new_id
 
 
 class User(Base):
@@ -50,6 +51,14 @@ class User(Base):
         granted.update(ROLE_DEFAULT_PERMISSIONS.get(self.role, set()))
         return sorted(granted, key=lambda permission: permission.value)
 
+    @property
+    def explicit_permissions(self) -> list[Permission]:
+        """Retourne uniquement les droits accordes directement a l'utilisateur."""
+        return sorted(
+            {grant.permission for grant in self.permission_grants},
+            key=lambda permission: permission.value,
+        )
+
 
 class UserPermission(Base):
     """Permission explicite accordee a un utilisateur du restaurant."""
@@ -65,4 +74,3 @@ class UserPermission(Base):
 
     user = relationship("User", back_populates="permission_grants", foreign_keys=[user_id])
     granted_by = relationship("User", foreign_keys=[granted_by_id])
-
