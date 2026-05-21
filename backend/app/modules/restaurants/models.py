@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,6 +16,16 @@ class Restaurant(Base):
     name: Mapped[str] = mapped_column(String(191), nullable=False)
     slug: Mapped[str] = mapped_column(String(191), unique=True, index=True, nullable=False)
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    postal_box: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(191), nullable=True)
+    website_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tax_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    legal_name: Mapped[str | None] = mapped_column(String(191), nullable=True)
     primary_color: Mapped[str] = mapped_column(String(20), default="#E4572E", nullable=False)
     secondary_color: Mapped[str] = mapped_column(String(20), default="#1F2937", nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="XAF", nullable=False)
@@ -34,4 +44,3 @@ class Restaurant(Base):
     branches = relationship("Branch", back_populates="restaurant", cascade="all, delete-orphan")
     users = relationship("User", back_populates="restaurant", foreign_keys="User.restaurant_id")
     owner = relationship("User", foreign_keys=[owner_id], post_update=True)
-

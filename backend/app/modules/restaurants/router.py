@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -17,6 +20,8 @@ from app.security import hash_password
 
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
+LOGO_UPLOAD_DIR = Path("uploads/logos")
+ALLOWED_LOGO_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/svg+xml": ".svg"}
 
 
 @router.get("", response_model=list[RestaurantPublic])
@@ -120,6 +125,41 @@ def update_my_restaurant_settings(
             value = value.upper()
         setattr(restaurant, field, value)
 
+    db.commit()
+    db.refresh(restaurant)
+    return restaurant
+
+
+@router.post("/me/logo", response_model=RestaurantPublic)
+async def upload_my_restaurant_logo(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Importe un logo et met a jour l'URL du logo du restaurant."""
+    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+    if not current_user.is_owner:
+        raise HTTPException(status_code=403, detail="Seul le proprietaire peut configurer le restaurant")
+
+    extension = ALLOWED_LOGO_TYPES.get(file.content_type or "")
+    if not extension:
+        raise HTTPException(status_code=400, detail="Format logo invalide. Utilisez PNG, JPG, WEBP ou SVG.")
+
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Logo trop volumineux. Taille maximale: 2 Mo.")
+
+    restaurant = db.get(Restaurant, current_user.restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    LOGO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{restaurant.id}-{uuid4().hex}{extension}"
+    destination = LOGO_UPLOAD_DIR / filename
+    destination.write_bytes(content)
+
+    restaurant.logo_url = str(request.url_for("uploads", path=f"logos/{filename}"))
     db.commit()
     db.refresh(restaurant)
     return restaurant

@@ -150,6 +150,8 @@ export const APP_MENUS = {
     { key: "orders", label: "Commandes", icon: "ClipboardList" },
     { key: "stocks", label: "Stocks", icon: "Box" },
     { key: "products", label: "Produits", icon: "Package" },
+    { key: "menu-categories", label: "Catégories menu", icon: "ClipboardList" },
+    { key: "menu-dishes", label: "Plats menu", icon: "UtensilsCrossed" },
     { key: "accounting", label: "Comptabilité", icon: "FileText" },
     { key: "reports", label: "Rapports", icon: "BarChart3" },
     { key: "settings", label: "Paramètres", icon: "Settings" },
@@ -173,6 +175,8 @@ export const APP_MENUS = {
   CUISINE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
     { key: "orders", label: "Commandes cuisine", icon: "ClipboardList" },
+    { key: "menu-categories", label: "Catégories menu", icon: "ClipboardList" },
+    { key: "menu-dishes", label: "Plats menu", icon: "UtensilsCrossed" },
     { key: "preparation", label: "En préparation", icon: "FileText" },
     { key: "ready", label: "Prêtes", icon: "Package" },
     { key: "history", label: "Historique", icon: "History" },

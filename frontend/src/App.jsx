@@ -7,7 +7,10 @@ import { SuperadminRestaurants } from "@/features/restaurants/components/Superad
 import LandingPage from "@/LandingPage";
 import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
 import { CatalogAdmin } from "@/modules/admin/components/CatalogAdmin";
+import { RestaurantSettingsAdmin } from "@/modules/admin/components/RestaurantSettingsAdmin";
 import { StaffPermissionsAdmin } from "@/modules/admin/components/StaffPermissionsAdmin";
+import CategoriesPage from "@/modules/menu/pages/CategoriesPage";
+import DishesPage from "@/modules/menu/pages/DishesPage";
 import {
   SuperadminOwners,
   SuperadminPlatform,
@@ -47,10 +50,14 @@ const routeAliases = {
   users: "staff",
   personnel: "staff",
   restaurants: "restaurants",
+  categories: "menu-categories",
+  dishes: "menu-dishes",
 };
 
 const viewPathSegments = {
   staff: "users",
+  "menu-categories": "categories",
+  "menu-dishes": "dishes",
 };
 
 function pathForView(role, view) {
@@ -388,6 +395,24 @@ export default function App() {
 
       if (activeView === "products" && session.role === "ADMIN") {
         return <CatalogAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+      }
+
+      if (activeView === "settings" && session.role === "ADMIN") {
+        return (
+          <RestaurantSettingsAdmin
+            apiBaseUrl={apiBaseUrl}
+            currentUser={session}
+            onMessage={setMessage}
+          />
+        );
+      }
+
+      if (activeView === "menu-categories" && ["ADMIN", "CUISINE"].includes(session.role)) {
+        return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} />;
+      }
+
+      if (activeView === "menu-dishes" && ["ADMIN", "CUISINE"].includes(session.role)) {
+        return <DishesPage restaurantId={session.restaurant_id} role={session.role} />;
       }
 
       if (stockViews.includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {

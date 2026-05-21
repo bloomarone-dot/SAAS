@@ -36,6 +36,8 @@ services:
       SUPERADMIN_PASSWORD: Superadmin123!
     ports:
       - "8001:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -48,7 +50,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:8001
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5174}:5173"
     depends_on:
       - backend
 

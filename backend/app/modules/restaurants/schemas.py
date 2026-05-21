@@ -14,6 +14,16 @@ class RestaurantPublic(OrmModel):
     name: str
     slug: str
     logo_url: Optional[str] = None
+    description: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    postal_box: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    website_url: Optional[str] = None
+    tax_id: Optional[str] = None
+    legal_name: Optional[str] = None
     primary_color: str
     secondary_color: str
     currency: str
@@ -53,8 +63,17 @@ class RestaurantSettingsIn(BaseModel):
 
     name: Optional[str] = Field(default=None, min_length=2, max_length=191)
     logo_url: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = None
+    address: Optional[str] = Field(default=None, max_length=255)
+    city: Optional[str] = Field(default=None, max_length=120)
+    country: Optional[str] = Field(default=None, max_length=120)
+    postal_box: Optional[str] = Field(default=None, max_length=80)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    email: Optional[str] = Field(default=None, max_length=191)
+    website_url: Optional[str] = Field(default=None, max_length=500)
+    tax_id: Optional[str] = Field(default=None, max_length=100)
+    legal_name: Optional[str] = Field(default=None, max_length=191)
     primary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
     timezone: Optional[str] = Field(default=None, max_length=50)
-
