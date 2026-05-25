@@ -20,7 +20,6 @@ export function CaisseDashboard({ overrides = {} }) {
       <DashboardHeader
         title="Tableau de bord"
         subtitle="Suivi des encaissements, tickets, paiements et clôture de caisse."
-        right="Aujourd'hui"
       />
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">

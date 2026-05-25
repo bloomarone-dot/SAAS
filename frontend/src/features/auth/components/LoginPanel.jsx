@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 const loginHeroImage = "/Images/ImageLogin.jpg";
@@ -17,6 +18,8 @@ export function LoginPanel({
   const [resetLogin, setResetLogin] = useState("");
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   async function submitForgotPassword(event) {
     event.preventDefault();
@@ -82,16 +85,27 @@ export function LoginPanel({
                 className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
               />
 
-              <input
-                name="password"
-                type="password"
-                value={value.password}
-                onChange={onChange}
-                autoComplete="current-password"
-                required
-                placeholder="Mot de passe"
-                className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
-              />
+              <div className="relative">
+                <input
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  value={value.password}
+                  onChange={onChange}
+                  autoComplete="current-password"
+                  required
+                  placeholder="Mot de passe"
+                  className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 pr-14 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="absolute right-4 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-[#fee4e2]"
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  title={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
 
               <div className="flex items-center justify-between text-sm">
                 <label className="flex cursor-pointer items-center gap-2 text-slate-500">
@@ -160,15 +174,26 @@ export function LoginPanel({
                 placeholder="Code de réinitialisation"
                 className="min-h-24 w-full rounded-3xl border border-slate-200 bg-white px-6 py-4 text-sm shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
               />
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                required
-                minLength={8}
-                placeholder="Nouveau mot de passe"
-                className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
-              />
+              <div className="relative">
+                <input
+                  type={showNewPassword ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  required
+                  minLength={8}
+                  placeholder="Nouveau mot de passe"
+                  className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 pr-14 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((current) => !current)}
+                  className="absolute right-4 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-[#fee4e2]"
+                  aria-label={showNewPassword ? "Masquer le nouveau mot de passe" : "Afficher le nouveau mot de passe"}
+                  title={showNewPassword ? "Masquer le nouveau mot de passe" : "Afficher le nouveau mot de passe"}
+                >
+                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
               <button
                 type="submit"
                 disabled={isLoading}

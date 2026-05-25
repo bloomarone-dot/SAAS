@@ -6,9 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, has_permission, require_tenant_user
-from app.modules.menu.schemas import CategoryCreate, CategoryResponse, DishCreate, DishResponse, DishUpdate
+from app.modules.menu.models import CategoryModel, DishModel
+from app.modules.menu.schemas import CategoryCreate, CategoryResponse, DishCreate, DishResponse, DishUpdate, PublicRestaurantMenu
 from app.modules.menu.services import MenuService
 from app.modules.permissions.models import Permission
+from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
 
 router = APIRouter(prefix="/menu", tags=["menu"])
@@ -47,6 +49,61 @@ async def upload_menu_image(
     destination = MENU_UPLOAD_DIR / filename
     destination.write_bytes(content)
     return {"image_url": str(request.url_for("uploads", path=f"menu/{filename}"))}
+
+
+@router.get("/public/{slug}", response_model=PublicRestaurantMenu)
+def get_public_menu(slug: str, db: Session = Depends(get_db)):
+    restaurant = (
+        db.query(Restaurant)
+        .filter(Restaurant.slug == slug, Restaurant.is_active.is_(True))
+        .one_or_none()
+    )
+    if not restaurant:
+        restaurant = (
+            db.query(Restaurant)
+            .filter(Restaurant.is_active.is_(True))
+            .order_by(Restaurant.created_at.asc())
+            .first()
+        )
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Aucun restaurant actif disponible")
+
+    categories = (
+        db.query(CategoryModel)
+        .filter(CategoryModel.restaurant_id == restaurant.id, CategoryModel.is_active.is_(True))
+        .order_by(CategoryModel.created_at.desc())
+        .all()
+    )
+    dishes = (
+        db.query(DishModel)
+        .filter(DishModel.restaurant_id == restaurant.id, DishModel.is_available.is_(True))
+        .order_by(DishModel.created_at.desc())
+        .all()
+    )
+    return PublicRestaurantMenu(
+        restaurant={
+            "id": restaurant.id,
+            "name": restaurant.name,
+            "slug": restaurant.slug,
+            "logo_url": restaurant.logo_url,
+            "description": restaurant.description,
+            "phone": restaurant.phone,
+            "whatsapp_phone": restaurant.whatsapp_phone,
+            "email": restaurant.email,
+            "address": restaurant.address,
+            "city": restaurant.city,
+            "country": restaurant.country,
+            "opening_hours": restaurant.opening_hours,
+            "is_open": restaurant.is_open,
+            "payment_methods": restaurant.payment_methods,
+            "delivery_fee": restaurant.delivery_fee,
+            "currency": restaurant.currency,
+            "primary_color": restaurant.primary_color,
+            "secondary_color": restaurant.secondary_color,
+        },
+        categories=categories,
+        dishes=dishes,
+    )
 
 
 @router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)

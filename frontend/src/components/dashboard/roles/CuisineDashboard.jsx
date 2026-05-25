@@ -17,7 +17,7 @@ export function CuisineDashboard({ overrides = {} }) {
 
   return (
     <section className="space-y-4">
-      <DashboardHeader title="Tableau de bord" subtitle="Bienvenue Chef. Préparez des plats délicieux." right="Aujourd'hui" />
+      <DashboardHeader title="Tableau de bord" subtitle="Bienvenue Chef. Préparez des plats délicieux." />
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
         <Panel title="Commandes en attente" link="Voir tout">

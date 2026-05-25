@@ -1,18 +1,21 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   ChefHat,
+  Clock3,
   Eye,
   Heart,
   Headphones,
   Leaf,
   LockKeyhole,
+  MapPin,
   Plus,
   Search,
   Send,
   ShieldCheck,
   ShoppingCart,
   Truck,
+  Wallet,
 } from "lucide-react";
 
 const restaurantName = "Le Bon Coin";
@@ -104,22 +107,22 @@ const translations = {
   },
 };
 
-const categories = [
-  ["Burgers", "12 plats", heroImage],
-  ["Pizzas", "15 plats", pizzaImage],
-  ["Tacos", "10 plats", tacosImage],
-  ["Grillades", "18 plats", chickenImage],
-  ["Boissons", "8 plats", drinksImage],
-  ["Desserts", "9 plats", dessertImage],
+const fallbackCategories = [
+  { id: "burgers", name: "Burgers", count: "12 plats", image_url: heroImage },
+  { id: "pizzas", name: "Pizzas", count: "15 plats", image_url: pizzaImage },
+  { id: "tacos", name: "Tacos", count: "10 plats", image_url: tacosImage },
+  { id: "grillades", name: "Grillades", count: "18 plats", image_url: chickenImage },
+  { id: "boissons", name: "Boissons", count: "8 plats", image_url: drinksImage },
+  { id: "desserts", name: "Desserts", count: "9 plats", image_url: dessertImage },
 ];
 
-const products = [
-  ["Cheese Burger", "4 500 FCFA", "Steak haché, fromage, salade, tomate, oignon.", heroImage],
-  ["Pizza Margherita", "6 500 FCFA", "Sauce tomate, mozzarella, basilic frais.", pizzaImage],
-  ["Tacos Mixte", "5 000 FCFA", "Viande hachée, poulet, frites, sauce fromagère.", tacosImage],
-  ["Poulet Braisé", "6 000 FCFA", "Poulet mariné, épices spéciales, accompagnement.", chickenImage],
-  ["Jus Naturel", "1 500 FCFA", "Cocktail frais, fruits de saison.", drinksImage],
-  ["Dessert Maison", "2 500 FCFA", "Dessert gourmand préparé sur place.", dessertImage],
+const fallbackProducts = [
+  { id: "burger", name: "Cheese Burger", price: 4500, description: "Steak haché, fromage, salade, tomate, oignon.", image_url: heroImage },
+  { id: "pizza", name: "Pizza Margherita", price: 6500, description: "Sauce tomate, mozzarella, basilic frais.", image_url: pizzaImage },
+  { id: "tacos", name: "Tacos Mixte", price: 5000, description: "Viande hachée, poulet, frites, sauce fromagère.", image_url: tacosImage },
+  { id: "chicken", name: "Poulet Braisé", price: 6000, description: "Poulet mariné, épices spéciales, accompagnement.", image_url: chickenImage },
+  { id: "juice", name: "Jus Naturel", price: 1500, description: "Cocktail frais, fruits de saison.", image_url: drinksImage },
+  { id: "dessert", name: "Dessert Maison", price: 2500, description: "Dessert gourmand préparé sur place.", image_url: dessertImage },
 ];
 
 const blogPosts = [
@@ -128,25 +131,97 @@ const blogPosts = [
   ["La livraison rapide et fiable", "Pourquoi la préparation et le packaging changent toute l’expérience."],
 ];
 
-export default function RestaurantLandingPage({ onLoginClick }) {
+function getApiBaseUrl() {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  return `${window.location.protocol}//${window.location.hostname}:8001`;
+}
+
+export default function RestaurantLandingPage({ onLoginClick, apiBaseUrl = getApiBaseUrl() }) {
   const [language, setLanguage] = useState("fr");
-  const [cartCount, setCartCount] = useState(2);
+  const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
+  const [publicMenu, setPublicMenu] = useState(null);
+  const [orderMessage, setOrderMessage] = useState("");
+  const [isOrdering, setIsOrdering] = useState(false);
   const t = translations[language];
+  const restaurant = publicMenu?.restaurant;
+  const brand = {
+    primary: restaurant?.primary_color ?? "#ff1f17",
+    secondary: restaurant?.secondary_color ?? "#05080d",
+  };
+  const dishes = publicMenu ? publicMenu.dishes : fallbackProducts;
+  const categories = useMemo(
+    () => buildCategories(publicMenu?.categories ?? fallbackCategories, dishes),
+    [publicMenu, dishes]
+  );
+  const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
+
+  useEffect(() => {
+    const slug = window.location.pathname.split("/").filter(Boolean)[0] || "main";
+    fetch(`${apiBaseUrl}/api/v1/menu/public/${slug}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("menu-unavailable");
+        setPublicMenu(await response.json());
+      })
+      .catch(() => setPublicMenu(null));
+  }, [apiBaseUrl]);
 
   function scrollToSection(id) {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function addToCart() {
-    setCartCount((count) => count + 1);
+  function addToCart(product) {
+    setCart((current) => {
+      const existing = current.find((item) => item.id === product.id);
+      if (existing) {
+        return current.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+      }
+      return [...current, { ...product, quantity: 1 }];
+    });
     scrollToSection("menu");
   }
 
+  async function submitOrder(event) {
+    event.preventDefault();
+    if (!restaurant?.slug || cart.length === 0) return;
+    setIsOrdering(true);
+    setOrderMessage("");
+    const formData = new FormData(event.currentTarget);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/orders/public/${restaurant.slug}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer_name: formData.get("customer_name"),
+          customer_phone: formData.get("customer_phone"),
+          customer_address: formData.get("customer_address"),
+          notes: formData.get("notes"),
+          fulfillment_type: formData.get("fulfillment_type"),
+          payment_method: formData.get("payment_method"),
+          items: cart.map((item) => ({ menu_item_id: item.id, quantity: item.quantity })),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setOrderMessage(data.detail ?? "Commande impossible pour le moment.");
+        return;
+      }
+      setCart([]);
+      event.currentTarget.reset();
+      setOrderMessage(`Commande ${data.order_number} reçue. Le restaurant va vous contacter.`);
+    } catch {
+      setOrderMessage(`API indisponible sur ${apiBaseUrl}. Démarrez le backend puis réessayez.`);
+    } finally {
+      setIsOrdering(false);
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-white text-[#111827]">
+    <div className="min-h-screen bg-white text-[#111827]" style={{ "--brand-primary": brand.primary, "--brand-secondary": brand.secondary }}>
       <HeroSection
         t={t}
+        restaurant={restaurant}
+        brand={brand}
         language={language}
         setLanguage={setLanguage}
         cartCount={cartCount}
@@ -155,19 +230,22 @@ export default function RestaurantLandingPage({ onLoginClick }) {
       />
 
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-6">
-        <CategoriesSection t={t} />
-        <MenuSection t={t} search={search} onSearch={setSearch} onAdd={addToCart} onNavigate={scrollToSection} />
+        <CategoriesSection t={t} categories={categories} brand={brand} />
+        <MenuSection t={t} products={dishes} search={search} onSearch={setSearch} onAdd={addToCart} onNavigate={scrollToSection} brand={brand} />
+        <RestaurantInfoSection restaurant={restaurant} brand={brand} />
+        <OrderSection cart={cart} setCart={setCart} restaurant={restaurant} onSubmit={submitOrder} message={orderMessage} isOrdering={isOrdering} brand={brand} />
         <PromoBanner t={t} onNavigate={scrollToSection} />
-        <FeaturesSection t={t} />
-        <BlogSection t={t} />
+        <FeaturesSection t={t} brand={brand} />
+        <BlogSection t={t} restaurant={restaurant} brand={brand} />
       </main>
 
-      <Footer t={t} />
+      <Footer t={t} restaurant={restaurant} brand={brand} />
     </div>
   );
 }
 
-function HeroSection({ t, language, setLanguage, cartCount, onLoginClick, onNavigate }) {
+function HeroSection({ t, restaurant, brand, language, setLanguage, cartCount, onLoginClick, onNavigate }) {
+  const displayName = restaurant?.name ?? restaurantName;
   return (
     <section id="home" className="relative min-h-[460px] overflow-hidden bg-black px-5 py-6 text-white md:px-10">
       <img src={heroImage} alt="Burger" className="absolute inset-0 h-full w-full object-cover opacity-90" />
@@ -176,8 +254,8 @@ function HeroSection({ t, language, setLanguage, cartCount, onLoginClick, onNavi
       <div className="relative z-10 mx-auto max-w-7xl">
         <header className="flex items-center justify-between gap-5">
           <button type="button" onClick={() => onNavigate("home")} className="flex items-center gap-3">
-            <ChefHat className="text-[#ff1f17]" size={34} />
-            <h1 className="text-2xl font-black text-white">{restaurantName}</h1>
+            <ChefHat style={{ color: brand.primary }} size={34} />
+            <h1 className="text-2xl font-black text-white">{displayName}</h1>
           </button>
 
           <nav className="hidden items-center gap-7 text-sm font-black lg:flex">
@@ -199,7 +277,7 @@ function HeroSection({ t, language, setLanguage, cartCount, onLoginClick, onNavi
             </button>
             <button type="button" onClick={() => onNavigate("menu")} className="relative hidden h-11 w-11 items-center justify-center rounded-lg bg-white/10 transition hover:bg-white/20 lg:flex" title={t.cart}>
               <ShoppingCart size={18} />
-              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#ff1f17] px-1 text-xs font-black">
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-black" style={{ backgroundColor: brand.primary }}>
                 {cartCount}
               </span>
             </button>
@@ -207,7 +285,7 @@ function HeroSection({ t, language, setLanguage, cartCount, onLoginClick, onNavi
             <button type="button" onClick={onLoginClick} className="h-11 rounded-lg border border-white/25 px-5 text-sm font-black text-white transition hover:bg-white hover:text-black">
               {t.login}
             </button>
-            <button type="button" onClick={() => onNavigate("menu")} className="hidden h-11 rounded-lg bg-[#ff1f17] px-6 text-sm font-black text-white shadow-xl shadow-red-950/30 md:block">
+            <button type="button" onClick={() => onNavigate("menu")} className="hidden h-11 rounded-lg px-6 text-sm font-black text-white shadow-xl shadow-red-950/30 md:block" style={{ backgroundColor: brand.primary }}>
               {t.order}
             </button>
           </div>
@@ -218,12 +296,12 @@ function HeroSection({ t, language, setLanguage, cartCount, onLoginClick, onNavi
           <h2 className="mt-6 text-5xl font-black leading-tight md:text-7xl">
             {t.heroTitleA}
             <br />
-            <span className="text-[#ff1f17]">{t.heroTitleB}</span>
+            <span style={{ color: brand.primary }}>{t.heroTitleB}</span>
           </h2>
           <p className="mt-8 max-w-lg text-lg font-medium leading-8 text-slate-100">{t.heroText}</p>
 
           <div className="mt-10 flex flex-wrap gap-4">
-            <button type="button" onClick={() => onNavigate("menu")} className="inline-flex h-14 items-center gap-3 rounded-lg bg-[#ff1f17] px-7 text-sm font-black text-white">
+            <button type="button" onClick={() => onNavigate("menu")} className="inline-flex h-14 items-center gap-3 rounded-lg px-7 text-sm font-black text-white" style={{ backgroundColor: brand.primary }}>
               {t.orderNow}
               <ArrowRight size={17} />
             </button>
@@ -245,18 +323,18 @@ function HeroSection({ t, language, setLanguage, cartCount, onLoginClick, onNavi
   );
 }
 
-function CategoriesSection({ t }) {
+function CategoriesSection({ t, categories, brand }) {
   return (
     <section id="about" className="scroll-mt-8 py-20 text-center">
-      <p className="text-xs font-black uppercase text-[#ff1f17]">{t.categoriesKicker}</p>
+      <p className="text-xs font-black uppercase" style={{ color: brand.primary }}>{t.categoriesKicker}</p>
       <h2 className="mt-3 text-3xl font-black text-slate-950">{t.categoriesTitle}</h2>
       <div className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {categories.map(([title, count, image]) => (
-          <button key={title} type="button" className="overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
-            <img src={image} alt={title} className="h-28 w-full object-cover" />
+        {categories.map((category) => (
+          <button key={category.id} type="button" className="overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
+            <img src={category.image_url || heroImage} alt={category.name} className="h-28 w-full object-cover" />
             <div className="p-4 text-center">
-              <h3 className="font-black">{title}</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-500">{count}</p>
+              <h3 className="font-black">{category.name}</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">{category.count}</p>
             </div>
           </button>
         ))}
@@ -265,15 +343,15 @@ function CategoriesSection({ t }) {
   );
 }
 
-function MenuSection({ t, search, onSearch, onAdd, onNavigate }) {
+function MenuSection({ t, products, search, onSearch, onAdd, onNavigate, brand }) {
   const query = search.trim().toLowerCase();
-  const visibleProducts = products.filter(([title]) => !query || title.toLowerCase().includes(query));
+  const visibleProducts = products.filter((product) => !query || product.name.toLowerCase().includes(query));
 
   return (
     <section id="menu" className="scroll-mt-8 py-20">
       <div className="mb-12 grid gap-6 md:grid-cols-[1fr_360px] md:items-end">
         <div>
-          <p className="text-xs font-black uppercase text-[#ff1f17]">{t.popularKicker}</p>
+          <p className="text-xs font-black uppercase" style={{ color: brand.primary }}>{t.popularKicker}</p>
           <h2 className="mt-3 text-3xl font-black text-slate-950">{t.popularTitle}</h2>
         </div>
         <label className="flex h-12 items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 shadow-sm">
@@ -283,7 +361,7 @@ function MenuSection({ t, search, onSearch, onAdd, onNavigate }) {
       </div>
       <div className="grid gap-9 md:grid-cols-2 xl:grid-cols-3">
         {visibleProducts.map((product) => (
-          <FoodCard key={product[0]} product={product} onAdd={onAdd} />
+          <FoodCard key={product.id} product={product} onAdd={onAdd} brand={brand} />
         ))}
       </div>
       <div className="mt-12 flex justify-center">
@@ -316,7 +394,145 @@ function PromoBanner({ t, onNavigate }) {
   );
 }
 
-function FeaturesSection({ t }) {
+function RestaurantInfoSection({ restaurant, brand }) {
+  const address = [restaurant?.address, restaurant?.city, restaurant?.country].filter(Boolean).join(", ") || "Adresse à renseigner";
+  const phone = restaurant?.whatsapp_phone || restaurant?.phone || "Téléphone à renseigner";
+  const paymentMethods = splitPaymentMethods(restaurant?.payment_methods);
+  const whatsappHref = restaurant?.whatsapp_phone ? `https://wa.me/${restaurant.whatsapp_phone.replace(/\D/g, "")}` : null;
+
+  return (
+    <section id="contact" className="scroll-mt-8 py-12">
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        <InfoCard
+          icon={<Clock3 size={19} />}
+          title="Horaires"
+          value={restaurant?.opening_hours || "Horaires à renseigner"}
+          meta={restaurant?.is_open === false ? "Fermeture" : "Ouvert"}
+          tone={restaurant?.is_open === false ? "#dc2626" : brand.primary}
+        />
+        <InfoCard icon={<MapPin size={19} />} title="Adresse" value={address} meta="Itinéraire restaurant" tone={brand.primary} />
+        <InfoCard
+          icon={<Headphones size={19} />}
+          title="WhatsApp / Téléphone"
+          value={phone}
+          meta={whatsappHref ? "Contacter sur WhatsApp" : "Contact restaurant"}
+          tone={brand.primary}
+          href={whatsappHref}
+        />
+        <InfoCard
+          icon={<Wallet size={19} />}
+          title="Paiement à distance"
+          value={paymentMethods.join(", ")}
+          meta="Modes disponibles"
+          tone={brand.primary}
+        />
+      </div>
+    </section>
+  );
+}
+
+function InfoCard({ icon, title, value, meta, tone, href }) {
+  const content = (
+    <div className="h-full rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
+      <div className="flex h-11 w-11 items-center justify-center rounded-lg text-white" style={{ backgroundColor: tone }}>
+        {icon}
+      </div>
+      <h3 className="mt-4 text-sm font-black uppercase text-slate-400">{title}</h3>
+      <p className="mt-2 text-base font-black text-slate-950">{value}</p>
+      <p className="mt-2 text-sm font-semibold" style={{ color: tone }}>{meta}</p>
+    </div>
+  );
+
+  if (!href) return content;
+  return <a href={href} target="_blank" rel="noreferrer">{content}</a>;
+}
+
+function OrderSection({ cart, setCart, restaurant, onSubmit, message, isOrdering, brand }) {
+  const [fulfillmentType, setFulfillmentType] = useState("Livraison");
+  const total = cart.reduce((sum, item) => sum + Number(item.price || 0) * item.quantity, 0);
+  const deliveryFee = fulfillmentType === "Livraison" ? Number(restaurant?.delivery_fee || 0) : 0;
+  const grandTotal = total + deliveryFee;
+  const paymentMethods = splitPaymentMethods(restaurant?.payment_methods);
+
+  function updateQuantity(id, delta) {
+    setCart((current) =>
+      current
+        .map((item) => item.id === id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item)
+        .filter((item) => item.quantity > 0)
+    );
+  }
+
+  return (
+    <section id="order" className="scroll-mt-8 py-12">
+      <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-2xl font-black text-slate-950">Votre panier</h2>
+          <div className="mt-5 divide-y divide-slate-100">
+            {cart.length === 0 ? (
+              <p className="py-8 text-sm font-semibold text-slate-500">Ajoutez des plats depuis le menu pour préparer votre commande.</p>
+            ) : (
+              cart.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-4 py-4">
+                  <div>
+                    <p className="font-black text-slate-950">{item.name}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-500">{formatMoney(item.price, restaurant?.currency)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => updateQuantity(item.id, -1)} className="h-8 w-8 rounded-md border border-slate-200 font-black">-</button>
+                    <span className="w-6 text-center text-sm font-black">{item.quantity}</span>
+                    <button type="button" onClick={() => updateQuantity(item.id, 1)} className="h-8 w-8 rounded-md border border-slate-200 font-black">+</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-5">
+            <span className="text-sm font-black text-slate-500">Sous-total</span>
+            <strong className="text-xl font-black text-slate-950">{formatMoney(total, restaurant?.currency)}</strong>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-sm font-black text-slate-500">Livraison</span>
+            <strong className="text-base font-black text-slate-950">{formatMoney(deliveryFee, restaurant?.currency)}</strong>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-sm font-black text-slate-500">Total</span>
+            <strong className="text-xl font-black text-slate-950">{formatMoney(grandTotal, restaurant?.currency)}</strong>
+          </div>
+        </div>
+
+        <form onSubmit={onSubmit} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-2xl font-black text-slate-950">Commander en ligne</h2>
+          <div className="mt-5 grid gap-4">
+            <input name="customer_name" required placeholder="Nom complet" className="h-12 rounded-lg border border-slate-200 px-4 text-sm font-semibold outline-none focus:border-[var(--brand-primary)]" />
+            <input name="customer_phone" required placeholder="Téléphone" className="h-12 rounded-lg border border-slate-200 px-4 text-sm font-semibold outline-none focus:border-[var(--brand-primary)]" />
+            <input name="customer_address" placeholder="Adresse de livraison" className="h-12 rounded-lg border border-slate-200 px-4 text-sm font-semibold outline-none focus:border-[var(--brand-primary)]" />
+            <select name="fulfillment_type" value={fulfillmentType} onChange={(event) => setFulfillmentType(event.target.value)} className="h-12 rounded-lg border border-slate-200 px-4 text-sm font-semibold outline-none focus:border-[var(--brand-primary)]">
+              <option>Livraison</option>
+              <option>À emporter</option>
+            </select>
+            <select name="payment_method" className="h-12 rounded-lg border border-slate-200 px-4 text-sm font-semibold outline-none focus:border-[var(--brand-primary)]">
+              {paymentMethods.map((method) => (
+                <option key={method}>{method}</option>
+              ))}
+            </select>
+            <textarea name="notes" placeholder="Instructions particulières" className="min-h-24 rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-[var(--brand-primary)]" />
+          </div>
+          <button
+            type="submit"
+            disabled={isOrdering || cart.length === 0 || !restaurant?.slug || restaurant?.is_open === false}
+            className="mt-5 h-12 w-full rounded-lg text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ backgroundColor: brand.primary }}
+          >
+            {restaurant?.is_open === false ? "Restaurant fermé" : isOrdering ? "Envoi..." : "Valider la commande"}
+          </button>
+          {message && <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">{message}</p>}
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function FeaturesSection({ t, brand }) {
   const features = [
     [<Leaf />, "Ingrédients frais", "Nous utilisons uniquement des produits frais."],
     [<Truck />, "Livraison rapide", "Votre commande livrée en 30 à 45 minutes."],
@@ -326,12 +542,12 @@ function FeaturesSection({ t }) {
 
   return (
     <section className="py-12 text-center">
-      <p className="text-xs font-black uppercase text-[#ff1f17]">{t.whyKicker}</p>
+      <p className="text-xs font-black uppercase" style={{ color: brand.primary }}>{t.whyKicker}</p>
       <h2 className="mt-3 text-3xl font-black text-slate-950">{t.whyTitle}</h2>
       <div className="mt-9 grid gap-6 md:grid-cols-4">
         {features.map(([icon, title, text]) => (
           <div key={title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center text-[#ff1f17]">{icon}</div>
+            <div className="mx-auto flex h-14 w-14 items-center justify-center" style={{ color: brand.primary }}>{icon}</div>
             <h3 className="mt-4 font-black">{title}</h3>
             <p className="mt-2 text-sm font-medium text-slate-500">{text}</p>
           </div>
@@ -341,15 +557,16 @@ function FeaturesSection({ t }) {
   );
 }
 
-function BlogSection({ t }) {
+function BlogSection({ t, restaurant, brand }) {
+  const displayName = restaurant?.name ?? restaurantName;
   return (
     <section id="blog" className="scroll-mt-8 py-12">
-      <p className="text-xs font-black uppercase text-[#ff1f17]">{t.blogKicker}</p>
+      <p className="text-xs font-black uppercase" style={{ color: brand.primary }}>{t.blogKicker}</p>
       <h2 className="mt-3 text-3xl font-black text-slate-950">{t.blogTitle}</h2>
       <div className="mt-7 grid gap-6 md:grid-cols-3">
         {blogPosts.map(([title, text]) => (
           <article key={title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-black uppercase text-[#ff1f17]">{restaurantName}</p>
+            <p className="text-xs font-black uppercase" style={{ color: brand.primary }}>{displayName}</p>
             <h3 className="mt-3 text-xl font-black text-slate-950">{title}</h3>
             <p className="mt-3 text-sm font-medium leading-6 text-slate-500">{text}</p>
           </article>
@@ -359,9 +576,10 @@ function BlogSection({ t }) {
   );
 }
 
-function Footer({ t }) {
+function Footer({ t, restaurant, brand }) {
+  const displayName = restaurant?.name ?? restaurantName;
   return (
-    <footer id="contact" className="scroll-mt-8 bg-[#05080d] text-white">
+    <footer id="footer-contact" className="scroll-mt-8 text-white" style={{ backgroundColor: brand.secondary }}>
       <div className="mx-auto grid max-w-7xl gap-6 px-6 py-9 md:grid-cols-[1fr_1fr]">
         <div>
           <h2 className="text-xl font-black">{t.footerTitle}</h2>
@@ -378,7 +596,7 @@ function Footer({ t }) {
           <h2 className="text-xl font-black">{t.newsletter}</h2>
           <div className="mt-4 flex overflow-hidden rounded-lg bg-white">
             <input placeholder={t.email} className="min-w-0 flex-1 px-4 text-sm font-semibold text-slate-900 outline-none" />
-            <button className="flex h-12 w-14 items-center justify-center bg-[#ff1f17]">
+            <button className="flex h-12 w-14 items-center justify-center" style={{ backgroundColor: brand.primary }}>
               <Send size={17} />
             </button>
           </div>
@@ -387,11 +605,11 @@ function Footer({ t }) {
       <div className="bg-white text-slate-700">
         <div className="mx-auto grid max-w-7xl gap-5 px-6 py-8 md:grid-cols-4">
           <div>
-            <h3 className="text-xl font-black text-slate-950">{restaurantName}</h3>
-            <p className="mt-3 text-sm font-medium text-slate-500">Votre restaurant préféré, prêt à vous régaler avec une expérience exceptionnelle.</p>
+            <h3 className="text-xl font-black text-slate-950">{displayName}</h3>
+            <p className="mt-3 text-sm font-medium text-slate-500">{restaurant?.description || "Votre restaurant préféré, prêt à vous régaler avec une expérience exceptionnelle."}</p>
           </div>
           <FooterColumn title="Explorez" items={["Accueil", "Menu", "À propos", "Blog", "Contact"]} />
-          <FooterColumn title="Contact" items={["+237 6 99 99 99", "contact@leboncoin.cm", "Douala, Cameroun"]} />
+          <FooterColumn title="Contact" items={[restaurant?.phone || "+237 6 99 99 99", restaurant?.email || "contact@leboncoin.cm", [restaurant?.city, restaurant?.country].filter(Boolean).join(", ") || "Douala, Cameroun"]} />
           <FooterColumn title="Paiement accepté" items={["Visa", "Mastercard", "Orange Money"]} />
         </div>
       </div>
@@ -399,22 +617,21 @@ function Footer({ t }) {
   );
 }
 
-function FoodCard({ product, onAdd }) {
-  const [title, price, description, image] = product;
+function FoodCard({ product, onAdd, brand }) {
   return (
     <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
       <div className="relative">
-        <img src={image} alt={title} className="h-56 w-full object-cover" />
+        <img src={product.image_url || heroImage} alt={product.name} className="h-56 w-full object-cover" />
         <button className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-700">
           <Heart size={17} />
         </button>
       </div>
       <div className="p-5">
-        <h3 className="font-black">{title}</h3>
-        <p className="mt-2 min-h-12 text-sm font-medium text-slate-500">{description}</p>
+        <h3 className="font-black">{product.name}</h3>
+        <p className="mt-2 min-h-12 text-sm font-medium text-slate-500">{product.description}</p>
         <div className="mt-5 flex items-center justify-between">
-          <p className="text-lg font-black">{price}</p>
-          <button onClick={() => onAdd(product)} className="inline-flex items-center gap-2 rounded-lg bg-[#ff1f17] px-4 py-2 text-sm font-black text-white">
+          <p className="text-lg font-black">{formatMoney(product.price)}</p>
+          <button onClick={() => onAdd(product)} className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-black text-white" style={{ backgroundColor: brand.primary }}>
             <Plus size={17} />
             Ajouter
           </button>
@@ -444,7 +661,7 @@ function LanguageToggle({ language, setLanguage }) {
           key={item}
           onClick={() => setLanguage(item)}
           className={`rounded-md px-3 py-2 text-xs font-black uppercase ${
-            language === item ? "bg-[#ff1f17] text-white" : "text-white"
+            language === item ? "bg-[var(--brand-primary)] text-white" : "text-white"
           }`}
         >
           {item}
@@ -452,6 +669,26 @@ function LanguageToggle({ language, setLanguage }) {
       ))}
     </div>
   );
+}
+
+function buildCategories(categories, dishes) {
+  return categories.map((category) => {
+    const count = dishes.filter((dish) => dish.category_id === category.id).length;
+    return {
+      ...category,
+      count: category.count ?? `${count} plat${count > 1 ? "s" : ""}`,
+    };
+  });
+}
+
+function formatMoney(value, currency = "FCFA") {
+  return `${Number(value || 0).toLocaleString("fr-FR")} ${currency}`;
+}
+
+function splitPaymentMethods(value) {
+  if (!value) return ["Paiement à la livraison"];
+  const methods = value.split(",").map((item) => item.trim()).filter(Boolean);
+  return methods.length ? methods : ["Paiement à la livraison"];
 }
 
 function FooterColumn({ title, items }) {

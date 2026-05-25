@@ -16,6 +16,7 @@ export function RestaurantTable({
       sortRows(restaurants, sort, {
         name: (restaurant) => restaurant.name,
         slug: (restaurant) => restaurant.slug,
+        branches: (restaurant) => Number(restaurant.branches_count || 1),
         currency: (restaurant) => restaurant.currency,
         status: (restaurant) => Number(restaurant.is_active),
         created_at: (restaurant) => restaurant.created_at,
@@ -27,9 +28,10 @@ export function RestaurantTable({
     return (
       <div className="overflow-hidden border border-[#eadfd7] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
         <div className="border-b border-[#eadfd7] bg-[#fffaf5] px-6 py-4">
-          <div className="grid grid-cols-5 gap-4 text-xs font-black uppercase text-[#9a3412]">
+          <div className="grid grid-cols-6 gap-4 text-xs font-black uppercase text-[#9a3412]">
             <span>Restaurant</span>
             <span>Slug</span>
+            <span>Branches</span>
             <span>Propriétaire</span>
             <span>Statut</span>
             <span>Création</span>
@@ -76,7 +78,7 @@ export function RestaurantTable({
   }
 
   return (
-    <div className="overflow-hidden border border-[#eadfd7] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
       <div className="flex items-center justify-between border-b border-[#eadfd7] px-6 py-4">
         <div>
           <h2 className="text-lg font-black text-[#07133d]">Restaurants créés</h2>
@@ -87,29 +89,35 @@ export function RestaurantTable({
         <button
           type="button"
           onClick={onAdd}
-          className="h-10 bg-[#f04438] px-4 text-sm font-black text-white transition-all hover:bg-[#d92d20]"
+          className="h-10 rounded-lg bg-[#f04438] px-4 text-sm font-black text-white transition-all hover:bg-[#d92d20]"
         >
           Ajouter
         </button>
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
-          <thead className="bg-[#fffaf5] text-xs font-black uppercase text-[#9a3412]">
+        <table className="w-full min-w-[860px] text-left text-sm">
+          <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
             <tr>
               <th className="px-6 py-4"><SortButton label="Nom" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4"><SortButton label="Slug" column="slug" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+              <th className="px-6 py-4"><SortButton label="Branches" column="branches" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4"><SortButton label="Devise" column="currency" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4"><SortButton label="Statut" column="status" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4"><SortButton label="Création" column="created_at" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4 text-right">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#ffead5]">
+          <tbody className="divide-y divide-slate-100">
             {sortedRestaurants.map((restaurant) => (
-              <tr key={restaurant.id} className="text-[#64708b] hover:bg-[#fffaf5]">
+              <tr key={restaurant.id} className="text-[#64708b] hover:bg-slate-50">
                 <td className="px-6 py-4 font-black text-[#07133d]">{restaurant.name}</td>
                 <td className="px-6 py-4">{restaurant.slug}</td>
+                <td className="px-6 py-4">
+                  <span className="rounded-lg bg-[#f04438]/10 px-3 py-1 text-xs font-black text-[#f04438]">
+                    {Number(restaurant.branches_count || 1)}
+                  </span>
+                </td>
                 <td className="px-6 py-4">{restaurant.currency}</td>
                 <td className="px-6 py-4">
                   <span

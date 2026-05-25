@@ -11,7 +11,7 @@ from app.modules.users.models import User
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-ORDER_TABLE_CANDIDATES = ("orders", "commandes", "restaurant_orders", "sales")
+ORDER_TABLE_CANDIDATES = ("customer_orders", "orders", "commandes", "restaurant_orders", "sales")
 REVENUE_COLUMN_CANDIDATES = (
     "total_amount",
     "total",
@@ -70,7 +70,7 @@ def admin_summary(current_user: User = Depends(require_tenant_user), db: Session
     return AdminDashboardSummaryOut(
         revenue=revenue,
         orders_count=orders_count,
-        restaurants_count=max(1, active_branches),
+        branches_count=max(1, active_branches),
         users_count=users_query.count(),
         active_users_count=users_query.filter(User.is_active.is_(True)).count(),
     )

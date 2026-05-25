@@ -2,11 +2,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, get_current_user, require_tenant_user
+from app.modules.branches.models import Branch
 from app.modules.restaurants.models import Restaurant
 from app.modules.restaurants.schemas import (
     RestaurantProvisionIn,
@@ -33,7 +34,15 @@ def list_restaurants(
     if current_user.role != Role.SUPERADMIN:
         raise HTTPException(status_code=403, detail="Seul un super administrateur peut lister les restaurants")
 
-    return db.query(Restaurant).order_by(Restaurant.created_at.desc()).all()
+    branch_counts = dict(
+        db.query(Branch.restaurant_id, func.count(Branch.id))
+        .group_by(Branch.restaurant_id)
+        .all()
+    )
+    restaurants = db.query(Restaurant).order_by(Restaurant.created_at.desc()).all()
+    for restaurant in restaurants:
+        restaurant.branches_count = max(1, branch_counts.get(restaurant.id, 0))
+    return restaurants
 
 
 @router.post("", response_model=RestaurantProvisionOut, status_code=status.HTTP_201_CREATED)
@@ -102,6 +111,10 @@ def get_my_restaurant(current_user: User = Depends(require_tenant_user), db: Ses
     restaurant = db.get(Restaurant, current_user.restaurant_id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant introuvable")
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
     return restaurant
 
 
@@ -127,6 +140,10 @@ def update_my_restaurant_settings(
 
     db.commit()
     db.refresh(restaurant)
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
     return restaurant
 
 
@@ -162,4 +179,8 @@ async def upload_my_restaurant_logo(
     restaurant.logo_url = str(request.url_for("uploads", path=f"logos/{filename}"))
     db.commit()
     db.refresh(restaurant)
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
     return restaurant

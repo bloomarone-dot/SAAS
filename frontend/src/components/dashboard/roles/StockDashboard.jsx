@@ -1,6 +1,7 @@
 import {
   BarChart,
   DashboardHeader,
+  formatTodayDate,
   KpiGrid,
   LowStockRows,
   Panel,
@@ -18,7 +19,7 @@ export function StockDashboard({ overrides = {} }) {
 
   return (
     <section className="space-y-4">
-      <DashboardHeader title="Tableau de bord" subtitle="Vue d'ensemble des stocks et finances" right="Aujourd'hui" />
+      <DashboardHeader title="Tableau de bord" subtitle="Vue d'ensemble des stocks et finances" />
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 xl:grid-cols-[1.05fr_1.3fr]">
         <Panel title="Produits en stock faible" link="Voir tout">
@@ -30,7 +31,7 @@ export function StockDashboard({ overrides = {} }) {
       </div>
       <div className="grid gap-4 xl:grid-cols-[1.05fr_1.3fr]">
         <Panel title="Derniers mouvements de stock" link="Voir tout">
-          <SimpleRows rows={[["Tomate", "-5 Kg", "Sortie"], ["Cuisine", "17 Mai 2026", "10:20"]]} />
+          <SimpleRows rows={[["Tomate", "-5 Kg", "Sortie"], ["Cuisine", formatTodayDate(), "10:20"]]} />
         </Panel>
         <Panel title="Résumé comptable (Ce mois)">
           <div className="grid gap-4 md:grid-cols-2">

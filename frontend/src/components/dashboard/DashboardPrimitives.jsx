@@ -1,6 +1,11 @@
+import { useEffect, useState } from "react";
+
 import { DashboardIcon } from "./icons";
 
 export function DashboardHeader({ title, subtitle, right }) {
+  const today = useTodayLabel();
+  const displayedDate = right ?? today;
+
   return (
     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div>
@@ -9,10 +14,32 @@ export function DashboardHeader({ title, subtitle, right }) {
       </div>
       <button className="flex h-10 w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-xs font-black text-slate-700 shadow-sm">
         <DashboardIcon name="CalendarDays" size={16} className="text-slate-500" />
-        {right}
+        {displayedDate}
       </button>
     </div>
   );
+}
+
+export function formatTodayDate() {
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+}
+
+function useTodayLabel() {
+  const [today, setToday] = useState(formatTodayDate);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setToday(formatTodayDate());
+    }, 60_000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return today;
 }
 
 export function KpiGrid({ kpis }) {
@@ -27,7 +54,7 @@ export function KpiGrid({ kpis }) {
 
 function MetricCard({ label, value, trend, icon, tone }) {
   const colors = {
-    pink: "bg-[#fff4ed] text-[#f04438]",
+    pink: "bg-slate-50 text-[var(--dashboard-primary)]",
     blue: "bg-blue-50 text-blue-600",
     green: "bg-emerald-50 text-emerald-600",
     purple: "bg-violet-50 text-violet-600",
@@ -77,15 +104,15 @@ export function LineChart() {
         ))}
         <defs>
           <linearGradient id="salesGradient" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#f04438" stopOpacity="0.28" />
-            <stop offset="100%" stopColor="#f04438" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--dashboard-primary, #f04438)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--dashboard-primary, #f04438)" stopOpacity="0" />
           </linearGradient>
         </defs>
         <path d={`M ${points} L 390 155 L 0 155 Z`} fill="url(#salesGradient)" />
-        <polyline points={points} fill="none" stroke="#f04438" strokeWidth="3" />
+        <polyline points={points} fill="none" stroke="var(--dashboard-primary, #f04438)" strokeWidth="3" />
         {points.split(" ").map((point) => {
           const [cx, cy] = point.split(",");
-          return <circle key={point} cx={cx} cy={cy} r="4" fill="#f04438" stroke="white" strokeWidth="2" />;
+          return <circle key={point} cx={cx} cy={cy} r="4" fill="var(--dashboard-primary, #f04438)" stroke="white" strokeWidth="2" />;
         })}
       </svg>
       <div className="-mt-4 grid grid-cols-7 text-center text-xs font-bold text-slate-500">

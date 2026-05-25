@@ -17,7 +17,7 @@ export function ServerDashboard({ overrides = {} }) {
 
   return (
     <section className="space-y-4">
-      <DashboardHeader title="Tableau de bord" subtitle="Bienvenue, Marie. Prêt(e) à servir vos clients." right="Aujourd'hui" />
+      <DashboardHeader title="Tableau de bord" subtitle="Bienvenue, Marie. Prêt(e) à servir vos clients." />
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
         <Panel title="Mes commandes récentes" link="Voir tout">

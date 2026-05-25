@@ -20,7 +20,6 @@ export function ManagerDashboard({ overrides = {} }) {
       <DashboardHeader
         title="Tableau de bord"
         subtitle="Vue opérationnelle du restaurant, des équipes et du service."
-        right="Aujourd'hui"
       />
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">

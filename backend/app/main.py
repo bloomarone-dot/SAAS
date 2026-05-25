@@ -11,8 +11,11 @@ from app.modules.auth import router as auth
 from app.modules.branches import router as branches
 from app.modules.catalog import router as catalog
 from app.modules.dashboard import router as dashboard
+from app.modules.finance import router as finance
 from app.modules.menu import routes as menu
+from app.modules.orders import router as orders
 from app.modules.permissions import router as permissions
+from app.modules.platform import router as platform
 from app.modules.restaurants import router as restaurants
 from app.modules.permissions.models import Role
 from app.modules.stock import router as stock
@@ -42,6 +45,7 @@ def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_restaurant_settings_columns()
     ensure_menu_category_columns()
+    ensure_order_columns()
     seed_superadmin()
 
 
@@ -70,7 +74,12 @@ def ensure_restaurant_settings_columns() -> None:
         "country": "VARCHAR(120) NULL",
         "postal_box": "VARCHAR(80) NULL",
         "phone": "VARCHAR(30) NULL",
+        "whatsapp_phone": "VARCHAR(30) NULL",
         "email": "VARCHAR(191) NULL",
+        "opening_hours": "VARCHAR(255) NULL",
+        "is_open": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "payment_methods": "VARCHAR(255) NULL",
+        "delivery_fee": "FLOAT NOT NULL DEFAULT 0",
         "website_url": "VARCHAR(500) NULL",
         "tax_id": "VARCHAR(100) NULL",
         "legal_name": "VARCHAR(191) NULL",
@@ -82,6 +91,26 @@ def ensure_restaurant_settings_columns() -> None:
     with engine.begin() as connection:
         for name, definition in missing:
             connection.execute(text(f"ALTER TABLE restaurants ADD COLUMN {name} {definition}"))
+
+
+def ensure_order_columns() -> None:
+    """Ajoute les champs commandes/encaissement tant qu'Alembic n'est pas installe."""
+    inspector = inspect(engine)
+    if "customer_orders" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("customer_orders")}
+    columns = {
+        "discount_amount": "FLOAT NOT NULL DEFAULT 0",
+        "delivery_fee": "FLOAT NOT NULL DEFAULT 0",
+        "cancelled_at": "DATETIME NULL",
+    }
+    missing = [(name, definition) for name, definition in columns.items() if name not in existing]
+    if not missing:
+        return
+
+    with engine.begin() as connection:
+        for name, definition in missing:
+            connection.execute(text(f"ALTER TABLE customer_orders ADD COLUMN {name} {definition}"))
 
 
 def seed_superadmin() -> None:
@@ -123,7 +152,10 @@ app.include_router(restaurants.router, prefix="/api/v1")
 app.include_router(branches.router, prefix="/api/v1")
 app.include_router(catalog.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(finance.router, prefix="/api/v1")
 app.include_router(menu.router, prefix="/api/v1")
+app.include_router(orders.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
 app.include_router(permissions.router, prefix="/api/v1")
+app.include_router(platform.router, prefix="/api/v1")
 app.include_router(stock.router, prefix="/api/v1")

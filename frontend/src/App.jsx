@@ -11,6 +11,7 @@ import { RestaurantSettingsAdmin } from "@/modules/admin/components/RestaurantSe
 import { StaffPermissionsAdmin } from "@/modules/admin/components/StaffPermissionsAdmin";
 import CategoriesPage from "@/modules/menu/pages/CategoriesPage";
 import DishesPage from "@/modules/menu/pages/DishesPage";
+import { OrdersAdmin } from "@/modules/orders/components/OrdersAdmin";
 import {
   SuperadminOwners,
   SuperadminPlatform,
@@ -32,7 +33,7 @@ const initialRestaurant = {
 
 function getApiBaseUrl() {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
+  return `${window.location.protocol}//${window.location.hostname}:8001`;
 }
 
 const rolePaths = {
@@ -82,6 +83,13 @@ function pushAppRoute(role, view, replace = false) {
   window.history[replace ? "replaceState" : "pushState"]({}, "", path);
 }
 
+function shouldShowLoginForPath(path = window.location.pathname) {
+  const firstSegment = path.split("/").filter(Boolean)[0];
+  if (!firstSegment) return false;
+  if (firstSegment === "login") return true;
+  return Object.values(rolePaths).includes(firstSegment);
+}
+
 export default function App() {
   const apiBaseUrl = useMemo(getApiBaseUrl, []);
   const [loginForm, setLoginForm] = useState(initialLogin);
@@ -89,11 +97,12 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [activeView, setActiveView] = useState("dashboard");
   const [restaurants, setRestaurants] = useState([]);
+  const [restaurantTheme, setRestaurantTheme] = useState(null);
   const [adminSummary, setAdminSummary] = useState(null);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [showLogin, setShowLogin] = useState(() => window.location.pathname !== "/");
+  const [showLogin, setShowLogin] = useState(() => shouldShowLoginForPath());
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -111,10 +120,11 @@ export default function App() {
         pushAppRoute(user.role, routeView, true);
         if (user.role === "SUPERADMIN") fetchRestaurants();
         if (user.role === "ADMIN") fetchAdminSummary();
+        if (user.restaurant_id) fetchRestaurantTheme();
       })
       .catch(() => {
         localStorage.removeItem("access_token");
-        if (window.location.pathname !== "/") setShowLogin(true);
+        if (shouldShowLoginForPath()) setShowLogin(true);
       });
   }, [apiBaseUrl]);
 
@@ -124,7 +134,7 @@ export default function App() {
         setActiveView(viewFromPath(session.role));
         return;
       }
-      setShowLogin(window.location.pathname === "/login");
+      setShowLogin(shouldShowLoginForPath());
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -158,6 +168,26 @@ export default function App() {
       setAdminSummary(await response.json());
     } catch {
       setMessage("Impossible de charger les indicateurs du tableau de bord.");
+    }
+  }
+
+  async function fetchRestaurantTheme() {
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/restaurants/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const restaurant = await response.json();
+      setRestaurantTheme({
+        name: restaurant.name,
+        primary: restaurant.primary_color || "#f04438",
+        secondary: restaurant.secondary_color || "#07133d",
+      });
+    } catch {
+      // Theme loading should never block dashboard usage.
     }
   }
 
@@ -199,6 +229,7 @@ export default function App() {
       pushAppRoute(data.user.role, "dashboard", true);
       if (data.user.role === "SUPERADMIN") fetchRestaurants();
       if (data.user.role === "ADMIN") fetchAdminSummary();
+      if (data.user.restaurant_id) fetchRestaurantTheme();
     } catch {
       setMessage("API indisponible. Vérifie que le backend est démarré.");
     } finally {
@@ -301,6 +332,7 @@ export default function App() {
     setMessage("");
     setLoginForm(initialLogin);
     setRestaurants([]);
+    setRestaurantTheme(null);
     setAdminSummary(null);
     setActiveView("dashboard");
     setShowRestaurantForm(false);
@@ -309,7 +341,7 @@ export default function App() {
   }
 
   if (!session && !showLogin) {
-    return <LandingPage onLoginClick={() => {
+    return <LandingPage apiBaseUrl={apiBaseUrl} onLoginClick={() => {
       setShowLogin(true);
       window.history.pushState({}, "", "/login");
     }} />;
@@ -333,6 +365,7 @@ export default function App() {
     session.role === "SUPERADMIN"
       ? {
           Restaurants: String(restaurants.length),
+          Branches: String(restaurants.reduce((total, restaurant) => total + Number(restaurant.branches_count || 1), 0)),
           Actifs: String(restaurants.filter((restaurant) => restaurant.is_active).length),
           Utilisateurs: "Tous",
         }
@@ -340,7 +373,7 @@ export default function App() {
         ? {
             "Chiffre d'affaires": `${Number(adminSummary.revenue || 0).toLocaleString("fr-FR")} FCFA`,
             Commandes: Number(adminSummary.orders_count || 0).toLocaleString("fr-FR"),
-            Restaurants: Number(adminSummary.restaurants_count || 0).toLocaleString("fr-FR"),
+            Branches: Number(adminSummary.branches_count || 0).toLocaleString("fr-FR"),
             Utilisateurs: Number(adminSummary.users_count || 0).toLocaleString("fr-FR"),
             "Utilisateurs actifs": Number(adminSummary.active_users_count || 0).toLocaleString("fr-FR"),
           }
@@ -351,6 +384,7 @@ export default function App() {
       role={session.role}
       user={session}
       activeView={activeView}
+      theme={restaurantTheme}
       onNavigate={(view) => {
         setActiveView(view);
         setMessage("");
@@ -385,12 +419,17 @@ export default function App() {
             apiBaseUrl={apiBaseUrl}
             currentUser={session}
             onMessage={setMessage}
+            onThemeChange={setRestaurantTheme}
           />
         );
       }
 
       if (activeView === "branches" && session.role === "ADMIN") {
         return <BranchesAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+      }
+
+      if (activeView === "orders" && ["ADMIN", "MANAGER", "SERVEUR", "CUISINE"].includes(session.role)) {
+        return <OrdersAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
       if (activeView === "products" && session.role === "ADMIN") {
@@ -448,15 +487,28 @@ export default function App() {
     }
 
     if (activeView === "subscriptions") {
-      return <SuperadminSubscriptions restaurants={restaurants} />;
+      return (
+        <SuperadminSubscriptions
+          apiBaseUrl={apiBaseUrl}
+          restaurants={restaurants}
+          onMessage={setMessage}
+        />
+      );
     }
 
     if (activeView === "platform") {
-      return <SuperadminPlatform restaurants={restaurants} />;
+      return (
+        <SuperadminPlatform
+          apiBaseUrl={apiBaseUrl}
+          restaurants={restaurants}
+          onMessage={setMessage}
+          onRefreshRestaurants={fetchRestaurants}
+        />
+      );
     }
 
     if (activeView === "settings") {
-      return <SuperadminSettings />;
+      return <SuperadminSettings apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
     }
 
     return <RoleDashboard role={session.role} overrides={overrides} />;

@@ -12,7 +12,12 @@ const emptySettings = {
   country: "",
   postal_box: "",
   phone: "",
+  whatsapp_phone: "",
   email: "",
+  opening_hours: "",
+  is_open: true,
+  payment_methods: "",
+  delivery_fee: "",
   website_url: "",
   tax_id: "",
   primary_color: "#E4572E",
@@ -21,7 +26,7 @@ const emptySettings = {
   timezone: "Africa/Douala",
 };
 
-export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage }) {
+export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, onThemeChange }) {
   const [restaurant, setRestaurant] = useState(null);
   const [form, setForm] = useState(emptySettings);
   const [isLoading, setIsLoading] = useState(false);
@@ -33,10 +38,10 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage }) 
     () => [
       { label: "Devise", value: form.currency || "-", icon: "Wallet" },
       { label: "Ville", value: form.city || "-", icon: "MapPin" },
-      { label: "Contact", value: form.phone || form.email || "-", icon: "Phone" },
-      { label: "Statut", value: restaurant?.is_active ? "Actif" : "Inactif", icon: "CheckCircle2" },
+      { label: "Contact", value: form.whatsapp_phone || form.phone || form.email || "-", icon: "Phone" },
+      { label: "Ouverture", value: form.is_open ? "Ouvert" : "Fermé", icon: "CheckCircle2" },
     ],
-    [form.city, form.currency, form.email, form.phone, restaurant?.is_active]
+    [form.city, form.currency, form.email, form.is_open, form.phone, form.whatsapp_phone]
   );
 
   useEffect(() => {
@@ -72,13 +77,23 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage }) 
         country: data.country ?? "",
         postal_box: data.postal_box ?? "",
         phone: data.phone ?? "",
+        whatsapp_phone: data.whatsapp_phone ?? "",
         email: data.email ?? "",
+        opening_hours: data.opening_hours ?? "",
+        is_open: data.is_open ?? true,
+        payment_methods: data.payment_methods ?? "",
+        delivery_fee: String(data.delivery_fee ?? 0),
         website_url: data.website_url ?? "",
         tax_id: data.tax_id ?? "",
         primary_color: data.primary_color ?? "#E4572E",
         secondary_color: data.secondary_color ?? "#1F2937",
         currency: data.currency ?? "XAF",
         timezone: data.timezone ?? "Africa/Douala",
+      });
+      onThemeChange?.({
+        name: data.name,
+        primary: data.primary_color ?? "#E4572E",
+        secondary: data.secondary_color ?? "#1F2937",
       });
     } catch (error) {
       onMessage(error.message);
@@ -88,8 +103,8 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage }) 
   }
 
   function updateField(event) {
-    const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    const { name, type, checked, value } = event.target;
+    setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
   }
 
   async function saveSettings(event) {
@@ -106,7 +121,12 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage }) 
         country: form.country || null,
         postal_box: form.postal_box || null,
         phone: form.phone || null,
+        whatsapp_phone: form.whatsapp_phone || null,
         email: form.email || null,
+        opening_hours: form.opening_hours || null,
+        is_open: form.is_open,
+        payment_methods: form.payment_methods || null,
+        delivery_fee: Number(form.delivery_fee || 0),
         website_url: form.website_url || null,
         tax_id: form.tax_id || null,
         primary_color: form.primary_color,
@@ -119,6 +139,11 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage }) 
         body: JSON.stringify(payload),
       });
       setRestaurant(updated);
+      onThemeChange?.({
+        name: updated.name,
+        primary: updated.primary_color ?? "#E4572E",
+        secondary: updated.secondary_color ?? "#1F2937",
+      });
       onMessage("Informations du restaurant mises à jour.");
     } catch (error) {
       onMessage(error.message);
@@ -213,15 +238,32 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage }) 
             <Field name="currency" label="Devise" value={form.currency} onChange={updateField} maxLength={3} required disabled={!canUpdate || isLoading} />
             <Field name="timezone" label="Fuseau horaire" value={form.timezone} onChange={updateField} required disabled={!canUpdate || isLoading} />
             <Field name="phone" label="Téléphone" value={form.phone} onChange={updateField} disabled={!canUpdate || isLoading} />
+            <Field name="whatsapp_phone" label="WhatsApp" value={form.whatsapp_phone} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="email" label="Email public" type="email" value={form.email} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="address" label="Adresse" value={form.address} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="city" label="Ville" value={form.city} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="country" label="Pays" value={form.country} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="postal_box" label="Boîte postale" value={form.postal_box} onChange={updateField} disabled={!canUpdate || isLoading} />
+            <Field name="opening_hours" label="Horaires d'ouverture" value={form.opening_hours} onChange={updateField} placeholder="Ex: Lun-Dim 09:00 - 22:00" disabled={!canUpdate || isLoading} />
+            <Field name="payment_methods" label="Modes de paiement" value={form.payment_methods} onChange={updateField} placeholder="Ex: Orange Money, MTN MoMo, Cash" disabled={!canUpdate || isLoading} />
+            <Field name="delivery_fee" label="Frais de livraison" type="number" min="0" value={form.delivery_fee} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="website_url" label="Site web" value={form.website_url} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="tax_id" label="Identifiant fiscal / registre" value={form.tax_id} onChange={updateField} disabled={!canUpdate || isLoading} />
             <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={!canUpdate || isLoading} />
             <LogoUpload onChange={uploadLogo} disabled={!canUpdate || isLoading} />
+            <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 md:col-span-2">
+              <input
+                name="is_open"
+                type="checkbox"
+                checked={form.is_open}
+                onChange={updateField}
+                disabled={!canUpdate || isLoading}
+                className="h-5 w-5 accent-[#f04438]"
+              />
+              <span className="text-sm font-black text-[#070528]">
+                Restaurant ouvert aux commandes et visites
+              </span>
+            </label>
             <label className="block md:col-span-2">
               <span className="text-xs font-black text-[#070528]">Description</span>
               <textarea

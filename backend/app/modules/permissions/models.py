@@ -76,7 +76,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[Role, set[Permission]] = {
     Role.SERVEUR: {Permission.SERVICE_READ, Permission.SERVICE_UPDATE},
     Role.CUISINE: {Permission.KITCHEN_READ, Permission.KITCHEN_UPDATE},
     Role.CAISSE: {Permission.CASHIER_READ, Permission.CASHIER_UPDATE},
-    Role.STOCK: {Permission.STOCK_READ, Permission.STOCK_UPDATE},
+    Role.STOCK: {Permission.STOCK_READ, Permission.STOCK_UPDATE, Permission.ACCOUNTING_READ},
     Role.COMPTABLE: {
         Permission.STOCK_READ,
         Permission.STOCK_UPDATE,

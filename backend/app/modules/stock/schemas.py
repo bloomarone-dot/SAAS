@@ -101,3 +101,55 @@ class StockSummaryOut(BaseModel):
     total_entries_value: float
     total_outputs_value: float
     total_damage_loss: float
+
+
+class RecipeIngredientPublic(OrmModel):
+    id: str
+    restaurant_id: str
+    menu_item_id: str
+    stock_item_id: str
+    quantity_per_dish: float
+    location: StockLocation
+    created_at: datetime
+
+
+class RecipeIngredientIn(BaseModel):
+    menu_item_id: str
+    stock_item_id: str
+    quantity_per_dish: float = Field(gt=0)
+    location: StockLocation = StockLocation.CUISINE
+
+
+class ProductionSheetPublic(OrmModel):
+    id: str
+    restaurant_id: str
+    menu_item_id: str
+    quantity: float
+    note: Optional[str] = None
+    created_by_id: Optional[str] = None
+    created_at: datetime
+
+
+class ProductionSheetIn(BaseModel):
+    menu_item_id: str
+    quantity: float = Field(gt=0)
+    note: Optional[str] = None
+
+
+class StockReportOut(BaseModel):
+    start_date: datetime
+    end_date: datetime
+    entries_value: float
+    outputs_value: float
+    damage_loss: float
+    stock_value: float
+    estimated_sales_value: float
+    estimated_profit: float
+    low_stock_count: int
+    movement_count: int
+
+
+class StockMenuItemOut(OrmModel):
+    id: str
+    name: str
+    price: float

@@ -3,9 +3,9 @@ import { DashboardHeader, KpiGrid, Panel, SimpleRows } from "../DashboardPrimiti
 export function SuperadminDashboard({ overrides = {} }) {
   const kpis = [
     { label: "Restaurants créés", value: overrides.Restaurants ?? "0", trend: "Tenants plateforme", icon: "Store", tone: "pink" },
+    { label: "Branches", value: overrides.Branches ?? "0", trend: "Points de vente", icon: "MapPin", tone: "blue" },
     { label: "Restaurants actifs", value: overrides.Actifs ?? "0", trend: "En service", icon: "Activity", tone: "green" },
-    { label: "Propriétaires", value: overrides.Utilisateurs ?? "0", trend: "Comptes owners", icon: "Users", tone: "blue" },
-    { label: "Abonnements", value: "0", trend: "À configurer", icon: "ReceiptText", tone: "purple" },
+    { label: "Propriétaires", value: overrides.Utilisateurs ?? "0", trend: "Comptes owners", icon: "Users", tone: "purple" },
   ];
 
   return (
@@ -13,7 +13,6 @@ export function SuperadminDashboard({ overrides = {} }) {
       <DashboardHeader
         title="Tableau de bord"
         subtitle="Vue plateforme: restaurants, propriétaires, abonnements et santé globale."
-        right="17 Mai 2026"
       />
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">

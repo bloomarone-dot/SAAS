@@ -49,3 +49,9 @@ class DishResponse(DishBase, OrmModel):
     restaurant_id: str
     category_id: Optional[str] = None
     created_at: datetime
+
+
+class PublicRestaurantMenu(BaseModel):
+    restaurant: dict
+    categories: list[CategoryResponse]
+    dishes: list[DishResponse]

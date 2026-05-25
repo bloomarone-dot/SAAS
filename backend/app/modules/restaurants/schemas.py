@@ -20,7 +20,12 @@ class RestaurantPublic(OrmModel):
     country: Optional[str] = None
     postal_box: Optional[str] = None
     phone: Optional[str] = None
+    whatsapp_phone: Optional[str] = None
     email: Optional[str] = None
+    opening_hours: Optional[str] = None
+    is_open: bool
+    payment_methods: Optional[str] = None
+    delivery_fee: float
     website_url: Optional[str] = None
     tax_id: Optional[str] = None
     legal_name: Optional[str] = None
@@ -29,6 +34,7 @@ class RestaurantPublic(OrmModel):
     currency: str
     timezone: str
     owner_id: Optional[str] = None
+    branches_count: int = 1
     is_active: bool
     created_at: datetime
 
@@ -69,7 +75,12 @@ class RestaurantSettingsIn(BaseModel):
     country: Optional[str] = Field(default=None, max_length=120)
     postal_box: Optional[str] = Field(default=None, max_length=80)
     phone: Optional[str] = Field(default=None, max_length=30)
+    whatsapp_phone: Optional[str] = Field(default=None, max_length=30)
     email: Optional[str] = Field(default=None, max_length=191)
+    opening_hours: Optional[str] = Field(default=None, max_length=255)
+    is_open: Optional[bool] = None
+    payment_methods: Optional[str] = Field(default=None, max_length=255)
+    delivery_fee: Optional[float] = Field(default=None, ge=0)
     website_url: Optional[str] = Field(default=None, max_length=500)
     tax_id: Optional[str] = Field(default=None, max_length=100)
     legal_name: Optional[str] = Field(default=None, max_length=191)

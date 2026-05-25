@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,7 +22,12 @@ class Restaurant(Base):
     country: Mapped[str | None] = mapped_column(String(120), nullable=True)
     postal_box: Mapped[str | None] = mapped_column(String(80), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    whatsapp_phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     email: Mapped[str | None] = mapped_column(String(191), nullable=True)
+    opening_hours: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    payment_methods: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    delivery_fee: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     website_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tax_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     legal_name: Mapped[str | None] = mapped_column(String(191), nullable=True)

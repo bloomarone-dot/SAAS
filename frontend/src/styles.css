@@ -18,3 +18,45 @@
     font: inherit;
   }
 }
+
+@layer utilities {
+  .tenant-theme .text-\[\#f04438\] {
+    color: var(--dashboard-primary) !important;
+  }
+
+  .tenant-theme .bg-\[\#f04438\] {
+    background-color: var(--dashboard-primary) !important;
+  }
+
+  .tenant-theme .border-\[\#f04438\] {
+    border-color: var(--dashboard-primary) !important;
+  }
+
+  .tenant-theme .hover\:text-\[\#f04438\]:hover {
+    color: var(--dashboard-primary) !important;
+  }
+
+  .tenant-theme .hover\:border-\[\#f04438\]:hover,
+  .tenant-theme .focus\:border-\[\#f04438\]:focus,
+  .tenant-theme .focus-within\:border-\[\#f04438\]:focus-within {
+    border-color: var(--dashboard-primary) !important;
+  }
+
+  .tenant-theme .accent-\[\#f04438\] {
+    accent-color: var(--dashboard-primary) !important;
+  }
+
+  .tenant-theme .bg-\[\#fff4ed\] {
+    background-color: color-mix(in srgb, var(--dashboard-primary) 10%, white) !important;
+  }
+
+  .tenant-theme .text-\[\#07133d\],
+  .tenant-theme .text-\[\#070528\] {
+    color: var(--dashboard-secondary) !important;
+  }
+
+  .tenant-theme .bg-\[\#07133d\],
+  .tenant-theme .bg-\[\#070528\] {
+    background-color: var(--dashboard-secondary) !important;
+  }
+}
