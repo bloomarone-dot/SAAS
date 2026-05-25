@@ -549,6 +549,23 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
     );
   }
 
+  const isStockHome = ["stocks", "stock"].includes(mode);
+  const isMovementView = mode === "movements";
+  const isSupplyView = ["suppliers", "purchases"].includes(mode);
+  const isInventoryView = mode === "inventory";
+  const isAccountingView = mode === "accounting";
+  const isReportView = mode === "reports";
+  const showReferenceForm = isStockHome;
+  const showMovementForm = isMovementView || isSupplyView;
+  const showDamageForm = isInventoryView || isAccountingView;
+  const showProductionForms = isStockHome;
+  const showStockTable = isStockHome || isInventoryView;
+  const showHistory = isMovementView || isSupplyView || isInventoryView;
+  const showFinance = isAccountingView;
+  const showReports = isReportView;
+  const showLeftColumn = showReferenceForm || showMovementForm || showDamageForm;
+  const showRightColumn = showProductionForms || showReports || showFinance || showStockTable || showHistory || isAccountingView;
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
@@ -585,8 +602,10 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+      <div className={showLeftColumn && showRightColumn ? "grid gap-6 xl:grid-cols-[0.9fr_1.1fr]" : "space-y-6"}>
+        {showLeftColumn && (
         <div className="space-y-6">
+          {showReferenceForm && (
           <form onSubmit={createItem} className="border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle title="Référence stock" icon="Package" />
             <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -630,7 +649,9 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
               )}
             </div>
           </form>
+          )}
 
+          {showMovementForm && (
           <form onSubmit={createMovement} className="border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle title="Mouvement stock" icon="Truck" />
             <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -663,7 +684,9 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
             </div>
             <PrimaryButton disabled={isLoading || !items.length} icon="Truck">Enregistrer le mouvement</PrimaryButton>
           </form>
+          )}
 
+          {showDamageForm && (
           <form onSubmit={createDamage} className="border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle title="Casse, avarie ou perte" icon="AlertTriangle" />
             <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -682,9 +705,13 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
             </div>
             <PrimaryButton disabled={isLoading || !items.length} icon="TrendingDown">Enregistrer l’avarie</PrimaryButton>
           </form>
+          )}
         </div>
+        )}
 
+        {showRightColumn && (
         <div className="space-y-6">
+          {showProductionForms && (
           <div className="grid gap-6 2xl:grid-cols-2">
             <form onSubmit={createRecipe} className="border border-slate-200 bg-white p-6 shadow-sm">
               <SectionTitle title="Ingrédients liés aux plats" icon="UtensilsCrossed" />
@@ -709,8 +736,12 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
               <ProductionRows rows={productionSheets} menuItems={menuItems} />
             </form>
           </div>
+          )}
 
+          {showReports && (
           <ReportPanel report={report} range={reportRange} setRange={setReportRange} onSubmit={submitReport} />
+          )}
+          {showFinance && (
           <FinancePanel
             finance={finance}
             expenses={expenses}
@@ -724,7 +755,9 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
             onSubmit={createExpense}
             onDelete={deleteExpense}
           />
+          )}
 
+          {showStockTable && (
           <div className="border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 p-5">
               <div className="grid gap-3 lg:grid-cols-[1fr_190px]">
@@ -746,7 +779,9 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
             </div>
             <StockTable items={filteredItems} onEdit={editItem} />
           </div>
+          )}
 
+          {showHistory && (
           <div className="grid gap-6 2xl:grid-cols-2">
             <HistoryPanel
               title="Derniers mouvements"
@@ -757,7 +792,12 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
             />
             <DamagePanel rows={damages} items={items} canAccount={canAccountDamage} onAccount={accountDamage} />
           </div>
+          )}
+          {isAccountingView && (
+            <DamagePanel rows={damages} items={items} canAccount={canAccountDamage} onAccount={accountDamage} />
+          )}
         </div>
+        )}
       </div>
     </section>
   );

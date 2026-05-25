@@ -13,11 +13,78 @@ export function DashboardLayout({
   children,
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [openMenuKeys, setOpenMenuKeys] = useState({});
   const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
   const roleMeta = getRoleMeta(role);
   const primary = theme?.primary ?? "#f04438";
   const secondary = theme?.secondary ?? "#07133d";
   const activeBackground = `${primary}14`;
+
+  function navigateTo(view) {
+    onNavigate(view);
+    setIsMobileMenuOpen(false);
+  }
+
+  function renderMenu(isCollapsedMenu = false) {
+    return menus.map((item) => {
+      const hasChildren = Boolean(item.children?.length);
+      const hasActiveChild = hasChildren && item.children.some((child) => child.key === activeView);
+      const isActive = activeView === item.key || hasActiveChild;
+      const isExpanded = !isCollapsedMenu && hasChildren && (openMenuKeys[item.key] ?? hasActiveChild);
+
+      return (
+        <div key={item.key}>
+          <button
+            type="button"
+            onClick={() => {
+              navigateTo(item.key);
+              if (hasChildren && !isCollapsedMenu) {
+                setOpenMenuKeys((current) => ({ ...current, [item.key]: !isExpanded }));
+              }
+            }}
+            title={isCollapsedMenu ? item.label : undefined}
+            className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition-all ${
+              isCollapsedMenu ? "justify-center" : ""
+            } ${isActive ? "" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"}`}
+            style={isActive ? { backgroundColor: activeBackground, color: primary } : undefined}
+          >
+            <DashboardIcon name={item.icon} size={17} />
+            {!isCollapsedMenu && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
+            {!isCollapsedMenu && hasChildren && (
+              <DashboardIcon
+                name="ChevronDown"
+                size={15}
+                className={`transition-transform ${isExpanded ? "rotate-180" : ""}`}
+              />
+            )}
+          </button>
+
+          {isExpanded && (
+            <div className="mt-1 space-y-1 border-l border-slate-200 pl-3">
+              {item.children.map((child) => {
+                const isChildActive = activeView === child.key;
+                return (
+                  <button
+                    key={child.key}
+                    type="button"
+                    onClick={() => navigateTo(child.key)}
+                    className={`flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-bold transition-all ${
+                      isChildActive ? "" : "text-slate-500 hover:bg-slate-50 hover:text-slate-950"
+                    }`}
+                    style={isChildActive ? { backgroundColor: activeBackground, color: primary } : undefined}
+                  >
+                    <DashboardIcon name={child.icon} size={14} />
+                    <span className="truncate">{child.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    });
+  }
 
   return (
     <div className={`flex min-h-screen bg-white text-[#101828] ${role !== "SUPERADMIN" ? "tenant-theme" : ""}`} style={{ "--dashboard-primary": primary, "--dashboard-secondary": secondary }}>
@@ -33,25 +100,7 @@ export function DashboardLayout({
         </div>
 
         <div className="space-y-2">
-          {menus.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => onNavigate(item.key)}
-              title={isCollapsed ? item.label : undefined}
-              className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition-all ${
-                isCollapsed ? "justify-center" : ""
-              } ${
-                activeView === item.key
-                  ? ""
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
-              }`}
-              style={activeView === item.key ? { backgroundColor: activeBackground, color: primary } : undefined}
-            >
-              <DashboardIcon name={item.icon} size={17} />
-              {!isCollapsed && item.label}
-            </button>
-          ))}
+          {renderMenu(isCollapsed)}
         </div>
 
         <div className={`mt-auto rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 ${isCollapsed ? "hidden" : ""}`}>
@@ -78,9 +127,46 @@ export function DashboardLayout({
         </div>
       </aside>
 
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/40"
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-label="Fermer le menu"
+          />
+          <aside className="relative flex h-full w-[min(86vw,320px)] flex-col overflow-y-auto border-r border-slate-200 bg-white px-5 py-6 shadow-2xl">
+            <div className="mb-7 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full border-2" style={{ borderColor: primary, color: primary }}>
+                  <DashboardIcon name="Store" size={20} />
+                </div>
+                <div>
+                  <h1 className="text-base font-black leading-tight text-slate-950">{role === "SUPERADMIN" ? "Resto SaaS" : theme?.name ?? "Restaurant"}</h1>
+                  <p className="text-xs font-semibold text-slate-500">Smart Restaurant</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsMobileMenuOpen(false)} className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-50" title="Fermer le menu">
+                <DashboardIcon name="Menu" size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-2">{renderMenu(false)}</div>
+          </aside>
+        </div>
+      )}
+
       <main className="min-w-0 flex-1">
         <header className="relative flex h-[76px] items-center justify-between border-b border-slate-200/80 bg-white px-4 md:px-7">
-          <div className="lg:hidden">
+          <div className="flex items-center gap-3 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-700 hover:bg-slate-50"
+              title="Ouvrir le menu"
+            >
+              <DashboardIcon name="Menu" size={21} />
+            </button>
             <h1 className="text-lg font-black text-slate-950">Resto SaaS</h1>
           </div>
 
