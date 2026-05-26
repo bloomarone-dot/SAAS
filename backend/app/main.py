@@ -23,6 +23,7 @@ from app.modules.stock import router as stock
 from app.modules.users.models import User
 from app.modules.users import router as users
 from app.security import hash_password
+from app.modules.kitchen.router import router as kitchen_router
 
 # Point d'entree FastAPI: assemble le middleware CORS, la creation de tables
 # en developpement et les routeurs versionnes de l'API.
@@ -31,6 +32,7 @@ UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 app.include_router(tables_router)
+app.include_router(kitchen_router)
 
 app.add_middleware(
     CORSMiddleware,
