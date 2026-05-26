@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import POSPage from './modules/menu/pages/POSPage';
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { LoginPanel } from "@/features/auth/components/LoginPanel";
