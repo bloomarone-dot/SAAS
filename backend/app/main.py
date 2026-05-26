@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
+from app.modules.tables.router import router as tables_router
 
 from app.database import Base, SessionLocal, engine
 import app.modules.models  # noqa: F401
@@ -29,6 +30,7 @@ app = FastAPI(title="Restaurant SaaS API")
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+app.include_router(tables_router)
 
 app.add_middleware(
     CORSMiddleware,
