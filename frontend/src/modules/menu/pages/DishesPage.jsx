@@ -82,7 +82,7 @@ export default function DishesPage({ restaurantId, role }) {
           <p className="text-xs font-black uppercase tracking-normal text-[#f04438]">
             {role === "CUISINE" ? "Cuisine" : "Administration restaurant"}
           </p>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Plats menu</h1>
+          <h1 className="mt-2 text-4xl font-black text-[#070528]">Plats vendables</h1>
           <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
             {role === "CUISINE"
               ? "Consultez les plats et basculez leur disponibilité selon les ruptures ou reprises en cuisine."

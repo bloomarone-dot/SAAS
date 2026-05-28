@@ -47,6 +47,7 @@ class OrderItemPublic(OrmModel):
     id: str
     menu_item_id: Optional[str] = None
     name: str
+    sale_channel: str = "REPAS"
     quantity: int
     unit_price: float
     line_total: float
@@ -55,6 +56,10 @@ class OrderItemPublic(OrmModel):
 class OrderPublic(OrmModel):
     id: str
     restaurant_id: str
+    branch_id: Optional[str] = None
+    table_id: Optional[int] = None
+    server_id: Optional[str] = None
+    party_size: int = 1
     order_number: str
     customer_name: str
     customer_phone: str

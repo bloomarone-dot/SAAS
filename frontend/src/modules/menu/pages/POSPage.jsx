@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import TableGrid from '../components/TableGrid';
 import TableSessionModal from '../components/TableSessionModal';
-import CategoriesPage from './CategoriesPage'; // Ton module Menu du Sprint 3
+import DishesPage from './DishesPage';
 
-export default function POSPage() {
-  const currentRestaurantId = 1; // ID de test pour le restaurant
+export default function POSPage({ restaurantId, role, currentUser }) {
+  const currentRestaurantId = restaurantId
   const [selectedTable, setSelectedTable] = useState(null);
   const [activeOrderContext, setActiveOrderContext] = useState(null);
 
@@ -41,6 +41,7 @@ export default function POSPage() {
           {selectedTable && (
             <TableSessionModal
               table={selectedTable}
+              currentUser={currentUser}
               onClose={() => setSelectedTable(null)}
               onOpenMenuForOrder={handleOpenMenuForOrder}
             />
@@ -68,9 +69,10 @@ export default function POSPage() {
 
           {/* Ici on charge ta page de gestion du menu et des catégories */}
           {/* On lui passe l'orderId pour que chaque plat ajouté y soit lié */}
-          <CategoriesPage 
-            restaurantId={currentRestaurantId} 
-            activeOrderId={activeOrderContext.orderId} 
+          <DishesPage
+            restaurantId={currentRestaurantId}
+            role={role}
+            activeOrderId={activeOrderContext.orderId}
           />
         </div>
       )}

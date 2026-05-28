@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.modules.audit.service import log_action
 from app.modules.auth.schemas import ForgotPasswordIn, ForgotPasswordOut, LoginIn, ResetPasswordIn, TokenOut
 from app.modules.users.models import User
 from app.modules.users.schemas import UserPublic
@@ -57,6 +58,8 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Compte desactive")
 
+    log_action(db, user, "auth.login", "user", user.id, f"Connexion utilisateur {user.username}")
+    db.commit()
     return TokenOut(access_token=create_access_token(user.id), user=user)
 
 

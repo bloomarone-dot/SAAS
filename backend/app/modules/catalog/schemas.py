@@ -33,6 +33,7 @@ class MenuItemPublic(OrmModel):
     name: str
     description: Optional[str] = None
     price: float
+    sale_channel: str = "REPAS"
     image_url: Optional[str] = None
     is_available: bool
     created_at: datetime
@@ -53,4 +54,3 @@ class MenuItemUpdateIn(BaseModel):
     category_id: Optional[str] = None
     image_url: Optional[str] = Field(default=None, max_length=500)
     is_available: Optional[bool] = None
-

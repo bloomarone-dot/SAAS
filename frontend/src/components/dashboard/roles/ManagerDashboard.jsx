@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from "react";
+
 import {
   DashboardHeader,
   DonutChart,
@@ -6,42 +8,92 @@ import {
   Panel,
   SimpleRows,
 } from "../DashboardPrimitives";
+import { orderApi } from "@/modules/orders/services/orderApi";
+import { tableApi } from "@/modules/menu/services/tableApi";
+
+function isToday(value) {
+  if (!value) return false;
+  return new Date(value).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
+}
 
 export function ManagerDashboard({ overrides = {} }) {
+  const apiBaseUrl = overrides.__apiBaseUrl;
+  const currentUser = overrides.__currentUser;
+  const [orders, setOrders] = useState([]);
+  const [tables, setTables] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    loadDashboard();
+  }, [apiBaseUrl, currentUser?.restaurant_id]);
+
+  async function loadDashboard() {
+    if (!currentUser?.restaurant_id) return;
+    setMessage("");
+    try {
+      const [orderData, tableData, userData] = await Promise.all([
+        orderApi.list().catch(() => []),
+        tableApi.getTables(currentUser.restaurant_id).catch(() => []),
+        fetchUsers().catch(() => []),
+      ]);
+      setOrders(orderData);
+      setTables(tableData);
+      setUsers(userData);
+    } catch (error) {
+      setMessage(error.message || "Impossible de charger le tableau de bord manager.");
+    }
+  }
+
+  async function fetchUsers() {
+    const token = localStorage.getItem("access_token");
+    const response = await fetch(`${apiBaseUrl}/api/v1/users`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return [];
+    return response.json();
+  }
+
+  const todayOrders = useMemo(() => orders.filter((order) => isToday(order.created_at)), [orders]);
+  const occupiedTables = tables.filter((table) => table.status === "Occupée").length;
+  const readyOrders = orders.filter((order) => order.status === "Prête").length;
+  const activeUsers = users.filter((user) => user.is_active).length;
+
   const kpis = [
-    { label: "Commandes du jour", value: overrides.Commandes ?? "186", trend: "Objectif 240", icon: "ClipboardList", tone: "pink" },
-    { label: "Tables occupées", value: "21", trend: "74% capacité", icon: "Table2", tone: "blue" },
-    { label: "Équipe active", value: "16", trend: "4 services", icon: "Users", tone: "green" },
-    { label: "Satisfaction", value: "92%", trend: "Avis clients", icon: "TrendingUp", tone: "purple" },
+    { label: "Commandes du jour", value: todayOrders.length, trend: "Données réelles", icon: "ClipboardList", tone: "pink" },
+    { label: "Tables occupées", value: occupiedTables, trend: `${tables.length} table(s)`, icon: "Table2", tone: "blue" },
+    { label: "Équipe active", value: activeUsers, trend: `${users.length} compte(s)`, icon: "Users", tone: "green" },
+    { label: "Commandes prêtes", value: readyOrders, trend: "À servir / encaisser", icon: "TrendingUp", tone: "purple" },
+  ];
+
+  const activityRows = [
+    ["Service", `${todayOrders.length} commande(s)`, todayOrders.length ? "Actif" : "Calme"],
+    ["Cuisine", `${orders.filter((order) => order.status === "En préparation").length} en préparation`, "Suivi"],
+    ["Caisse", `${orders.filter((order) => order.status === "Prête" || order.status === "Livrée").length} à encaisser`, "À traiter"],
+    ["Stock", "Voir alertes stock", "Module stock"],
   ];
 
   return (
     <section className="space-y-4">
       <DashboardHeader
-        title="Tableau de bord"
-        subtitle="Vue opérationnelle du restaurant, des équipes et du service."
+        title="Tableau de bord manager"
+        subtitle="Vue opérationnelle construite avec les commandes, tables et comptes du restaurant."
       />
+      {message && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-bold text-red-600">{message}</div>}
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-        <Panel title="Priorités opérationnelles" link="Voir tout">
-          <SimpleRows
-            rows={[
-              ["Renforcer le service terrasse", "2 serveurs", "Urgent"],
-              ["Préparer le rush déjeuner", "12:00", "Planifié"],
-              ["Contrôler les ruptures", "5 articles", "Stock"],
-              ["Valider la clôture caisse", "18:00", "Finance"],
-            ]}
-          />
+        <Panel title="Priorités opérationnelles" link="Données réelles">
+          <SimpleRows rows={activityRows} />
         </Panel>
-        <Panel title="Répartition des activités" action="Ce jour">
+        <Panel title="Répartition des activités" action="Aujourd'hui">
           <div className="grid gap-6 md:grid-cols-[180px_1fr]">
-            <DonutChart total="186" label="Actions" segments={["#f04438", "#2f80ed", "#31b86f", "#ff9b21"]} />
+            <DonutChart total={String(todayOrders.length + occupiedTables + readyOrders)} label="Actions" segments={["#f04438", "#2f80ed", "#31b86f", "#ff9b21"]} />
             <Legend
               items={[
-                ["Service", "45%", "bg-[#f04438]"],
-                ["Cuisine", "28%", "bg-[#2f80ed]"],
-                ["Stock", "17%", "bg-[#31b86f]"],
-                ["Caisse", "10%", "bg-[#ff9b21]"],
+                ["Commandes", String(todayOrders.length), "bg-[#f04438]"],
+                ["Tables occupées", String(occupiedTables), "bg-[#2f80ed]"],
+                ["Prêtes", String(readyOrders), "bg-[#31b86f]"],
+                ["Équipe active", String(activeUsers), "bg-[#ff9b21]"],
               ]}
             />
           </div>
@@ -49,11 +101,11 @@ export function ManagerDashboard({ overrides = {} }) {
       </div>
       <Panel title="Suivi d'équipe">
         <SimpleRows
-          rows={[
-            ["Marie Claire", "Service", "Présente"],
-            ["Paul Chef", "Cuisine", "Présent"],
-            ["Jean Dupont", "Stock", "Présent"],
-          ]}
+          rows={users.length ? users.slice(0, 5).map((user) => [
+            `${user.first_name} ${user.last_name}`,
+            user.role,
+            user.is_active ? "Actif" : "Désactivé",
+          ]) : [["Aucun compte", "-", "À configurer"]]}
         />
       </Panel>
     </section>

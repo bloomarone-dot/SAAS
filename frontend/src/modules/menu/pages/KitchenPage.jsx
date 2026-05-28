@@ -1,11 +1,10 @@
 import React from 'react';
 import KitchenDisplay from '../components/KitchenDisplay';
 
-export default function KitchenPage() {
+export default function KitchenPage({ filter = 'orders' }) {
   return (
-    <div className="bg-gray-900 min-h-screen">
-      {/* Chargement de l'écran de suivi des tickets */}
-      <KitchenDisplay />
+    <div className="min-h-screen bg-white">
+      <KitchenDisplay filter={filter} />
     </div>
   );
 }

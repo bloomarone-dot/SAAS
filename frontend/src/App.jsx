@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 
 import POSPage from './modules/menu/pages/POSPage';
+import KitchenPage from './modules/menu/pages/KitchenPage';
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { LoginPanel } from "@/features/auth/components/LoginPanel";
 import { SuperadminRestaurants } from "@/features/restaurants/components/SuperadminRestaurants";
 import LandingPage from "@/LandingPage";
 import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
+import { AuditLogsAdmin } from "@/modules/admin/components/AuditLogsAdmin";
 import { CatalogAdmin } from "@/modules/admin/components/CatalogAdmin";
 import { RestaurantSettingsAdmin } from "@/modules/admin/components/RestaurantSettingsAdmin";
 import { StaffPermissionsAdmin } from "@/modules/admin/components/StaffPermissionsAdmin";
 import CategoriesPage from "@/modules/menu/pages/CategoriesPage";
 import DishesPage from "@/modules/menu/pages/DishesPage";
+import { ServerClients, ServerHistory, ServerInvoices } from "@/modules/menu/components/ServerClientSections";
 import { OrdersAdmin } from "@/modules/orders/components/OrdersAdmin";
 import {
   SuperadminOwners,
@@ -19,7 +22,9 @@ import {
   SuperadminSettings,
   SuperadminSubscriptions,
 } from "@/modules/platform/components/SuperadminSections";
+import { StockDashboard } from "@/components/dashboard/roles/StockDashboard";
 import { StockOperations } from "@/modules/stock/components/StockOperations";
+import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 
 const initialLogin = { login: "", password: "" };
 const initialRestaurant = {
@@ -104,6 +109,8 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showLogin, setShowLogin] = useState(() => shouldShowLoginForPath());
+  const [offlineQueueCount, setOfflineQueueCount] = useState(() => readOfflineQueue().length);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -128,6 +135,35 @@ export default function App() {
         if (shouldShowLoginForPath()) setShowLogin(true);
       });
   }, [apiBaseUrl]);
+
+  useEffect(() => {
+    function refreshQueueState() {
+      setOfflineQueueCount(readOfflineQueue().length);
+    }
+
+    async function handleOnline() {
+      setIsOnline(true);
+      const result = await flushOfflineQueue(apiBaseUrl);
+      refreshQueueState();
+      if (result.synced > 0) setMessage(`${result.synced} action(s) synchronisée(s).`);
+      if (session?.role === "ADMIN") fetchAdminSummary();
+    }
+
+    function handleOffline() {
+      setIsOnline(false);
+    }
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("offline-queue-changed", refreshQueueState);
+    refreshQueueState();
+    if (navigator.onLine) handleOnline();
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("offline-queue-changed", refreshQueueState);
+    };
+  }, [apiBaseUrl, session?.role]);
 
   useEffect(() => {
     function handlePopState() {
@@ -165,10 +201,14 @@ export default function App() {
       const response = await fetch(`${apiBaseUrl}/api/v1/dashboard/admin-summary`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) return;
-      setAdminSummary(await response.json());
-    } catch {
-      setMessage("Impossible de charger les indicateurs du tableau de bord.");
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setMessage(data.detail ?? "Impossible de charger les indicateurs du tableau de bord.");
+        return;
+      }
+      setAdminSummary(data);
+    } catch (error) {
+      setMessage(error.message || "Impossible de charger les indicateurs du tableau de bord.");
     }
   }
 
@@ -342,10 +382,7 @@ export default function App() {
   }
 
   if (!session && !showLogin) {
-    return <LandingPage apiBaseUrl={apiBaseUrl} onLoginClick={() => {
-      setShowLogin(true);
-      window.history.pushState({}, "", "/login");
-    }} />;
+    return <LandingPage apiBaseUrl={apiBaseUrl} />;
   }
 
   if (!session) {
@@ -369,6 +406,9 @@ export default function App() {
           Branches: String(restaurants.reduce((total, restaurant) => total + Number(restaurant.branches_count || 1), 0)),
           Actifs: String(restaurants.filter((restaurant) => restaurant.is_active).length),
           Utilisateurs: "Tous",
+          __apiBaseUrl: apiBaseUrl,
+          __currentUser: session,
+          __restaurants: restaurants,
         }
       : session.role === "ADMIN" && adminSummary
         ? {
@@ -377,8 +417,11 @@ export default function App() {
             Branches: Number(adminSummary.branches_count || 0).toLocaleString("fr-FR"),
             Utilisateurs: Number(adminSummary.users_count || 0).toLocaleString("fr-FR"),
             "Utilisateurs actifs": Number(adminSummary.active_users_count || 0).toLocaleString("fr-FR"),
+            __summary: adminSummary,
+            __apiBaseUrl: apiBaseUrl,
+            __currentUser: session,
           }
-      : {};
+      : { __apiBaseUrl: apiBaseUrl, __currentUser: session };
 
   return (
     <DashboardLayout
@@ -400,11 +443,17 @@ export default function App() {
       }}
       onLogout={logout}
     >
+      <SyncStatus
+        apiBaseUrl={apiBaseUrl}
+        isOnline={isOnline}
+        queueCount={offlineQueueCount}
+        onMessage={setMessage}
+      />
       {renderContent()}
 
       {message && (
         <p className="mt-8 max-w-3xl rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
-          {message}
+          {friendlyNetworkMessage(message, message)}
         </p>
       )}
     </DashboardLayout>
@@ -429,7 +478,27 @@ export default function App() {
         return <BranchesAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
-      if (activeView === "orders" && ["ADMIN", "MANAGER", "SERVEUR", "CUISINE"].includes(session.role)) {
+      if (activeView === "tables" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+        return <POSPage restaurantId={session.restaurant_id} role={session.role} currentUser={session} />;
+      }
+
+      if (activeView === "clients" && session.role === "SERVEUR") {
+        return <ServerClients />;
+      }
+
+      if (activeView === "invoices" && session.role === "SERVEUR") {
+        return <ServerInvoices />;
+      }
+
+      if (activeView === "history" && session.role === "SERVEUR") {
+        return <ServerHistory />;
+      }
+
+      if (["orders", "preparation", "ready"].includes(activeView) && session.role === "CUISINE") {
+        return <KitchenPage filter={activeView} />;
+      }
+
+      if (activeView === "orders" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
         return <OrdersAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
@@ -447,12 +516,23 @@ export default function App() {
         );
       }
 
+      if (activeView === "audit-logs" && session.role === "ADMIN") {
+        return <AuditLogsAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+      }
+
       if (activeView === "menu-categories" && ["ADMIN", "CUISINE"].includes(session.role)) {
         return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} />;
       }
 
       if (activeView === "menu-dishes" && ["ADMIN", "CUISINE"].includes(session.role)) {
         return <DishesPage restaurantId={session.restaurant_id} role={session.role} />;
+      }
+
+      if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
+        return <StockDashboard variant="stock" overrides={overrides} onNavigate={(view) => {
+          setActiveView(view);
+          pushAppRoute(session.role, view);
+        }} />;
       }
 
       if (stockViews.includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
@@ -514,4 +594,40 @@ export default function App() {
 
     return <RoleDashboard role={session.role} overrides={overrides} />;
   }
+}
+
+function SyncStatus({ apiBaseUrl, isOnline, queueCount, onMessage }) {
+  if (isOnline && queueCount === 0) return null;
+  async function syncNow() {
+    const result = await flushOfflineQueue(apiBaseUrl);
+    onMessage(result.synced > 0 ? `${result.synced} action(s) synchronisée(s).` : "Aucune action synchronisée pour le moment.");
+  }
+
+  function clearQueue() {
+    if (!window.confirm("Vider les actions en attente de synchronisation ?")) return;
+    clearOfflineQueue();
+    onMessage("File de synchronisation vidée.");
+  }
+
+  return (
+    <div className={`mb-4 flex flex-col gap-3 rounded-xl border p-3 text-sm font-bold md:flex-row md:items-center md:justify-between ${
+      isOnline ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-700"
+    }`}>
+      <span>
+        {isOnline
+          ? `${queueCount} action(s) en attente de synchronisation.`
+          : `Mode hors connexion actif${queueCount ? ` · ${queueCount} action(s) en attente` : ""}.`}
+      </span>
+      {queueCount > 0 && (
+        <span className="flex flex-wrap gap-2">
+          <button type="button" onClick={syncNow} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-800 shadow-sm">
+            Synchroniser
+          </button>
+          <button type="button" onClick={clearQueue} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-red-600 shadow-sm">
+            Vider
+          </button>
+        </span>
+      )}
+    </div>
+  );
 }

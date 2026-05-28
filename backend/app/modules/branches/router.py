@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
+from app.modules.audit.service import log_action
 from app.modules.branches.models import Branch
 from app.modules.branches.schemas import BranchCreateIn, BranchPublic
 from app.modules.permissions.models import Permission
@@ -40,6 +41,7 @@ def create_branch(
         phone=payload.phone,
     )
     db.add(branch)
+    log_action(db, current_user, "branch.create", "branch", branch.id, f"Création branche {branch.name}", {"city": branch.city})
     db.commit()
     db.refresh(branch)
     return branch

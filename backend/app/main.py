@@ -9,6 +9,7 @@ from app.modules.tables.router import router as tables_router
 from app.database import Base, SessionLocal, engine
 import app.modules.models  # noqa: F401
 from app.modules.auth import router as auth
+from app.modules.audit import router as audit
 from app.modules.branches import router as branches
 from app.modules.catalog import router as catalog
 from app.modules.dashboard import router as dashboard
@@ -49,7 +50,10 @@ def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_restaurant_settings_columns()
     ensure_menu_category_columns()
+    ensure_menu_item_columns()
     ensure_order_columns()
+    ensure_stock_columns()
+    ensure_french_status_values()
     seed_superadmin()
 
 
@@ -66,6 +70,24 @@ def ensure_menu_category_columns() -> None:
     with engine.begin() as connection:
         for name, definition in missing:
             connection.execute(text(f"ALTER TABLE menu_categories ADD COLUMN {name} {definition}"))
+
+
+def ensure_menu_item_columns() -> None:
+    """Ajoute les champs de classification caisse sur la carte vendable."""
+    inspector = inspect(engine)
+    if "menu_items" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("menu_items")}
+    columns = {
+        "sale_channel": "VARCHAR(20) NOT NULL DEFAULT 'REPAS'",
+    }
+    missing = [(name, definition) for name, definition in columns.items() if name not in existing]
+    if not missing:
+        return
+
+    with engine.begin() as connection:
+        for name, definition in missing:
+            connection.execute(text(f"ALTER TABLE menu_items ADD COLUMN {name} {definition}"))
 
 
 def ensure_restaurant_settings_columns() -> None:
@@ -104,9 +126,65 @@ def ensure_order_columns() -> None:
         return
     existing = {column["name"] for column in inspector.get_columns("customer_orders")}
     columns = {
+        "branch_id": "VARCHAR(36) NULL",
         "discount_amount": "FLOAT NOT NULL DEFAULT 0",
         "delivery_fee": "FLOAT NOT NULL DEFAULT 0",
         "cancelled_at": "DATETIME NULL",
+        "table_id": "INTEGER NULL",
+        "server_id": "VARCHAR(36) NULL",
+        "party_size": "INTEGER NOT NULL DEFAULT 1",
+    }
+    missing = [(name, definition) for name, definition in columns.items() if name not in existing]
+    if missing:
+        with engine.begin() as connection:
+            for name, definition in missing:
+                connection.execute(text(f"ALTER TABLE customer_orders ADD COLUMN {name} {definition}"))
+
+    if "customer_order_items" not in inspector.get_table_names():
+        return
+    existing_item_columns = {column["name"] for column in inspector.get_columns("customer_order_items")}
+    item_columns = {
+        "sale_channel": "VARCHAR(20) NOT NULL DEFAULT 'REPAS'",
+    }
+    missing_item_columns = [
+        (name, definition)
+        for name, definition in item_columns.items()
+        if name not in existing_item_columns
+    ]
+    if not missing_item_columns:
+        return
+    with engine.begin() as connection:
+        for name, definition in missing_item_columns:
+            connection.execute(text(f"ALTER TABLE customer_order_items ADD COLUMN {name} {definition}"))
+        connection.execute(
+            text(
+                """
+                UPDATE customer_order_items coi
+                JOIN menu_items mi ON mi.id = coi.menu_item_id
+                SET coi.sale_channel = COALESCE(mi.sale_channel, 'REPAS')
+                """
+            )
+        )
+
+
+def ensure_stock_columns() -> None:
+    """Ajoute les champs stock recents sans attendre une migration Alembic."""
+    inspector = inspect(engine)
+    if "stock_items" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("stock_items")}
+    columns = {
+        "product_type": "VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'",
+        "unit": "VARCHAR(30) NOT NULL DEFAULT 'Unité'",
+        "quantity": "FLOAT NOT NULL DEFAULT 0",
+        "kitchen_quantity": "FLOAT NOT NULL DEFAULT 0",
+        "drink_quantity": "FLOAT NOT NULL DEFAULT 0",
+        "alert_threshold": "FLOAT NOT NULL DEFAULT 0",
+        "purchase_price": "FLOAT NOT NULL DEFAULT 0",
+        "sale_margin_rate": "FLOAT NOT NULL DEFAULT 0",
+        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if not missing:
@@ -114,7 +192,77 @@ def ensure_order_columns() -> None:
 
     with engine.begin() as connection:
         for name, definition in missing:
-            connection.execute(text(f"ALTER TABLE customer_orders ADD COLUMN {name} {definition}"))
+            connection.execute(text(f"ALTER TABLE stock_items ADD COLUMN {name} {definition}"))
+
+
+def ensure_french_status_values() -> None:
+    """Migre les anciens statuts techniques tables/cuisine vers des valeurs francaises."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    is_mysql = engine.dialect.name == "mysql"
+
+    with engine.begin() as connection:
+        if "restaurant_tables" in tables:
+            table_status_needs_enum_update = (
+                is_mysql and "Libre" not in read_mysql_column_type(connection, "restaurant_tables", "status")
+            )
+            if table_status_needs_enum_update:
+                connection.execute(text("ALTER TABLE restaurant_tables MODIFY COLUMN status VARCHAR(40) NOT NULL"))
+            connection.execute(
+                text(
+                    """
+                    UPDATE restaurant_tables
+                    SET status = CASE status
+                        WHEN 'FREE' THEN 'Libre'
+                        WHEN 'OCCUPIED' THEN 'Occupée'
+                        WHEN 'RESERVED' THEN 'Réservée'
+                        ELSE status
+                    END
+                    """
+                )
+            )
+            if table_status_needs_enum_update:
+                connection.execute(
+                    text(
+                        "ALTER TABLE restaurant_tables "
+                        "MODIFY COLUMN status ENUM('Libre','Occupée','Réservée') NOT NULL DEFAULT 'Libre'"
+                    )
+                )
+
+        if "kitchen_tickets" in tables:
+            kitchen_status_needs_enum_update = (
+                is_mysql and "En attente" not in read_mysql_column_type(connection, "kitchen_tickets", "status")
+            )
+            if kitchen_status_needs_enum_update:
+                connection.execute(text("ALTER TABLE kitchen_tickets MODIFY COLUMN status VARCHAR(40) NOT NULL"))
+            connection.execute(
+                text(
+                    """
+                    UPDATE kitchen_tickets
+                    SET status = CASE status
+                        WHEN 'PENDING' THEN 'En attente'
+                        WHEN 'COOKING' THEN 'En préparation'
+                        WHEN 'READY' THEN 'Prête'
+                        WHEN 'SERVED' THEN 'Servie'
+                        ELSE status
+                    END
+                    """
+                )
+            )
+            if kitchen_status_needs_enum_update:
+                connection.execute(
+                    text(
+                        "ALTER TABLE kitchen_tickets "
+                        "MODIFY COLUMN status ENUM('En attente','En préparation','Prête','Servie') "
+                        "NOT NULL DEFAULT 'En attente'"
+                    )
+                )
+
+
+def read_mysql_column_type(connection, table_name: str, column_name: str) -> str:
+    """Retourne la definition d'une colonne MySQL pour limiter les ALTER repetes."""
+    row = connection.execute(text(f"SHOW COLUMNS FROM {table_name} LIKE '{column_name}'")).mappings().first()
+    return str(row["Type"]) if row else ""
 
 
 def seed_superadmin() -> None:
@@ -152,6 +300,7 @@ async def root():
 
 
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(audit.router, prefix="/api/v1")
 app.include_router(restaurants.router, prefix="/api/v1")
 app.include_router(branches.router, prefix="/api/v1")
 app.include_router(catalog.router, prefix="/api/v1")

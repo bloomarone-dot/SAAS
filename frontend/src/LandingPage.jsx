@@ -17,6 +17,7 @@ import {
   Truck,
   Wallet,
 } from "lucide-react";
+import { clearOfflineQueue, enqueueOfflineAction, flushOfflineQueue, friendlyNetworkMessage, isNetworkError, readOfflineQueue } from "@/utils/network";
 
 const restaurantName = "Le Bon Coin";
 const heroImage =
@@ -41,7 +42,6 @@ const translations = {
       ["blog", "Blog"],
       ["contact", "Contact"],
     ],
-    login: "Connexion",
     order: "Commander",
     search: "Rechercher un plat...",
     heroKicker: "Meilleur fast-food en ville",
@@ -77,7 +77,6 @@ const translations = {
       ["blog", "Blog"],
       ["contact", "Contact"],
     ],
-    login: "Login",
     order: "Order",
     search: "Search a meal...",
     heroKicker: "Best fast-food in town",
@@ -136,13 +135,14 @@ function getApiBaseUrl() {
   return `${window.location.protocol}//${window.location.hostname}:8001`;
 }
 
-export default function RestaurantLandingPage({ onLoginClick, apiBaseUrl = getApiBaseUrl() }) {
+export default function RestaurantLandingPage({ apiBaseUrl = getApiBaseUrl() }) {
   const [language, setLanguage] = useState("fr");
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
   const [publicMenu, setPublicMenu] = useState(null);
   const [orderMessage, setOrderMessage] = useState("");
   const [isOrdering, setIsOrdering] = useState(false);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(() => readOfflineQueue().length);
   const t = translations[language];
   const restaurant = publicMenu?.restaurant;
   const brand = {
@@ -166,6 +166,24 @@ export default function RestaurantLandingPage({ onLoginClick, apiBaseUrl = getAp
       .catch(() => setPublicMenu(null));
   }, [apiBaseUrl]);
 
+  useEffect(() => {
+    function refreshQueue() {
+      setOfflineQueueCount(readOfflineQueue().length);
+    }
+    async function syncWhenOnline() {
+      const result = await flushOfflineQueue(apiBaseUrl);
+      refreshQueue();
+      if (result.synced > 0) setOrderMessage(`${result.synced} action(s) synchronisée(s).`);
+    }
+    window.addEventListener("online", syncWhenOnline);
+    window.addEventListener("offline-queue-changed", refreshQueue);
+    if (navigator.onLine) syncWhenOnline();
+    return () => {
+      window.removeEventListener("online", syncWhenOnline);
+      window.removeEventListener("offline-queue-changed", refreshQueue);
+    };
+  }, [apiBaseUrl]);
+
   function scrollToSection(id) {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -187,19 +205,20 @@ export default function RestaurantLandingPage({ onLoginClick, apiBaseUrl = getAp
     setIsOrdering(true);
     setOrderMessage("");
     const formData = new FormData(event.currentTarget);
+    const payload = {
+      customer_name: formData.get("customer_name"),
+      customer_phone: formData.get("customer_phone"),
+      customer_address: formData.get("customer_address"),
+      notes: formData.get("notes"),
+      fulfillment_type: formData.get("fulfillment_type"),
+      payment_method: formData.get("payment_method"),
+      items: cart.map((item) => ({ menu_item_id: item.id, quantity: item.quantity })),
+    };
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/orders/public/${restaurant.slug}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customer_name: formData.get("customer_name"),
-          customer_phone: formData.get("customer_phone"),
-          customer_address: formData.get("customer_address"),
-          notes: formData.get("notes"),
-          fulfillment_type: formData.get("fulfillment_type"),
-          payment_method: formData.get("payment_method"),
-          items: cart.map((item) => ({ menu_item_id: item.id, quantity: item.quantity })),
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -209,8 +228,18 @@ export default function RestaurantLandingPage({ onLoginClick, apiBaseUrl = getAp
       setCart([]);
       event.currentTarget.reset();
       setOrderMessage(`Commande ${data.order_number} reçue. Le restaurant va vous contacter.`);
-    } catch {
-      setOrderMessage(`API indisponible sur ${apiBaseUrl}. Démarrez le backend puis réessayez.`);
+    } catch (error) {
+      if (isNetworkError(error)) {
+        enqueueOfflineAction({
+          label: "Commande visiteur",
+          requests: [{ path: `/api/v1/orders/public/${restaurant.slug}`, method: "POST", body: payload }],
+        });
+        setCart([]);
+        event.currentTarget.reset();
+        setOrderMessage("Connexion indisponible. Votre commande est enregistrée localement et sera envoyée automatiquement au retour du réseau.");
+      } else {
+        setOrderMessage(friendlyNetworkMessage(error, "Commande impossible pour le moment."));
+      }
     } finally {
       setIsOrdering(false);
     }
@@ -225,9 +254,21 @@ export default function RestaurantLandingPage({ onLoginClick, apiBaseUrl = getAp
         language={language}
         setLanguage={setLanguage}
         cartCount={cartCount}
-        onLoginClick={onLoginClick}
         onNavigate={scrollToSection}
       />
+      {offlineQueueCount > 0 && (
+        <div className="mx-auto mt-4 flex max-w-7xl flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm font-bold text-amber-800 md:flex-row md:items-center md:justify-between">
+          <span>{offlineQueueCount} action(s) en attente de synchronisation.</span>
+          <span className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => flushOfflineQueue(apiBaseUrl).then(() => setOfflineQueueCount(readOfflineQueue().length))} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-800 shadow-sm">
+              Synchroniser
+            </button>
+            <button type="button" onClick={() => { clearOfflineQueue(); setOfflineQueueCount(0); }} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-red-600 shadow-sm">
+              Vider
+            </button>
+          </span>
+        </div>
+      )}
 
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-6">
         <CategoriesSection t={t} categories={categories} brand={brand} />
@@ -244,7 +285,7 @@ export default function RestaurantLandingPage({ onLoginClick, apiBaseUrl = getAp
   );
 }
 
-function HeroSection({ t, restaurant, brand, language, setLanguage, cartCount, onLoginClick, onNavigate }) {
+function HeroSection({ t, restaurant, brand, language, setLanguage, cartCount, onNavigate }) {
   const displayName = restaurant?.name ?? restaurantName;
   return (
     <section id="home" className="relative min-h-[460px] overflow-hidden bg-black px-5 py-6 text-white md:px-10">
@@ -282,9 +323,6 @@ function HeroSection({ t, restaurant, brand, language, setLanguage, cartCount, o
               </span>
             </button>
             <LanguageToggle language={language} setLanguage={setLanguage} />
-            <button type="button" onClick={onLoginClick} className="h-11 rounded-lg border border-white/25 px-5 text-sm font-black text-white transition hover:bg-white hover:text-black">
-              {t.login}
-            </button>
             <button type="button" onClick={() => onNavigate("menu")} className="hidden h-11 rounded-lg px-6 text-sm font-black text-white shadow-xl shadow-red-950/30 md:block" style={{ backgroundColor: brand.primary }}>
               {t.order}
             </button>

@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.modules.catalog.classification import classify_sale_channel
 from app.modules.menu.models import CategoryModel, DishModel
 from app.modules.menu.schemas import CategoryCreate, DishCreate, DishUpdate
 
@@ -52,6 +53,13 @@ class MenuService:
             image_url=dish_data.image_url,
             is_available=dish_data.is_available,
         )
+        category = db.get(CategoryModel, dish.category_id) if dish.category_id else None
+        dish.sale_channel = classify_sale_channel(
+            dish.name,
+            dish.description,
+            category.name if category else None,
+            category.description if category else None,
+        )
         db.add(dish)
         db.commit()
         db.refresh(dish)
@@ -85,6 +93,13 @@ class MenuService:
 
         for key, value in update_data.items():
             setattr(dish, key, value)
+        category = db.get(CategoryModel, dish.category_id) if dish.category_id else None
+        dish.sale_channel = classify_sale_channel(
+            dish.name,
+            dish.description,
+            category.name if category else None,
+            category.description if category else None,
+        )
         db.commit()
         db.refresh(dish)
         return dish

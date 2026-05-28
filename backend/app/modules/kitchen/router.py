@@ -6,7 +6,7 @@ from .models import KitchenTicketModel, KitchenStatus
 from .schemas import KitchenTicketCreate, KitchenTicketUpdateStatus, KitchenTicketResponse
 
 router = APIRouter(
-    prefix="/api/kitchen",
+    prefix="/kitchen",
     tags=["Kitchen / Cuisine"]
 )
 
@@ -19,7 +19,7 @@ def create_kitchen_ticket(obj_in: KitchenTicketCreate, db: Session = Depends(get
         item_name=obj_in.item_name,
         quantity=obj_in.quantity,
         notes=obj_in.notes,
-        status=KitchenStatus.PENDING
+        status=KitchenStatus.EN_ATTENTE
     )
     db.add(db_ticket)
     db.commit()
@@ -31,11 +31,11 @@ def create_kitchen_ticket(obj_in: KitchenTicketCreate, db: Session = Depends(get
 @router.get("/tickets/active", response_model=List[KitchenTicketResponse])
 def get_active_kitchen_tickets(db: Session = Depends(get_db)):
     tickets = db.query(KitchenTicketModel).filter(
-        KitchenTicketModel.status != KitchenStatus.SERVED
+        KitchenTicketModel.status != KitchenStatus.SERVIE
     ).order_by(KitchenTicketModel.created_at.asc()).all()
     return tickets
 
-# 3. METTRE À JOUR LE STATUT D'UN PLAT (PENDING -> COOKING -> READY -> SERVED)
+# 3. METTRE À JOUR LE STATUT D'UN PLAT (En attente -> En préparation -> Prête -> Servie)
 @router.patch("/ticket/{ticket_id}/status", response_model=KitchenTicketResponse)
 def update_ticket_status(ticket_id: int, obj_in: KitchenTicketUpdateStatus, db: Session = Depends(get_db)):
     db_ticket = db.query(KitchenTicketModel).filter(KitchenTicketModel.id == ticket_id).first()

@@ -1,118 +1,187 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { tableApi } from '../services/tableApi';
 
-export default function TableSessionModal({ table, onClose, onOpenMenuForOrder }) {
+export default function TableSessionModal({ table, currentUser, onClose, onOpenMenuForOrder }) {
   const [activeOrders, setActiveOrders] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  // Simuler l'utilisateur actuellement connecté (Reine)
-  const currentUserId = 1; 
-  const currentUserName = "Reine";
+  const [partySize, setPartySize] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (table && table.status === 'OCCUPIED') {
+    let mounted = true;
+    async function loadActiveOrders() {
       setLoading(true);
-      // Ici, on va normalement requêter l'API de ton collègue pour récupérer 
-      // les commandes actives liées à cette table.
-      // Pour le test, on simule deux factures en cours sur cette même table :
-      setTimeout(() => {
-        setActiveOrders([
-          { id: 1024, server_id: 1, server_name: "Reine", total_amount: 4500, status: "PENDING" },
-          { id: 1025, server_id: 2, server_name: "Florence", total_amount: 12000, status: "PREPARING" }
-        ]);
-        setLoading(false);
-      }, 500);
-    } else {
-      setActiveOrders([]);
+      setError('');
+      try {
+        const data = await tableApi.getActiveOrders(table.id);
+        if (mounted) setActiveOrders(data);
+      } catch (err) {
+        if (mounted) setError(err.message || 'Impossible de charger les commandes actives.');
+      } finally {
+        if (mounted) setLoading(false);
+      }
     }
+    if (table) loadActiveOrders();
+    return () => {
+      mounted = false;
+    };
   }, [table]);
+
+  const otherServerOrders = useMemo(
+    () => activeOrders.filter((order) => order.server_id && order.server_id !== currentUser?.id),
+    [activeOrders, currentUser?.id]
+  );
+  const currentServerOrders = useMemo(
+    () => activeOrders.filter((order) => order.server_id === currentUser?.id),
+    [activeOrders, currentUser?.id]
+  );
+  const occupiedSeats = useMemo(
+    () => activeOrders.reduce((total, order) => total + Math.max(1, Number(order.party_size || 1)), 0),
+    [activeOrders]
+  );
+  const freeSeats = Math.max(0, Number(table?.capacity || 0) - occupiedSeats);
+  const requestedSeats = Math.max(1, Number(partySize || 1));
+  const canCreateOrder = requestedSeats <= freeSeats;
 
   if (!table) return null;
 
-  // Action : Ouvrir une toute nouvelle commande/facture sur cette table
-  const handleCreateNewOrder = async () => {
-    try {
-      // 1. Si la table était libre, on passe son statut à OCCUPIED dans le backend
-      if (table.status === 'FREE') {
-        await tableApi.updateTableStatus(table.id, 'OCCUPIED');
-      }
-      
-      // 2. Ici on appellera l'API de ton collègue pour créer la commande en base de données
-      // ex: const newOrder = await orderApi.createOrder({ table_id: table.id, server_id: currentUserId })
-      const mockNewOrderId = Math.floor(Math.random() * 1000) + 2000;
+  async function createSeparateOrder() {
+    if (!canCreateOrder) {
+      setError(`Places insuffisantes: ${freeSeats} place(s) libre(s) sur ${table.capacity}.`);
+      return;
+    }
 
-      // 3. On bascule la serveuse vers l'écran du menu (Sprint 3) avec l'ID de la nouvelle commande
-      onOpenMenuForOrder(mockNewOrderId, table.number);
+    try {
+      const result = await tableApi.createOrder(table.id, { party_size: requestedSeats });
+      onOpenMenuForOrder(result.order.id, table.name || table.number);
       onClose();
     } catch (err) {
-      alert("Erreur lors de l'ouverture de la commande.");
+      setError(err.message || "Erreur lors de l'ouverture de la commande.");
     }
-  };
+  }
+
+  function openExistingOrder(order) {
+    onOpenMenuForOrder(order.id, table.name || table.number);
+    onClose();
+  }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
-        
-        {/* En-tête */}
-        <div className="p-4 bg-gray-900 text-white flex justify-between items-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl">
+        <div className="flex items-center justify-between bg-[#070528] p-4 text-white">
           <div>
-            <h3 className="text-lg font-bold">Table {table.number}</h3>
-            <p className="text-xs text-gray-400">Capacité : {table.capacity} personnes</p>
+            <h3 className="text-lg font-black">Table {table.name || table.number}</h3>
+            <p className="text-xs font-semibold text-white/70">
+              {occupiedSeats}/{table.capacity} place(s) occupée(s) · {freeSeats} libre(s)
+            </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white font-bold text-lg">&times;</button>
+          <button type="button" onClick={onClose} className="text-2xl font-black text-white/70 hover:text-white">&times;</button>
         </div>
 
-        {/* Corps de la Modal */}
-        <div className="p-6 space-y-6">
-          
-          {/* CAS 1 : LA TABLE EST OCCUPÉE (Gestion des factures multiples/serveuses) */}
-          {table.status === 'OCCUPIED' && (
-            <div className="space-y-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Factures actives sur cette table :</p>
-              
-              {loading ? (
-                <p className="text-sm text-gray-400">Chargement des factures...</p>
-              ) : (
-                <div className="space-y-2">
-                  {activeOrders.map((order) => (
-                    <div key={order.id} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
-                      <div>
-                        <p className="text-sm font-bold text-gray-800">Commande #{order.id}</p>
-                        <p className="text-xs text-gray-500">Serveuse : <span className="font-medium text-gray-700">{order.server_name}</span></p>
-                        <p className="text-xs text-blue-600 font-semibold mt-1">{order.total_amount} XAF</p>
-                      </div>
-                      
-                      <button 
-                        onClick={() => onOpenMenuForOrder(order.id, table.number)}
-                        className="px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Compléter la note
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <hr className="my-4 border-gray-100" />
+        <div className="space-y-5 p-6">
+          {loading && <p className="text-sm font-semibold text-slate-500">Chargement des commandes actives...</p>}
+          {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>}
+
+          {!loading && otherServerOrders.length > 0 && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+              <p className="text-sm font-black text-orange-900">
+                Il y a déjà une commande active sur cette table gérée par une autre serveuse.
+              </p>
+              <p className="mt-1 text-sm font-semibold text-orange-800">
+                Voulez-vous ouvrir une nouvelle commande séparée ?
+              </p>
             </div>
           )}
 
-          {/* CAS 2 : LA TABLE EST LIBRE */}
-          {table.status === 'FREE' && (
-            <div className="text-center py-4">
-              <div className="w-12 h-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto text-xl font-bold">✓</div>
-              <p className="text-sm text-gray-600 mt-3">Cette table est actuellement libre. Aucun client n'y est installé.</p>
+          {!loading && currentServerOrders.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-xs font-black uppercase text-slate-500">Vos commandes actives</p>
+              {currentServerOrders.map((order) => (
+                <OrderRow key={order.id} order={order} onOpen={() => openExistingOrder(order)} />
+              ))}
             </div>
           )}
 
-          {/* Bouton d'action principal : Toujours disponible pour ouvrir un compte séparé */}
-          <button
-            onClick={handleCreateNewOrder}
-            className="w-full bg-blue-600 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            {table.status === 'OCCUPIED' ? '+ Ouvrir une autre facture séparée' : 'Ouvrir une table / Prendre commande'}
-          </button>
+          {!loading && otherServerOrders.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-xs font-black uppercase text-slate-500">Commandes des autres serveuses</p>
+              {otherServerOrders.map((order) => (
+                <OrderRow key={order.id} order={order} disabled />
+              ))}
+            </div>
+          )}
+
+          {!loading && activeOrders.length === 0 && (
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-center">
+              <p className="text-sm font-black text-emerald-800">Cette table est libre.</p>
+              <p className="mt-1 text-xs font-semibold text-emerald-700">Aucune commande active n'est rattachée à cette table.</p>
+            </div>
+          )}
+
+          {!loading && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <label className="text-xs font-black uppercase text-slate-500" htmlFor="party-size">
+                Nombre de personnes à installer
+              </label>
+              <div className="mt-2 flex items-center gap-3">
+                <input
+                  id="party-size"
+                  type="number"
+                  min="1"
+                  max={Math.max(1, freeSeats)}
+                  value={partySize}
+                  onChange={(event) => setPartySize(event.target.value)}
+                  className="h-11 w-28 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-800 outline-none focus:border-[#f04438]"
+                />
+                <p className={`text-sm font-bold ${canCreateOrder ? 'text-emerald-700' : 'text-red-600'}`}>
+                  {canCreateOrder
+                    ? `${freeSeats - requestedSeats} place(s) resteront libres.`
+                    : `Seulement ${freeSeats} place(s) libre(s).`}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={createSeparateOrder}
+              disabled={!canCreateOrder || loading || freeSeats <= 0}
+              className="h-11 rounded-lg bg-[#f04438] px-4 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {otherServerOrders.length > 0 ? 'Oui' : 'Ouvrir une commande'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-11 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-700"
+            >
+              Annuler
+            </button>
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function OrderRow({ order, onOpen, disabled = false }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
+      <div>
+        <p className="text-sm font-black text-slate-900">Commande #{order.order_number}</p>
+        <p className="mt-1 text-xs font-semibold text-slate-500">Serveuse : {order.server_name}</p>
+        <p className="mt-1 text-xs font-semibold text-slate-500">{Number(order.party_size || 1)} personne(s)</p>
+        <p className="mt-1 text-xs font-black text-[#f04438]">{Number(order.total_amount || 0).toLocaleString('fr-FR')} FCFA</p>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onOpen}
+        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Compléter
+      </button>
     </div>
   );
 }

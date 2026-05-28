@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, has_permission, require_tenant_user
+from app.modules.audit.service import log_action
 from app.modules.menu.models import CategoryModel, DishModel
 from app.modules.menu.schemas import CategoryCreate, CategoryResponse, DishCreate, DishResponse, DishUpdate, PublicRestaurantMenu
 from app.modules.menu.services import MenuService
@@ -113,11 +114,22 @@ def create_new_category(
     db: Session = Depends(get_db),
 ):
     assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_UPDATE, Permission.KITCHEN_UPDATE))
-    return MenuService.create_category(
+    created = MenuService.create_category(
         db=db,
         restaurant_id=current_user.restaurant_id,
         category_data=category,
     )
+    log_action(
+        db,
+        current_user,
+        "menu.category_create",
+        "menu_category",
+        created.id,
+        f"Creation categorie carte {created.name}",
+        {"name": created.name},
+    )
+    db.commit()
+    return created
 
 
 @router.get("/categories/restaurant/{restaurant_id}", response_model=list[CategoryResponse])
@@ -126,7 +138,7 @@ def get_restaurant_categories(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_READ, Permission.KITCHEN_READ))
+    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_READ, Permission.KITCHEN_READ, Permission.SERVICE_READ))
     if restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=403, detail="Restaurant non autorise")
     return MenuService.get_categories_by_restaurant(db=db, restaurant_id=current_user.restaurant_id)
@@ -139,6 +151,8 @@ def delete_category(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+    category = db.get(CategoryModel, category_id)
+    category_name = category.name if category else None
     success = MenuService.delete_category(
         db=db,
         restaurant_id=current_user.restaurant_id,
@@ -146,6 +160,16 @@ def delete_category(
     )
     if not success:
         raise HTTPException(status_code=404, detail="Categorie non trouvee")
+    log_action(
+        db,
+        current_user,
+        "menu.category_delete",
+        "menu_category",
+        category_id,
+        f"Suppression categorie carte {category_name or category_id}",
+        {"name": category_name},
+    )
+    db.commit()
     return {"message": "Categorie supprimee avec succes"}
 
 
@@ -163,6 +187,16 @@ def create_new_dish(
     )
     if not created:
         raise HTTPException(status_code=400, detail="Categorie invalide pour ce restaurant")
+    log_action(
+        db,
+        current_user,
+        "menu.dish_create",
+        "menu_dish",
+        created.id,
+        f"Creation plat carte {created.name}",
+        {"name": created.name, "price": created.price, "category_id": created.category_id},
+    )
+    db.commit()
     return created
 
 
@@ -173,7 +207,7 @@ def get_category_dishes(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_READ, Permission.KITCHEN_READ))
+    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_READ, Permission.KITCHEN_READ, Permission.SERVICE_READ))
     if not MenuService.category_belongs_to_restaurant(db, current_user.restaurant_id, category_id):
         raise HTTPException(status_code=404, detail="Categorie introuvable")
     return MenuService.get_dishes_by_category(
@@ -200,6 +234,16 @@ def update_dish_info(
     )
     if not updated_dish:
         raise HTTPException(status_code=404, detail="Plat introuvable")
+    log_action(
+        db,
+        current_user,
+        "menu.dish_update",
+        "menu_dish",
+        updated_dish.id,
+        f"Modification plat carte {updated_dish.name}",
+        {"name": updated_dish.name, "price": updated_dish.price, "is_available": updated_dish.is_available},
+    )
+    db.commit()
     return updated_dish
 
 
@@ -217,6 +261,16 @@ def toggle_dish_status(
     )
     if not updated_dish:
         raise HTTPException(status_code=404, detail="Plat introuvable")
+    log_action(
+        db,
+        current_user,
+        "menu.dish_availability",
+        "menu_dish",
+        updated_dish.id,
+        f"Disponibilite plat carte {updated_dish.name}: {'disponible' if updated_dish.is_available else 'indisponible'}",
+        {"name": updated_dish.name, "is_available": updated_dish.is_available},
+    )
+    db.commit()
     return updated_dish
 
 
@@ -227,6 +281,8 @@ def delete_dish(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+    dish = db.get(DishModel, dish_id)
+    dish_name = dish.name if dish else None
     success = MenuService.delete_dish(
         db=db,
         restaurant_id=current_user.restaurant_id,
@@ -234,4 +290,14 @@ def delete_dish(
     )
     if not success:
         raise HTTPException(status_code=404, detail="Plat introuvable")
+    log_action(
+        db,
+        current_user,
+        "menu.dish_delete",
+        "menu_dish",
+        dish_id,
+        f"Suppression plat carte {dish_name or dish_id}",
+        {"name": dish_name},
+    )
+    db.commit()
     return {"message": "Le plat a ete retire du menu avec succes"}

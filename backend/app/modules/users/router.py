@@ -9,6 +9,7 @@ from app.dependencies import (
     assert_staff_role,
     require_tenant_user,
 )
+from app.modules.audit.service import log_action
 from app.modules.branches.models import Branch
 from app.modules.permissions.models import Permission, ROLE_DEFAULT_PERMISSIONS, Role
 from app.modules.permissions.schemas import PermissionGroupPublic, PermissionPublic, RolePresetPublic
@@ -117,6 +118,15 @@ def create_user(
     db.add(user)
     db.flush()
     replace_user_permissions(db, user, payload.permissions, current_user.id)
+    log_action(
+        db,
+        current_user,
+        "user.create",
+        "user",
+        user.id,
+        f"Création utilisateur {user.username}",
+        {"role": user.role.value, "email": user.email},
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -191,6 +201,15 @@ def update_user(
     if payload.permissions is not None:
         replace_user_permissions(db, user, payload.permissions, current_user.id)
 
+    log_action(
+        db,
+        current_user,
+        "user.update",
+        "user",
+        user.id,
+        f"Modification utilisateur {user.username}",
+        {"role": user.role.value, "is_active": user.is_active},
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -215,6 +234,15 @@ def update_user_status(
         raise HTTPException(status_code=400, detail="Vous ne pouvez pas desactiver votre propre compte")
 
     user.is_active = payload.is_active
+    log_action(
+        db,
+        current_user,
+        "user.status_update",
+        "user",
+        user.id,
+        f"{'Activation' if user.is_active else 'Désactivation'} utilisateur {user.username}",
+        {"is_active": user.is_active},
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -236,6 +264,15 @@ def update_user_permissions(
     assert_managed_user(current_user, user)
 
     replace_user_permissions(db, user, payload.permissions, current_user.id)
+    log_action(
+        db,
+        current_user,
+        "user.permissions_update",
+        "user",
+        user.id,
+        f"Modification permissions utilisateur {user.username}",
+        {"permissions": [permission.value for permission in payload.permissions]},
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -263,6 +300,15 @@ def delete_user(
         {UserPermission.granted_by_id: None}
     )
     db.query(UserPermission).filter(UserPermission.user_id == user.id).delete()
+    log_action(
+        db,
+        current_user,
+        "user.delete",
+        "user",
+        user.id,
+        f"Suppression utilisateur {user.username}",
+        {"role": user.role.value, "email": user.email},
+    )
     db.delete(user)
     db.commit()
     return None

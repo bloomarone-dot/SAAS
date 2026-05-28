@@ -1,129 +1,187 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { DashboardIcon } from '@/components/dashboard/icons';
 import { kitchenApi } from '../services/kitchenApi';
 
-export default function KitchenDisplay() {
+const columns = [
+  { key: 'En attente', title: 'En attente', tone: 'orange', action: 'Lancer la préparation' },
+  { key: 'En préparation', title: 'En préparation', tone: 'blue', action: 'Marquer prête' },
+  { key: 'Prête', title: 'Prêtes', tone: 'green', action: 'Marquer servie' },
+];
+
+const nextStatus = { 'En attente': 'En préparation', 'En préparation': 'Prête', Prête: 'Servie' };
+
+export default function KitchenDisplay({ filter = 'orders' }) {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Charger les tickets de cuisine au démarrage et rafraîchir automatiquement
   useEffect(() => {
+    let mounted = true;
     async function loadTickets() {
       try {
         const data = await kitchenApi.getActiveTickets();
-        setTickets(data);
+        if (mounted) {
+          setTickets(data);
+          setError('');
+        }
       } catch (err) {
-        setError('Impossible de charger les commandes en cuisine.');
+        if (mounted) setError('Impossible de charger les commandes en cuisine.');
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     }
 
     loadTickets();
-    // Système de rafraîchissement automatique toutes les 10 secondes
-    const interval = setInterval(loadTickets, 10000);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(loadTickets, 10000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
   }, []);
 
-  // Action : Faire progresser le statut du plat
-  const handleStatusChange = async (ticketId, currentStatus) => {
-    let nextStatus = 'COOKING';
-    if (currentStatus === 'COOKING') nextStatus = 'READY';
-    if (currentStatus === 'READY') nextStatus = 'SERVED';
+  const visibleColumns = useMemo(() => {
+    if (filter === 'preparation') return columns.filter((column) => column.key === 'En préparation');
+    if (filter === 'ready') return columns.filter((column) => column.key === 'Prête');
+    return columns;
+  }, [filter]);
 
+  const stats = useMemo(() => ({
+    EN_ATTENTE: tickets.filter((ticket) => ticket.status === 'En attente').length,
+    EN_PREPARATION: tickets.filter((ticket) => ticket.status === 'En préparation').length,
+    PRETE: tickets.filter((ticket) => ticket.status === 'Prête').length,
+    URGENT: tickets.filter((ticket) => minutesSince(ticket.created_at) >= 20).length,
+  }), [tickets]);
+
+  async function advance(ticket) {
+    const status = nextStatus[ticket.status];
+    if (!status) return;
     try {
-      await kitchenApi.updateTicketStatus(ticketId, nextStatus);
-      // Mettre à jour l'affichage localement sans attendre le rechargement
-      setTickets((prev) =>
-        prev
-          .map((t) => (t.id === ticketId ? { ...t, status: nextStatus } : t))
-          .filter((t) => t.status !== 'SERVED') // On retire si c'est déjà servi
-      );
-    } catch (err) {
-      alert('Erreur lors du changement de statut.');
+      await kitchenApi.updateTicketStatus(ticket.id, status);
+      setTickets((current) => current
+        .map((item) => (item.id === ticket.id ? { ...item, status } : item))
+        .filter((item) => item.status !== 'Servie'));
+    } catch {
+      setError('Mise a jour du ticket impossible.');
     }
-  };
+  }
 
-  if (loading) return <div className="p-6 text-sm text-gray-500">Chargement de l'écran cuisine...</div>;
+  if (loading) return <div className="p-6 text-sm font-semibold text-slate-500">Chargement de l'ecran cuisine...</div>;
 
   return (
-    <div className="p-6 bg-gray-900 min-h-screen text-white space-y-6">
-      {/* En-tête de l'écran cuisine */}
-      <div className="border-b border-gray-800 pb-4 flex justify-between items-center">
+    <section className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-black text-[#070528]">Dashboard Cuisine</h1>
+        <p className="mt-1 text-sm font-medium text-slate-500">Gerez les commandes en temps reel et suivez l'avancement en cuisine.</p>
+      </div>
+
+      {error && <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-600">{error}</div>}
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <Metric icon="Clock3" label="Commandes en attente" value={stats.EN_ATTENTE} tone="orange" />
+        <Metric icon="ChefHat" label="En préparation" value={stats.EN_PREPARATION} tone="blue" />
+        <Metric icon="CheckCircle2" label="Prêtes" value={stats.PRETE} tone="green" />
+        <Metric icon="AlertTriangle" label="Commandes urgentes" value={stats.URGENT} tone="red" />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_280px]">
+        <div className="grid gap-5 lg:grid-cols-3">
+          {visibleColumns.map((column) => {
+            const items = tickets.filter((ticket) => ticket.status === column.key);
+            return (
+              <div key={column.key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-black text-[#070528]">{column.title}</h2>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{items.length}</span>
+                </div>
+                <div className="space-y-3">
+                  {items.map((ticket) => (
+                    <TicketCard key={ticket.id} ticket={ticket} action={column.action} onAdvance={() => advance(ticket)} />
+                  ))}
+                  {items.length === 0 && <p className="py-10 text-center text-sm font-semibold text-slate-400">Aucune commande.</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <aside className="space-y-4">
+          <Panel title="Commandes urgentes">
+            {tickets.filter((ticket) => minutesSince(ticket.created_at) >= 20).slice(0, 4).map((ticket) => (
+              <div key={ticket.id} className="border-b border-slate-100 py-3 last:border-0">
+                <p className="font-black text-[#070528]">#{ticket.order_id}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">Table {ticket.table_number} - {ticket.quantity}x {ticket.item_name}</p>
+                <p className="mt-2 text-xs font-black text-red-500">{minutesSince(ticket.created_at)} min</p>
+              </div>
+            ))}
+          </Panel>
+          <Panel title="Avaries enregistrees">
+            {['Four principal', 'Friteuse', 'Refrigerateur 2'].map((item) => (
+              <div key={item} className="flex items-center gap-2 py-2 text-sm font-semibold text-slate-600">
+                <DashboardIcon name="AlertTriangle" size={15} className="text-red-500" />
+                {item}
+              </div>
+            ))}
+          </Panel>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function Metric({ icon, label, value, tone }) {
+  const colors = { orange: 'bg-orange-50 text-orange-500', blue: 'bg-blue-50 text-blue-600', green: 'bg-emerald-50 text-emerald-600', red: 'bg-red-50 text-red-500' };
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center gap-4">
+        <div className={`flex h-12 w-12 items-center justify-center rounded-full ${colors[tone]}`}>
+          <DashboardIcon name={icon} size={22} />
+        </div>
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-white">ÉCRAN CUISINE (KDS)</h1>
-          <p className="text-xs text-gray-400">Suivi des préparations et des cuissons en temps réel</p>
-        </div>
-        <div className="bg-gray-800 px-4 py-2 rounded-lg text-sm font-bold text-green-400 border border-gray-700">
-          {tickets.length} Plats en cours
+          <p className="text-xs font-bold text-slate-500">{label}</p>
+          <p className="mt-2 text-2xl font-black text-[#070528]">{value}</p>
         </div>
       </div>
-
-      {error && (
-        <div className="p-3 text-sm bg-red-900 text-red-200 rounded-md border border-red-800">
-          {error}
-        </div>
-      )}
-
-      {/* Grille des bons de commande */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {tickets.map((ticket) => {
-          // Logique visuelle selon l'état de préparation
-          let cardBg = "bg-yellow-50 border-yellow-200 text-yellow-900";
-          let btnText = "Lancer la cuisson";
-          let btnStyle = "bg-yellow-600 hover:bg-yellow-700 text-white";
-
-          if (ticket.status === 'COOKING') {
-            cardBg = "bg-blue-50 border-blue-200 text-blue-900";
-            btnText = "Marquer comme Prêt";
-            btnStyle = "bg-blue-600 hover:bg-blue-700 text-white";
-          } else if (ticket.status === 'READY') {
-            cardBg = "bg-green-50 border-green-200 text-green-900";
-            btnText = "Récupéré par la serveuse";
-            btnStyle = "bg-green-600 hover:bg-green-700 text-white";
-          }
-
-          return (
-            <div key={ticket.id} className={`border rounded-xl shadow-md p-4 flex flex-col justify-between ${cardBg}`}>
-              <div>
-                <div className="flex justify-between items-start border-b border-black border-opacity-10 pb-2 mb-3">
-                  <span className="text-xl font-black">TABLE {ticket.table_number}</span>
-                  <span className="text-xs font-mono font-bold bg-white bg-opacity-60 px-2 py-0.5 rounded">
-                    #{ticket.order_id}
-                  </span>
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-lg font-bold leading-tight">
-                    <span className="text-xl font-extrabold mr-2">x{ticket.quantity}</span> 
-                    {ticket.item_name}
-                  </p>
-                  {ticket.notes && (
-                    <p className="text-xs font-medium italic bg-red-100 text-red-800 p-1.5 rounded mt-1">
-                      ⚠️ Note : {ticket.notes}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-6">
-                <button
-                  onClick={() => handleStatusChange(ticket.id, ticket.status)}
-                  className={`w-full py-2.5 px-4 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${btnStyle}`}
-                >
-                  {btnText}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {tickets.length === 0 && (
-        <div className="text-center py-20 text-gray-500 text-sm">
-          Aucun plat en attente pour le moment. La cuisine est à jour !
-        </div>
-      )}
     </div>
   );
+}
+
+function TicketCard({ ticket, action, onAdvance }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-black text-[#070528]">#{ticket.order_id}</p>
+        <span className="text-xs font-black text-orange-500">{formatTime(ticket.created_at)}</span>
+      </div>
+      <p className="mt-2 text-xs font-semibold text-slate-500">Table {ticket.table_number}</p>
+      <p className="mt-3 text-sm font-bold text-slate-700">{ticket.quantity}x {ticket.item_name}</p>
+      {ticket.notes && <p className="mt-3 rounded bg-slate-50 p-2 text-xs font-semibold text-slate-500">{ticket.notes}</p>}
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <span className="text-xs font-black text-slate-500">{minutesSince(ticket.created_at)} min</span>
+        <button type="button" onClick={onAdvance} className="rounded-lg bg-[#f04438] px-3 py-2 text-xs font-black text-white">
+          {action}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Panel({ title, children }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 className="mb-3 text-base font-black text-[#070528]">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function minutesSince(value) {
+  const created = new Date(value).getTime();
+  if (Number.isNaN(created)) return 0;
+  return Math.max(0, Math.round((Date.now() - created) / 60000));
+}
+
+function formatTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--:--';
+  return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }

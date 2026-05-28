@@ -4,7 +4,7 @@ from datetime import datetime
 from .models import KitchenStatus
 
 class KitchenTicketBase(BaseModel):
-    order_id: int
+    order_id: str
     table_number: str
     item_name: str
     quantity: int = Field(default=1, ge=1)

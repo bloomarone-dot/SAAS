@@ -65,7 +65,7 @@ def read_summary(db: Session, restaurant_id: str, start: datetime, end: datetime
     stock_items = db.query(StockItem).filter(StockItem.restaurant_id == restaurant_id).all()
     stock_value = sum((item.quantity + item.kitchen_quantity + item.drink_quantity) * item.purchase_price for item in stock_items)
     revenue = sum(order.total_amount for order in orders)
-    paid_orders = [order for order in orders if order.status in {"Livrée", "Prête"}]
+    paid_orders = [order for order in orders if order.status in {"Payée", "Payee"}]
     gross_profit = revenue - float(damage_loss or 0)
     net_profit = gross_profit - float(expenses or 0)
     return FinanceSummaryOut(

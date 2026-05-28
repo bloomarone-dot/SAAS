@@ -14,6 +14,10 @@ class CustomerOrder(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    branch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("branches.id"), index=True, nullable=True)
+    table_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("restaurant_tables.id"), index=True, nullable=True)
+    server_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
+    party_size: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     order_number: Mapped[str] = mapped_column(String(40), unique=True, index=True, nullable=False)
     customer_name: Mapped[str] = mapped_column(String(160), nullable=False)
     customer_phone: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -43,6 +47,7 @@ class CustomerOrderItem(Base):
     order_id: Mapped[str] = mapped_column(String(36), ForeignKey("customer_orders.id"), index=True, nullable=False)
     menu_item_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("menu_items.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    sale_channel: Mapped[str] = mapped_column(String(20), default="REPAS", nullable=False, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[float] = mapped_column(Float, nullable=False)
     line_total: Mapped[float] = mapped_column(Float, nullable=False)

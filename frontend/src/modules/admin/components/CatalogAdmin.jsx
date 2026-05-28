@@ -186,9 +186,9 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
           <p className="text-xs font-black uppercase text-[#f04438]">Administrateur / Propriétaire</p>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Carte menu & produits</h1>
+          <h1 className="mt-2 text-4xl font-black text-[#070528]">Carte vendable</h1>
           <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-            Structurez les catégories, ajoutez les plats et pilotez leur disponibilité à la vente.
+            Gérez les plats et produits visibles à la vente. Les ingrédients et marchandises sont suivis dans Stock &gt; Produits stock.
           </p>
         </div>
         <button

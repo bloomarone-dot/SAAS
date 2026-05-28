@@ -1,25 +1,46 @@
-const API_URL = 'http://localhost:8000/api/kitchen'; // Ajuste le port si nécessaire
+import { friendlyNetworkMessage } from "@/utils/network";
+
+function getApiBaseUrl() {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  return `${window.location.protocol}//${window.location.hostname}:8001`;
+}
+
+async function request(path, options = {}) {
+  const token = localStorage.getItem("access_token");
+  try {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
+      ...options,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers ?? {}),
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail ?? "Requete cuisine impossible.");
+    }
+
+    if (response.status === 204) return null;
+    return response.json();
+  } catch (error) {
+    throw new Error(friendlyNetworkMessage(error, "Requete cuisine impossible."));
+  }
+}
 
 export const kitchenApi = {
-  // 1. Récupérer les tickets de cuisine actifs (en attente, en cours, prêts)
-  getActiveTickets: async () => {
-    const response = await fetch(`${API_URL}/tickets/active`);
-    if (!response.ok) {
-      throw new Error('Erreur lors de la récupération des tickets de cuisine.');
-    }
-    return response.json();
-  },
+  getActiveTickets: () => request("/kitchen/tickets/active"),
 
-  // 2. Changer le statut d'un ticket (COOKING, READY, SERVED)
-  updateTicketStatus: async (ticketId, status) => {
-    const response = await fetch(`${API_URL}/ticket/${ticketId}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+  createTicket: (ticketData) =>
+    request("/kitchen/ticket", {
+      method: "POST",
+      body: JSON.stringify(ticketData),
+    }),
+
+  updateTicketStatus: (ticketId, status) =>
+    request(`/kitchen/ticket/${ticketId}/status`, {
+      method: "PATCH",
       body: JSON.stringify({ status }),
-    });
-    if (!response.ok) {
-      throw new Error('Erreur lors de la mise à jour du statut du ticket.');
-    }
-    return response.json();
-  }
+    }),
 };

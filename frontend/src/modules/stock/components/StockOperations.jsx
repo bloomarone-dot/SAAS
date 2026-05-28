@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
+import { enqueueOfflineAction, friendlyNetworkMessage, isNetworkError } from "@/utils/network";
 
 const emptyItem = {
   name: "",
@@ -156,17 +157,21 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
   }, []);
 
   async function api(path, options = {}) {
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(options.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail ?? "Opération impossible.");
-    return data;
+    try {
+      const response = await fetch(`${apiBaseUrl}${path}`, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          ...(options.headers ?? {}),
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail ?? "Opération impossible.");
+      return data;
+    } catch (error) {
+      throw new Error(friendlyNetworkMessage(error, "Opération impossible."));
+    }
   }
 
   async function loadStock() {
@@ -299,21 +304,48 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
   async function createMovement(event) {
     event.preventDefault();
     setIsLoading(true);
-    try {
-      await api("/api/v1/stock/movements", {
-        method: "POST",
-        body: JSON.stringify({
+    const movementType = isSupplyView ? "IN" : movementForm.movement_type;
+    const movementPayload = isSupplyView
+      ? {
+          item_id: movementForm.item_id,
+          movement_type: "IN",
+          quantity: Number(movementForm.quantity || 0),
+          unit_price: Number(movementForm.unit_price || 0),
+          note: movementForm.note || null,
+        }
+      : {
           ...numberPayload(movementForm, ["quantity", "unit_price"]),
+          movement_type: movementType,
           unit_price: Number(movementForm.unit_price || 0),
           destination: movementForm.destination || null,
           note: movementForm.note || null,
-        }),
+        };
+    try {
+      await api("/api/v1/stock/movements", {
+        method: "POST",
+        body: JSON.stringify(movementPayload),
       });
-      setMovementForm({ ...emptyMovement, item_id: movementForm.item_id });
+      setMovementForm({ ...emptyMovement, movement_type: movementType, item_id: movementForm.item_id });
       await loadStock();
-      onMessage("Mouvement de stock enregistré.");
+      onMessage(isSupplyView ? "Approvisionnement enregistré en stock magasin." : "Mouvement de stock enregistré.");
     } catch (error) {
-      onMessage(error.message);
+      if (isNetworkError(error)) {
+        enqueueOfflineAction({
+          label: isSupplyView ? "Approvisionnement stock" : "Mouvement stock",
+          requests: [
+            {
+              path: "/api/v1/stock/movements",
+              method: "POST",
+              requiresAuth: true,
+              body: movementPayload,
+            },
+          ],
+        });
+        setMovementForm({ ...emptyMovement, movement_type: movementType, item_id: movementForm.item_id });
+        onMessage("Connexion indisponible. Le mouvement est mis en attente et sera synchronisé automatiquement.");
+      } else {
+        onMessage(error.message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -555,11 +587,12 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
   const isInventoryView = mode === "inventory";
   const isAccountingView = mode === "accounting";
   const isReportView = mode === "reports";
-  const showReferenceForm = isStockHome;
+  const effectiveMovementType = isSupplyView ? "IN" : movementForm.movement_type;
+  const showReferenceForm = isStockHome || isSupplyView;
   const showMovementForm = isMovementView || isSupplyView;
   const showDamageForm = isInventoryView || isAccountingView;
   const showProductionForms = isStockHome;
-  const showStockTable = isStockHome || isInventoryView;
+  const showStockTable = isStockHome || isInventoryView || isSupplyView;
   const showHistory = isMovementView || isSupplyView || isInventoryView;
   const showFinance = isAccountingView;
   const showReports = isReportView;
@@ -602,12 +635,18 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
         ))}
       </div>
 
+      {isSupplyView && <SupplyGuide />}
+
       <div className={showLeftColumn && showRightColumn ? "grid gap-6 xl:grid-cols-[0.9fr_1.1fr]" : "space-y-6"}>
         {showLeftColumn && (
         <div className="space-y-6">
           {showReferenceForm && (
           <form onSubmit={createItem} className="border border-slate-200 bg-white p-6 shadow-sm">
-            <SectionTitle title="Référence stock" icon="Package" />
+            <SectionTitle
+              title={isSupplyView ? "Créer un produit stock" : "Référence stock"}
+              subtitle={isSupplyView ? "Créez ici le produit à approvisionner s’il n’existe pas encore." : "Définissez les produits suivis dans le magasin, la cuisine ou le stock boisson."}
+              icon="Package"
+            />
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <Field name="name" label="Produit" value={itemForm.name} onChange={updateItemField} required />
               <SelectField
@@ -653,36 +692,58 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
 
           {showMovementForm && (
           <form onSubmit={createMovement} className="border border-slate-200 bg-white p-6 shadow-sm">
-            <SectionTitle title="Mouvement stock" icon="Truck" />
+            <SectionTitle
+              title={isSupplyView ? "Approvisionnement magasin" : "Mouvement stock"}
+              subtitle={isSupplyView ? "Sélectionnez un produit stock existant, puis saisissez la quantité reçue et le prix d’achat. Aucun fournisseur n’est requis." : "Enregistrez une entrée, une sortie, un transfert ou un ajustement."}
+              icon="Truck"
+            />
+            {!items.length && (
+              <div className="mt-5 border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
+                Aucun produit stock n’existe encore. Créez d’abord une référence stock dans le formulaire au-dessus.
+              </div>
+            )}
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <SelectField name="item_id" label="Produit" value={movementForm.item_id} onChange={updateMovementField} options={items.map((item) => [item.id, item.name])} required />
-              <SelectField name="movement_type" label="Type" value={movementForm.movement_type} onChange={updateMovementField} options={Object.entries(movementLabels)} required />
-              {movementForm.movement_type !== "IN" && (
+              {isSupplyView ? (
+                <div className="block">
+                  <span className="text-xs font-black text-[#070528]">Type</span>
+                  <div className="mt-2 flex h-11 items-center border border-emerald-200 bg-emerald-50 px-3 text-sm font-black text-emerald-700">
+                    Entrée vers magasin
+                  </div>
+                </div>
+              ) : (
+                <SelectField name="movement_type" label="Type" value={movementForm.movement_type} onChange={updateMovementField} options={Object.entries(movementLabels)} required />
+              )}
+              {effectiveMovementType !== "IN" && (
                 <SelectField
                   name="source_location"
-                  label={movementForm.movement_type === "TRANSFER" ? "Source" : "Stock concerné"}
+                  label={effectiveMovementType === "TRANSFER" ? "Source" : "Stock concerné"}
                   value={movementForm.source_location}
                   onChange={updateMovementField}
-                  options={getLocationOptions(movementForm.movement_type, selectedMovementItem(items, movementForm.item_id), "source")}
+                  options={getLocationOptions(effectiveMovementType, selectedMovementItem(items, movementForm.item_id), "source")}
                   required
                 />
               )}
-              {movementForm.movement_type === "TRANSFER" && (
+              {effectiveMovementType === "TRANSFER" && (
                 <SelectField
                   name="destination_location"
                   label="Destination"
                   value={movementForm.destination_location}
                   onChange={updateMovementField}
-                  options={getLocationOptions(movementForm.movement_type, selectedMovementItem(items, movementForm.item_id), "destination")}
+                  options={getLocationOptions(effectiveMovementType, selectedMovementItem(items, movementForm.item_id), "destination")}
                   required
                 />
               )}
               <Field name="quantity" label="Quantité" type="number" min="0" value={movementForm.quantity} onChange={updateMovementField} required />
               <Field name="unit_price" label="Prix unitaire achat" type="number" min="0" value={movementForm.unit_price} onChange={updateMovementField} />
-              <Field name="destination" label="Service ou motif" value={movementForm.destination} onChange={updateMovementField} />
+              {!isSupplyView && (
+                <Field name="destination" label="Service ou motif" value={movementForm.destination} onChange={updateMovementField} />
+              )}
               <Field name="note" label="Note" value={movementForm.note} onChange={updateMovementField} />
             </div>
-            <PrimaryButton disabled={isLoading || !items.length} icon="Truck">Enregistrer le mouvement</PrimaryButton>
+            <PrimaryButton disabled={isLoading || !items.length} icon="Truck">
+              {isSupplyView ? "Enregistrer l’approvisionnement" : "Enregistrer le mouvement"}
+            </PrimaryButton>
           </form>
           )}
 
@@ -806,9 +867,9 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
 function getPageCopy(mode) {
   const copy = {
     movements: ["Mouvements de stock", "Enregistrez entrées, sorties, transferts et ajustements d’inventaire."],
-    suppliers: ["Fournisseurs & livraisons", "Suivez les approvisionnements, les coûts d’achat et les entrées de stock."],
+    suppliers: ["Entrées stock", "Enregistrez une entrée simple de stock sans gestion fournisseur."],
     inventory: ["Inventaires", "Surveillez les écarts, les seuils d’alerte et la rotation des produits."],
-    purchases: ["Achats fournisseurs", "Saisissez les approvisionnements et les prix d’achat pour suivre les marges."],
+    purchases: ["Achats stock", "Saisissez les achats, les entrées et les prix d’achat pour suivre les marges."],
     accounting: ["Comptabilité stock", "Suivez la valeur du stock, les pertes et les éléments à comptabiliser."],
     reports: ["Rapports stock & finances", "Exportez les synthèses hebdomadaires et mensuelles pour le pilotage."],
   };
@@ -1018,16 +1079,39 @@ function numberPayload(payload, fields) {
   );
 }
 
-function SectionTitle({ title, icon }) {
+function SectionTitle({ title, subtitle = "Donnée utilisée dans le suivi opérationnel et comptable.", icon }) {
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
         <h2 className="text-2xl font-black text-[#070528]">{title}</h2>
-        <p className="mt-1 text-sm font-medium text-slate-500">Donnée utilisée dans le suivi opérationnel et comptable.</p>
+        <p className="mt-1 text-sm font-medium text-slate-500">{subtitle}</p>
       </div>
       <div className="flex h-11 w-11 items-center justify-center bg-[#f04438] text-white">
         <DashboardIcon name={icon} size={19} />
       </div>
+    </div>
+  );
+}
+
+function SupplyGuide() {
+  const steps = [
+    ["1", "Créer le produit", "À faire une seule fois si le produit n’existe pas encore."],
+    ["2", "Entrer la quantité", "L’entrée ajoute la quantité au stock magasin."],
+    ["3", "Contrôler la liste", "Le tableau des produits se met à jour après enregistrement."],
+  ];
+  return (
+    <div className="grid gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 md:grid-cols-3">
+      {steps.map(([number, title, text]) => (
+        <div key={number} className="flex gap-3 rounded-lg bg-white p-3 shadow-sm">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-700 text-sm font-black text-white">
+            {number}
+          </span>
+          <span>
+            <p className="text-sm font-black text-slate-900">{title}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">{text}</p>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

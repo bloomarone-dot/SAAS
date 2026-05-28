@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import CategoryForm from "../components/CategoryForm";
 import DishCard from "../components/DishCard";
-import DishForm from "../components/DishForm";
 import { menuApi } from "../services/menuApi";
 
 export default function CategoriesPage({ restaurantId, role }) {
@@ -12,6 +11,7 @@ export default function CategoriesPage({ restaurantId, role }) {
   const [dishes, setDishes] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [loadingDishes, setLoadingDishes] = useState(false);
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [error, setError] = useState("");
 
   const selectedCategory = useMemo(
@@ -67,14 +67,9 @@ export default function CategoriesPage({ restaurantId, role }) {
   }
 
   const handleCategoryCreated = (newCategory) => {
-    setCategories((prev) => [...prev, newCategory]);
+    setCategories((prev) => [newCategory, ...prev]);
     setSelectedCategoryId(newCategory.id);
-  };
-
-  const handleDishCreated = (newDish) => {
-    if (newDish.category_id === selectedCategoryId) {
-      setDishes((prev) => [...prev, newDish]);
-    }
+    setShowCategoryForm(false);
   };
 
   const handleDishUpdated = (updatedDish) => {
@@ -98,21 +93,31 @@ export default function CategoriesPage({ restaurantId, role }) {
           <p className="text-xs font-black uppercase tracking-normal text-[#f04438]">
             {role === "CUISINE" ? "Cuisine" : "Administration restaurant"}
           </p>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Catégories menu</h1>
+          <h1 className="mt-2 text-4xl font-black text-[#070528]">Catégories de la carte</h1>
           <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
             {role === "CUISINE"
-              ? "Créez les catégories de repas, ajoutez les plats et gérez leur disponibilité depuis la cuisine."
-              : "Structurez la carte par catégories et vérifiez les plats rattachés à chaque famille."}
+              ? "Consultez et créez les familles de plats utilisées dans la carte vendable."
+              : "Structurez la carte par familles avant d’y rattacher les plats vendables."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={loadCategories}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition-all hover:border-[#f04438] hover:text-[#f04438]"
-        >
-          <DashboardIcon name="Activity" size={17} />
-          Actualiser
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setShowCategoryForm((value) => !value)}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20]"
+          >
+            <DashboardIcon name={showCategoryForm ? "ChevronDown" : "Plus"} size={17} />
+            {showCategoryForm ? "Masquer le formulaire" : "Créer une catégorie"}
+          </button>
+          <button
+            type="button"
+            onClick={loadCategories}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition-all hover:border-[#f04438] hover:text-[#f04438]"
+          >
+            <DashboardIcon name="Activity" size={17} />
+            Actualiser
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -133,16 +138,63 @@ export default function CategoriesPage({ restaurantId, role }) {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-        <div className="space-y-6">
+      {showCategoryForm && (
           <CategoryForm
             restaurantId={restaurantId}
             onCategoryCreated={handleCategoryCreated}
           />
-          <DishForm
-            categories={categories}
-            onDishCreated={handleDishCreated}
-          />
+      )}
+
+      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 p-5">
+            <h2 className="text-2xl font-black text-[#070528]">Liste des catégories</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              Sélectionnez une catégorie pour voir les plats rattachés.
+            </p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {categories.length > 0 ? (
+              categories.map((category) => {
+                const isActive = category.id === selectedCategoryId;
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setSelectedCategoryId(category.id)}
+                    className={`flex w-full items-center justify-between gap-4 p-5 text-left transition-all ${
+                      isActive ? "bg-[#fff4ed]" : "bg-white hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-center gap-4">
+                      {category.image_url ? (
+                        <img src={category.image_url} alt="" className="h-12 w-12 rounded-lg object-cover" />
+                      ) : (
+                        <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
+                          <DashboardIcon name="ClipboardList" size={18} />
+                        </span>
+                      )}
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black text-[#070528]">{category.name}</span>
+                        <span className="mt-1 block truncate text-xs font-semibold text-slate-500">
+                          {category.description || "Sans description"}
+                        </span>
+                      </span>
+                    </div>
+                    <span className={`rounded px-3 py-1 text-xs font-black ${isActive ? "bg-[#f04438] text-white" : "bg-slate-100 text-slate-600"}`}>
+                      {isActive ? "Sélectionnée" : "Voir"}
+                    </span>
+                  </button>
+                );
+              })
+            ) : (
+              <EmptyState
+                icon="ClipboardList"
+                title="Aucune catégorie créée"
+                text="Créez une catégorie pour organiser les plats de la carte."
+              />
+            )}
+          </div>
         </div>
 
         <div className="border border-slate-200 bg-white shadow-sm">
@@ -187,8 +239,9 @@ export default function CategoriesPage({ restaurantId, role }) {
               </div>
             ) : (
               <EmptyState
+                icon="UtensilsCrossed"
                 title="Aucun plat dans cette catégorie"
-                text="Ajoutez un plat depuis le formulaire ou sélectionnez une autre catégorie."
+                text="Ajoutez les plats depuis le menu Plats vendables ou sélectionnez une autre catégorie."
               />
             )}
           </div>
@@ -198,11 +251,11 @@ export default function CategoriesPage({ restaurantId, role }) {
   );
 }
 
-function EmptyState({ title, text }) {
+function EmptyState({ icon = "UtensilsCrossed", title, text }) {
   return (
     <div className="px-5 py-16 text-center">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
-        <DashboardIcon name="UtensilsCrossed" size={23} />
+        <DashboardIcon name={icon} size={23} />
       </div>
       <p className="mt-4 text-lg font-black text-[#070528]">{title}</p>
       <p className="mt-1 text-sm font-medium text-slate-500">{text}</p>

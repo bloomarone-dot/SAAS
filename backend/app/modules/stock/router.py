@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
+from app.modules.audit.service import log_action
 from app.modules.permissions.models import Permission
 from app.modules.catalog.models import MenuItem
 from app.modules.stock.models import (
@@ -117,34 +118,53 @@ def apply_movement(
 @router.get("/summary", response_model=StockSummaryOut)
 def stock_summary(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_READ)
-    items = db.query(StockItem).filter(StockItem.restaurant_id == current_user.restaurant_id).all()
-    movements = db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id).all()
+    total_quantity = StockItem.quantity + StockItem.kitchen_quantity + StockItem.drink_quantity
+    item_totals = (
+        db.query(
+            func.count(StockItem.id),
+            func.coalesce(func.sum(total_quantity * StockItem.purchase_price), 0),
+            func.coalesce(func.sum(StockItem.quantity * StockItem.purchase_price), 0),
+            func.coalesce(func.sum(StockItem.kitchen_quantity * StockItem.purchase_price), 0),
+            func.coalesce(func.sum(StockItem.drink_quantity * StockItem.purchase_price), 0),
+        )
+        .filter(StockItem.restaurant_id == current_user.restaurant_id)
+        .one()
+    )
+    low_stock_count = (
+        db.query(func.count(StockItem.id))
+        .filter(StockItem.restaurant_id == current_user.restaurant_id)
+        .filter(total_quantity <= StockItem.alert_threshold)
+        .scalar()
+        or 0
+    )
+    total_entries_value = (
+        db.query(func.coalesce(func.sum(StockMovement.quantity * StockMovement.unit_price), 0))
+        .filter(StockMovement.restaurant_id == current_user.restaurant_id)
+        .filter(StockMovement.movement_type == StockMovementType.IN)
+        .scalar()
+        or 0
+    )
+    total_outputs_value = (
+        db.query(func.coalesce(func.sum(StockMovement.quantity * StockMovement.unit_price), 0))
+        .filter(StockMovement.restaurant_id == current_user.restaurant_id)
+        .filter(StockMovement.movement_type.in_([StockMovementType.OUT, StockMovementType.TRANSFER]))
+        .scalar()
+        or 0
+    )
     damage_loss = (
         db.query(func.coalesce(func.sum(StockDamage.estimated_loss), 0))
         .filter(StockDamage.restaurant_id == current_user.restaurant_id)
         .scalar()
     )
     return StockSummaryOut(
-        product_count=len(items),
-        low_stock_count=len(
-            [
-                item
-                for item in items
-                if (item.quantity + item.kitchen_quantity + item.drink_quantity) <= item.alert_threshold
-            ]
-        ),
-        stock_value=sum(
-            (item.quantity + item.kitchen_quantity + item.drink_quantity) * item.purchase_price for item in items
-        ),
-        main_stock_value=sum(item.quantity * item.purchase_price for item in items),
-        kitchen_stock_value=sum(item.kitchen_quantity * item.purchase_price for item in items),
-        drink_stock_value=sum(item.drink_quantity * item.purchase_price for item in items),
-        total_entries_value=sum(m.quantity * m.unit_price for m in movements if m.movement_type == StockMovementType.IN),
-        total_outputs_value=sum(
-            m.quantity * m.unit_price
-            for m in movements
-            if m.movement_type in {StockMovementType.OUT, StockMovementType.TRANSFER}
-        ),
+        product_count=int(item_totals[0] or 0),
+        low_stock_count=int(low_stock_count),
+        stock_value=float(item_totals[1] or 0),
+        main_stock_value=float(item_totals[2] or 0),
+        kitchen_stock_value=float(item_totals[3] or 0),
+        drink_stock_value=float(item_totals[4] or 0),
+        total_entries_value=float(total_entries_value),
+        total_outputs_value=float(total_outputs_value),
         total_damage_loss=float(damage_loss or 0),
     )
 
@@ -176,6 +196,7 @@ def create_item(payload: StockItemIn, current_user: User = Depends(require_tenan
     assert_permission(current_user, Permission.STOCK_UPDATE)
     item = StockItem(restaurant_id=current_user.restaurant_id, **payload.dict())
     db.add(item)
+    log_action(db, current_user, "stock.item_create", "stock_item", item.id, f"Création produit stock {item.name}")
     db.commit()
     db.refresh(item)
     return item
@@ -192,6 +213,7 @@ def update_item(
     item = get_item_or_404(db, item_id, current_user.restaurant_id)
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(item, field, value)
+    log_action(db, current_user, "stock.item_update", "stock_item", item.id, f"Modification produit stock {item.name}")
     db.commit()
     db.refresh(item)
     return item
@@ -235,6 +257,8 @@ def create_movement(
         payload.destination_location,
     )
     apply_movement(item, payload.movement_type, payload.quantity, source_location, destination_location)
+    if payload.movement_type == StockMovementType.IN and payload.unit_price > 0:
+        item.purchase_price = payload.unit_price
     payload_data = payload.dict()
     payload_data["source_location"] = source_location
     payload_data["destination_location"] = destination_location
@@ -244,6 +268,15 @@ def create_movement(
         **payload_data,
     )
     db.add(movement)
+    log_action(
+        db,
+        current_user,
+        "stock.movement_create",
+        "stock_movement",
+        movement.id,
+        f"Mouvement stock {payload.movement_type.value} sur {item.name}",
+        {"item_id": item.id, "quantity": payload.quantity},
+    )
     db.commit()
     db.refresh(movement)
     return movement
@@ -270,6 +303,15 @@ def create_damage(payload: StockDamageIn, current_user: User = Depends(require_t
     set_location_quantity(item, payload.location, source_quantity - payload.quantity)
     damage = StockDamage(restaurant_id=current_user.restaurant_id, **payload.dict())
     db.add(damage)
+    log_action(
+        db,
+        current_user,
+        "stock.damage_create",
+        "stock_damage",
+        damage.id,
+        f"Avarie stock {item.name}",
+        {"item_id": item.id, "quantity": payload.quantity, "estimated_loss": payload.estimated_loss},
+    )
     db.commit()
     db.refresh(damage)
     return damage
@@ -282,6 +324,7 @@ def account_damage(damage_id: str, current_user: User = Depends(require_tenant_u
     if not damage or damage.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Avarie introuvable")
     damage.accounted_at = datetime.utcnow()
+    log_action(db, current_user, "stock.damage_account", "stock_damage", damage.id, "Comptabilisation avarie stock")
     db.commit()
     db.refresh(damage)
     return damage
@@ -311,6 +354,7 @@ def create_recipe_link(
     get_item_or_404(db, payload.stock_item_id, current_user.restaurant_id)
     link = StockRecipeIngredient(restaurant_id=current_user.restaurant_id, **payload.dict())
     db.add(link)
+    log_action(db, current_user, "stock.recipe_link_create", "stock_recipe", link.id, "Liaison ingrédient stock à un plat")
     db.commit()
     db.refresh(link)
     return link
@@ -323,6 +367,7 @@ def delete_recipe_link(link_id: str, current_user: User = Depends(require_tenant
     if not link or link.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Liaison introuvable")
     db.delete(link)
+    log_action(db, current_user, "stock.recipe_link_delete", "stock_recipe", link_id, "Suppression liaison ingrédient stock")
     db.commit()
     return {"message": "Liaison supprimée"}
 
@@ -390,6 +435,15 @@ def create_production_sheet(
         created_by_id=current_user.id,
     )
     db.add(sheet)
+    log_action(
+        db,
+        current_user,
+        "stock.production_sheet_create",
+        "production_sheet",
+        sheet.id,
+        f"Fiche production {payload.quantity} x {dish.name}",
+        {"menu_item_id": dish.id, "quantity": payload.quantity},
+    )
     db.commit()
     db.refresh(sheet)
     return sheet
