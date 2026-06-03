@@ -3,6 +3,15 @@ import { Eye, EyeOff } from "lucide-react";
 
 const loginHeroImage = "/Images/ImageLogin.jpg";
 const logoImage = "/logo.jpeg";
+const noPasswordManagerAttrs = {
+  autoComplete: "new-password",
+  autoCorrect: "off",
+  autoCapitalize: "none",
+  spellCheck: false,
+  "data-lpignore": "true",
+  "data-1p-ignore": "true",
+  "data-form-type": "other",
+};
 
 export function LoginPanel({
   value,
@@ -62,7 +71,9 @@ export function LoginPanel({
             />
             <div>
               <p className="text-2xl font-black leading-tight">Le Bon Coin</p>
-              <p className="text-sm font-semibold text-white/75">Gestion de restaurant</p>
+              <p className="text-sm font-semibold text-white/75">
+                Gestion de restaurant
+              </p>
             </div>
           </div>
           <div className="max-w-xl">
@@ -73,7 +84,8 @@ export function LoginPanel({
               Pilotez vos restaurants depuis un seul espace.
             </h1>
             <p className="mt-5 text-base font-medium leading-7 text-white/75">
-              Connectez-vous pour gérer les commandes, la caisse, le stock, l’équipe et les rapports.
+              Connectez-vous pour gérer les commandes, la caisse, le stock,
+              l’équipe et les rapports.
             </p>
           </div>
         </div>
@@ -98,59 +110,67 @@ export function LoginPanel({
           </div>
 
           {mode === "login" && (
-            <form onSubmit={onSubmit} className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <form
+              onSubmit={onSubmit}
+              autoComplete="off"
+              data-lpignore="true"
+              className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+            >
               <label className="block">
                 <span className="mb-2 block text-xs font-black text-slate-700">
-                  Adresse e-mail ou identifiant <span className="text-red-500">*</span>
+                  Adresse e-mail ou identifiant{" "}
+                  <span className="text-red-500">*</span>
                 </span>
-              <input
-                name="login"
-                value={value.login}
-                onChange={onChange}
-                autoComplete="username"
-                required
-                placeholder="Email, nom utilisateur ou téléphone"
-                className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
-              />
+                <input
+                  name="login"
+                  value={value.login}
+                  onChange={onChange}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                  placeholder="Email, nom utilisateur ou téléphone"
+                  className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
+                />
               </label>
 
               <label className="block">
                 <span className="mb-2 block text-xs font-black text-slate-700">
                   Mot de passe <span className="text-red-500">*</span>
                 </span>
-              <div className="relative">
-                <input
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  value={value.password}
-                  onChange={onChange}
-                  autoComplete="current-password"
-                  required
-                  placeholder="Mot de passe"
-                  className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((current) => !current)}
-                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-emerald-50"
-                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                  title={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
+                <div className="relative">
+                  <input
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    value={value.password}
+                    onChange={onChange}
+                    {...noPasswordManagerAttrs}
+                    required
+                    placeholder="Mot de passe"
+                    className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-emerald-50"
+                    aria-label={
+                      showPassword
+                        ? "Masquer le mot de passe"
+                        : "Afficher le mot de passe"
+                    }
+                    title={
+                      showPassword
+                        ? "Masquer le mot de passe"
+                        : "Afficher le mot de passe"
+                    }
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </label>
 
               <div className="flex items-center justify-between text-sm">
-                <label className="flex cursor-pointer items-center gap-2 text-slate-500">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(event) => setRemember(event.target.checked)}
-                  />
-                  Se souvenir de moi
-                </label>
-
                 <button
                   type="button"
                   onClick={() => {
@@ -174,10 +194,19 @@ export function LoginPanel({
           )}
 
           {mode === "forgot" && (
-            <form onSubmit={submitForgotPassword} className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <form
+              onSubmit={submitForgotPassword}
+              autoComplete="off"
+              data-lpignore="true"
+              className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+            >
               <input
                 value={resetLogin}
                 onChange={(event) => setResetLogin(event.target.value)}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
                 required
                 placeholder="Email, nom utilisateur ou téléphone"
                 className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
@@ -200,7 +229,12 @@ export function LoginPanel({
           )}
 
           {mode === "reset" && (
-            <form onSubmit={submitResetPassword} className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <form
+              onSubmit={submitResetPassword}
+              autoComplete="off"
+              data-lpignore="true"
+              className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+            >
               <textarea
                 value={resetToken}
                 onChange={(event) => setResetToken(event.target.value)}
@@ -210,10 +244,11 @@ export function LoginPanel({
               />
               <div className="relative">
                 <input
-                  type={showNewPassword ? "text" : "password"}
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  required
+                type={showNewPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                {...noPasswordManagerAttrs}
+                required
                   minLength={8}
                   placeholder="Nouveau mot de passe"
                   className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
@@ -222,8 +257,16 @@ export function LoginPanel({
                   type="button"
                   onClick={() => setShowNewPassword((current) => !current)}
                   className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-emerald-50"
-                  aria-label={showNewPassword ? "Masquer le nouveau mot de passe" : "Afficher le nouveau mot de passe"}
-                  title={showNewPassword ? "Masquer le nouveau mot de passe" : "Afficher le nouveau mot de passe"}
+                  aria-label={
+                    showNewPassword
+                      ? "Masquer le nouveau mot de passe"
+                      : "Afficher le nouveau mot de passe"
+                  }
+                  title={
+                    showNewPassword
+                      ? "Masquer le nouveau mot de passe"
+                      : "Afficher le nouveau mot de passe"
+                  }
                 >
                   {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>

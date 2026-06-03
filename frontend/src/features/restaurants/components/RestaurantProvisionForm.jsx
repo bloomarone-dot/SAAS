@@ -144,6 +144,7 @@ function FormSection({ icon, title, description, children }) {
 function ProvisionField({ field, value, onChange, wide = false }) {
   const [name, label, type, placeholder] = field;
   const isOptional = optionalFields.has(name);
+  const isPassword = type === "password";
 
   return (
     <label className={`block ${wide ? "md:col-span-2" : ""}`}>
@@ -158,6 +159,13 @@ function ProvisionField({ field, value, onChange, wide = false }) {
         value={value[name] ?? ""}
         onChange={onChange}
         placeholder={placeholder}
+        autoComplete={isPassword ? "new-password" : "off"}
+        autoCorrect="off"
+        autoCapitalize="none"
+        spellCheck={false}
+        data-lpignore={isPassword ? "true" : undefined}
+        data-1p-ignore={isPassword ? "true" : undefined}
+        data-form-type={isPassword ? "other" : undefined}
         required={!isOptional}
         minLength={name === "owner_password" ? 8 : undefined}
         pattern={name === "slug" ? "[a-z0-9-]+" : undefined}

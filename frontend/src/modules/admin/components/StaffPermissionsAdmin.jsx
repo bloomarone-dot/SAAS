@@ -351,7 +351,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
             <Field name="last_name" label="Nom" value={form.last_name} onChange={updateFormField} required />
             <Field name="email" label="Email" type="email" value={form.email} onChange={updateFormField} />
             <Field name="username" label="Nom utilisateur" value={form.username} onChange={updateFormField} required />
-            <Field name="password" label="Mot de passe" type="password" value={form.password} onChange={updateFormField} required />
+            <Field name="password" label="Mot de passe" type="password" value={form.password} onChange={updateFormField} autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-form-type="other" required />
             <Field name="phone" label="Téléphone" value={form.phone} onChange={updateFormField} />
             <Select name="role" label="Rôle" value={form.role} onChange={updateFormField} required>
               {STAFF_ROLES.map((role) => (
@@ -665,12 +665,17 @@ function RequiredLabel({ children, required }) {
 }
 
 function Field({ label, required, ...props }) {
+  const isPassword = props.type === "password";
   return (
     <label className="block">
       <RequiredLabel required={required}>{label}</RequiredLabel>
       <input
         {...props}
         required={required}
+        autoComplete={props.autoComplete ?? (isPassword ? "new-password" : undefined)}
+        autoCorrect={isPassword ? "off" : props.autoCorrect}
+        autoCapitalize={isPassword ? "none" : props.autoCapitalize}
+        spellCheck={isPassword ? false : props.spellCheck}
         className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-[#fee4e2]"
       />
     </label>
