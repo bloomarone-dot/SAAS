@@ -1,13 +1,16 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.modules.audit.models import AuditLog
 from app.modules.permissions.models import Role
 from app.modules.platform.models import PlatformSetting, RestaurantSubscription
 from app.modules.platform.schemas import (
+    PlatformActivityPublic,
+    PlatformPaymentPublic,
     PlatformOverview,
     PlatformSettingsPublic,
     PlatformSettingsUpdateIn,
@@ -110,6 +113,64 @@ def update_subscription(
     return serialize_subscription(subscription, restaurant)
 
 
+@router.get("/payments", response_model=list[PlatformPaymentPublic])
+def list_platform_payments(
+    current_user: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """Expose les paiements SaaS connus a partir des abonnements configures."""
+    restaurants = db.query(Restaurant).order_by(Restaurant.created_at.desc()).all()
+    rows: list[PlatformPaymentPublic] = []
+    for restaurant in restaurants:
+        subscription = get_or_create_subscription(db, restaurant)
+        due_date = subscription.renewal_date
+        is_paid = subscription.status == "Actif" and subscription.amount > 0
+        rows.append(
+            PlatformPaymentPublic(
+                id=subscription.id,
+                restaurant_id=restaurant.id,
+                restaurant_name=restaurant.name,
+                restaurant_slug=restaurant.slug,
+                reference=f"SAAS-{restaurant.slug}-{subscription.created_at.strftime('%Y%m')}",
+                amount=subscription.amount,
+                currency=subscription.currency,
+                status="Payé" if is_paid else subscription.status,
+                method="Abonnement SaaS",
+                paid_at=subscription.updated_at if is_paid else None,
+                due_date=due_date,
+            )
+        )
+    db.commit()
+    return rows
+
+
+@router.get("/activity", response_model=list[PlatformActivityPublic])
+def list_platform_activity(
+    limit: int = Query(default=100, ge=1, le=300),
+    current_user: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    """Retourne le journal global de plateforme pour le superadmin."""
+    restaurants = {restaurant.id: restaurant.name for restaurant in db.query(Restaurant).all()}
+    logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).all()
+    return [
+        PlatformActivityPublic(
+            id=log.id,
+            restaurant_id=log.restaurant_id,
+            restaurant_name=restaurants.get(log.restaurant_id),
+            user_id=log.user_id,
+            user_role=log.user_role,
+            action=log.action,
+            entity_type=log.entity_type,
+            entity_id=log.entity_id,
+            description=log.description,
+            details_json=log.details_json,
+            created_at=log.created_at,
+        )
+        for log in logs
+    ]
+
+
 @router.get("/settings", response_model=PlatformSettingsPublic)
 def get_settings(
     current_user: User = Depends(require_superadmin),
@@ -188,4 +249,3 @@ def encode_setting(value: object) -> str:
 
 def decode_bool(value: str) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
-

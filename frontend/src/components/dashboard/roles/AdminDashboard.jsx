@@ -6,13 +6,19 @@ import {
   Panel,
   SimpleRows,
 } from "../DashboardPrimitives";
+import { useMemo, useState } from "react";
+import { SecondaryAction } from "@/modules/admin/components/AdminUi";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 }
 
 export function AdminDashboard({ overrides = {} }) {
-  const summary = overrides.__summary;
+  const apiBaseUrl = overrides.__apiBaseUrl;
+  const [periodSummary, setPeriodSummary] = useState(null);
+  const [period, setPeriod] = useState(() => defaultPeriod());
+  const [isPeriodLoading, setIsPeriodLoading] = useState(false);
+  const summary = periodSummary ?? overrides.__summary;
   const branches = summary?.branches ?? [];
   const weeklyRevenue = summary?.weekly_revenue ?? [];
   const recentActivities = summary?.recent_activities ?? [];
@@ -27,12 +33,50 @@ export function AdminDashboard({ overrides = {} }) {
     { label: "Branches", value: Number(summary?.branches_count || 0).toLocaleString("fr-FR"), trend: "Points de vente actifs", icon: "Package", tone: "green" },
   ];
 
+  async function loadPeriodSummary() {
+    if (!apiBaseUrl) return;
+    setIsPeriodLoading(true);
+    try {
+      const token = localStorage.getItem("access_token");
+      const query = new URLSearchParams({
+        start_date: `${period.start}T00:00:00`,
+        end_date: `${period.end}T23:59:59`,
+      });
+      const response = await fetch(`${apiBaseUrl}/api/v1/dashboard/admin-summary?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "Rapport impossible.");
+      setPeriodSummary(data);
+    } finally {
+      setIsPeriodLoading(false);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <DashboardHeader
         title="Tableau de bord"
         subtitle="Vue d'ensemble dynamique de votre activité"
       />
+      <Panel title="État de l'activité sur une période" action={periodSummary ? "Période appliquée" : "Temps réel"}>
+        <div className="grid gap-3 md:grid-cols-[180px_180px_auto_1fr] md:items-end">
+          <label className="block">
+            <span className="mb-2 block text-xs font-black uppercase text-slate-500">Début</span>
+            <input type="date" value={period.start} onChange={(event) => setPeriod((current) => ({ ...current, start: event.target.value }))} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-[var(--dashboard-primary)]" />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-xs font-black uppercase text-slate-500">Fin</span>
+            <input type="date" value={period.end} onChange={(event) => setPeriod((current) => ({ ...current, end: event.target.value }))} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-[var(--dashboard-primary)]" />
+          </label>
+          <SecondaryAction icon="BarChart3" onClick={loadPeriodSummary} disabled={isPeriodLoading}>
+            {isPeriodLoading ? "Analyse..." : "Analyser"}
+          </SecondaryAction>
+          <p className="text-sm font-semibold text-slate-500 md:text-right">
+            CA {money(summary?.revenue)} · {Number(summary?.orders_count || 0).toLocaleString("fr-FR")} commandes · bénéfice {money(summary?.profit)}
+          </p>
+        </div>
+      </Panel>
       <KpiGrid kpis={kpis} />
       <div className="grid gap-4 md:grid-cols-2">
         {(cashRegisters.length ? cashRegisters : [
@@ -94,6 +138,16 @@ export function AdminDashboard({ overrides = {} }) {
       </Panel>
     </section>
   );
+}
+
+function defaultPeriod() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 30);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
 }
 
 function Metric({ label, value }) {

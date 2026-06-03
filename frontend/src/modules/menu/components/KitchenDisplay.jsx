@@ -18,6 +18,7 @@ export default function KitchenDisplay({ filter = 'orders' }) {
   useEffect(() => {
     let mounted = true;
     async function loadTickets() {
+      if (document.hidden || !navigator.onLine) return;
       try {
         const data = await kitchenApi.getActiveTickets();
         if (mounted) {
@@ -32,10 +33,14 @@ export default function KitchenDisplay({ filter = 'orders' }) {
     }
 
     loadTickets();
-    const interval = window.setInterval(loadTickets, 10000);
+    const interval = window.setInterval(loadTickets, 5000);
+    window.addEventListener('focus', loadTickets);
+    document.addEventListener('visibilitychange', loadTickets);
     return () => {
       mounted = false;
       window.clearInterval(interval);
+      window.removeEventListener('focus', loadTickets);
+      document.removeEventListener('visibilitychange', loadTickets);
     };
   }, []);
 
@@ -43,6 +48,14 @@ export default function KitchenDisplay({ filter = 'orders' }) {
     if (filter === 'preparation') return columns.filter((column) => column.key === 'En préparation');
     if (filter === 'ready') return columns.filter((column) => column.key === 'Prête');
     return columns;
+  }, [filter]);
+
+  const pageCopy = useMemo(() => {
+    if (filter === 'preparation') return ['Commandes en préparation', "Suivez les plats déjà lancés en cuisine."];
+    if (filter === 'ready') return ['Commandes prêtes', "Validez les tickets prêts à partir en salle."];
+    if (filter === 'urgent') return ['Commandes urgentes', "Priorisez les tickets qui dépassent le délai de préparation."];
+    if (filter === 'notes') return ['Notes spéciales', "Consultez les consignes client et remarques de préparation."];
+    return ['Commandes cuisine', "Gérez les commandes en temps réel et suivez l'avancement en cuisine."];
   }, [filter]);
 
   const stats = useMemo(() => ({
@@ -70,8 +83,8 @@ export default function KitchenDisplay({ filter = 'orders' }) {
   return (
     <section className="space-y-6">
       <div>
-        <h1 className="text-3xl font-black text-[#070528]">Dashboard Cuisine</h1>
-        <p className="mt-1 text-sm font-medium text-slate-500">Gerez les commandes en temps reel et suivez l'avancement en cuisine.</p>
+        <h1 className="text-3xl font-black text-[#070528]">{pageCopy[0]}</h1>
+        <p className="mt-1 text-sm font-medium text-slate-500">{pageCopy[1]}</p>
       </div>
 
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-600">{error}</div>}
@@ -86,7 +99,12 @@ export default function KitchenDisplay({ filter = 'orders' }) {
       <div className="grid gap-5 xl:grid-cols-[1fr_280px]">
         <div className="grid gap-5 lg:grid-cols-3">
           {visibleColumns.map((column) => {
-            const items = tickets.filter((ticket) => ticket.status === column.key);
+            const items = tickets.filter((ticket) => {
+              const matchesColumn = ticket.status === column.key;
+              const matchesUrgent = filter !== 'urgent' || minutesSince(ticket.created_at) >= 20;
+              const matchesNotes = filter !== 'notes' || Boolean(ticket.notes);
+              return matchesColumn && matchesUrgent && matchesNotes;
+            });
             return (
               <div key={column.key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="mb-4 flex items-center justify-between">
@@ -157,7 +175,7 @@ function TicketCard({ ticket, action, onAdvance }) {
       {ticket.notes && <p className="mt-3 rounded bg-slate-50 p-2 text-xs font-semibold text-slate-500">{ticket.notes}</p>}
       <div className="mt-4 flex items-center justify-between gap-3">
         <span className="text-xs font-black text-slate-500">{minutesSince(ticket.created_at)} min</span>
-        <button type="button" onClick={onAdvance} className="rounded-lg bg-[#f04438] px-3 py-2 text-xs font-black text-white">
+        <button type="button" onClick={onAdvance} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700">
           {action}
         </button>
       </div>

@@ -10,6 +10,7 @@ import {
 } from "../DashboardPrimitives";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { tableApi } from "@/modules/menu/services/tableApi";
+import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
 function isToday(value) {
   if (!value) return false;
@@ -28,9 +29,11 @@ export function ManagerDashboard({ overrides = {} }) {
     loadDashboard();
   }, [apiBaseUrl, currentUser?.restaurant_id]);
 
-  async function loadDashboard() {
+  useAutoRefresh(() => loadDashboard({ silent: true }), 15000, [apiBaseUrl, currentUser?.restaurant_id]);
+
+  async function loadDashboard({ silent = false } = {}) {
     if (!currentUser?.restaurant_id) return;
-    setMessage("");
+    if (!silent) setMessage("");
     try {
       const [orderData, tableData, userData] = await Promise.all([
         orderApi.list().catch(() => []),
@@ -41,7 +44,7 @@ export function ManagerDashboard({ overrides = {} }) {
       setTables(tableData);
       setUsers(userData);
     } catch (error) {
-      setMessage(error.message || "Impossible de charger le tableau de bord manager.");
+      if (!silent) setMessage(error.message || "Impossible de charger le tableau de bord manager.");
     }
   }
 

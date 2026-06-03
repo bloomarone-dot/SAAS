@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import MetaData, Table, func, inspect, select
 from sqlalchemy.orm import Session, selectinload
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
@@ -46,7 +46,12 @@ def cashier_summary(current_user: User = Depends(require_tenant_user), db: Sessi
     return build_cash_register_points(metrics)
 
 
-def read_orders_and_revenue(db: Session, restaurant_id: str) -> tuple[int, float]:
+def read_orders_and_revenue(
+    db: Session,
+    restaurant_id: str,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> tuple[int, float]:
     """Lit les commandes si un module ventes existe deja, sinon retourne zero.
 
     Le projet n'a pas encore de module commandes persistant. Cette fonction rend
@@ -65,6 +70,10 @@ def read_orders_and_revenue(db: Session, restaurant_id: str) -> tuple[int, float
         return 0, 0.0
 
     filters = [table.c.restaurant_id == restaurant_id]
+    if start_date is not None and "created_at" in table.c:
+        filters.append(table.c.created_at >= start_date)
+    if end_date is not None and "created_at" in table.c:
+        filters.append(table.c.created_at <= end_date)
     orders_count = db.execute(select(func.count()).select_from(table).where(*filters)).scalar() or 0
 
     revenue_column_name = next((name for name in REVENUE_COLUMN_CANDIDATES if name in table.c), None)
@@ -79,11 +88,17 @@ def read_orders_and_revenue(db: Session, restaurant_id: str) -> tuple[int, float
 
 
 @router.get("/admin-summary", response_model=AdminDashboardSummaryOut)
-def admin_summary(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+def admin_summary(
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
     restaurant_id = current_user.restaurant_id
-    orders_count, revenue = read_orders_and_revenue(db, restaurant_id)
-    sales_metrics = build_sales_metrics(db, restaurant_id)
+    period_start, period_end = dashboard_period(start_date, end_date)
+    orders_count, revenue = read_orders_and_revenue(db, restaurant_id, period_start, period_end)
+    sales_metrics = build_sales_metrics(db, restaurant_id, period_start, period_end)
     revenue = sales_metrics["revenue"]
     active_branches = (
         db.query(Branch)
@@ -105,7 +120,7 @@ def admin_summary(current_user: User = Depends(require_tenant_user), db: Session
         meal_revenue=sales_metrics["by_channel"]["REPAS"]["revenue"],
         drink_revenue=sales_metrics["by_channel"]["BOISSON"]["revenue"],
         cash_registers=build_cash_register_points(sales_metrics),
-        weekly_revenue=build_weekly_revenue(db, restaurant_id),
+        weekly_revenue=build_weekly_revenue(db, restaurant_id, period_start, period_end),
         branches=branches,
         top_branches=sorted(branches, key=lambda item: (item.revenue, item.active_users_count), reverse=True)[:3],
         recent_activities=build_recent_activities(db, restaurant_id),
@@ -113,13 +128,27 @@ def admin_summary(current_user: User = Depends(require_tenant_user), db: Session
     )
 
 
-def build_sales_metrics(db: Session, restaurant_id: str) -> dict:
-    orders = (
+def dashboard_period(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime | None, datetime | None]:
+    if not start_date and not end_date:
+        return None, None
+    end = end_date or datetime.utcnow()
+    start = start_date or (end - timedelta(days=30))
+    return start, end
+
+
+def build_sales_metrics(db: Session, restaurant_id: str, start_date: datetime | None = None, end_date: datetime | None = None) -> dict:
+    query = (
         db.query(CustomerOrder)
         .options(selectinload(CustomerOrder.items))
         .filter(CustomerOrder.restaurant_id == restaurant_id)
         .filter(CustomerOrder.status.in_(PAID_STATUSES))
-        .all()
+    )
+    if start_date:
+        query = query.filter(CustomerOrder.updated_at >= start_date)
+    if end_date:
+        query = query.filter(CustomerOrder.updated_at <= end_date)
+    orders = (
+        query.all()
     )
     server_branch_by_id = {
         user.id: user.branch_id
@@ -171,17 +200,24 @@ def empty_channel_metrics() -> dict:
 
 
 def read_recipe_costs(db: Session, restaurant_id: str) -> dict[str, float]:
+    manual_rows = (
+        db.query(MenuItem.id, MenuItem.cost_per_dish)
+        .filter(MenuItem.restaurant_id == restaurant_id, MenuItem.cost_per_dish > 0)
+        .all()
+    )
+    manual_costs = {menu_item_id: float(cost or 0) for menu_item_id, cost in manual_rows}
     rows = (
         db.query(
             StockRecipeIngredient.menu_item_id,
-            func.coalesce(func.sum(StockRecipeIngredient.quantity_per_dish * StockItem.purchase_price), 0),
+            func.coalesce(func.sum(StockRecipeIngredient.quantity_per_dish * StockItem.cmup_current), 0),
         )
         .join(StockItem, StockItem.id == StockRecipeIngredient.stock_item_id)
         .filter(StockRecipeIngredient.restaurant_id == restaurant_id)
         .group_by(StockRecipeIngredient.menu_item_id)
         .all()
     )
-    return {menu_item_id: float(cost or 0) for menu_item_id, cost in rows}
+    recipe_costs = {menu_item_id: float(cost or 0) for menu_item_id, cost in rows}
+    return {**recipe_costs, **manual_costs}
 
 
 def read_menu_item_context(db: Session, restaurant_id: str) -> dict[str, tuple[str | None, str | None, str | None, str | None, str | None]]:
@@ -224,22 +260,29 @@ def build_cash_register_points(metrics: dict) -> list[AdminDashboardCashRegister
     return points
 
 
-def build_weekly_revenue(db: Session, restaurant_id: str) -> list[AdminDashboardWeeklyPoint]:
-    today = datetime.utcnow().date()
-    days = [today - timedelta(days=offset) for offset in range(6, -1, -1)]
+def build_weekly_revenue(
+    db: Session,
+    restaurant_id: str,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> list[AdminDashboardWeeklyPoint]:
+    end_day = (end_date or datetime.utcnow()).date()
+    days = [end_day - timedelta(days=offset) for offset in range(6, -1, -1)]
     labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
     totals = {day: {"revenue": 0.0, "orders_count": 0} for day in days}
 
-    start = datetime.combine(days[0], datetime.min.time())
+    start = start_date or datetime.combine(days[0], datetime.min.time())
+    end = end_date or datetime.combine(days[-1], datetime.max.time())
     orders = (
         db.query(CustomerOrder)
         .filter(CustomerOrder.restaurant_id == restaurant_id)
         .filter(CustomerOrder.status.in_(PAID_STATUSES))
-        .filter(CustomerOrder.created_at >= start)
+        .filter(CustomerOrder.updated_at >= start)
+        .filter(CustomerOrder.updated_at <= end)
         .all()
     )
     for order in orders:
-        day = order.created_at.date()
+        day = order.updated_at.date()
         if day in totals:
             totals[day]["revenue"] += float(order.total_amount or 0)
             totals[day]["orders_count"] += 1

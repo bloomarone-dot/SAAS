@@ -91,11 +91,14 @@ def create_user(
     if payload.permissions:
         assert_owner_or_permission(current_user, Permission.USER_PERMISSIONS_UPDATE)
 
-    email = payload.email.lower().strip()
+    email = payload.email.lower().strip() if payload.email else None
     username = payload.username.lower().strip()
+    uniqueness_filters = [User.username == username]
+    if email:
+        uniqueness_filters.append(User.email == email)
     existing_user = (
         db.query(User)
-        .filter(or_(User.email == email, User.username == username))
+        .filter(or_(*uniqueness_filters))
         .one_or_none()
     )
     if existing_user:
@@ -177,10 +180,11 @@ def update_user(
     validate_branch(db, payload.branch_id, current_user.restaurant_id)
 
     if payload.email is not None:
-        email = payload.email.lower().strip()
-        existing_user = db.query(User).filter(User.email == email, User.id != user.id).one_or_none()
-        if existing_user:
-            raise HTTPException(status_code=409, detail="Email deja utilise")
+        email = payload.email.lower().strip() or None
+        if email:
+            existing_user = db.query(User).filter(User.email == email, User.id != user.id).one_or_none()
+            if existing_user:
+                raise HTTPException(status_code=409, detail="Email deja utilise")
         user.email = email
 
     if payload.username is not None:
@@ -284,7 +288,7 @@ def delete_user(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    """Supprime un utilisateur non proprietaire du restaurant courant."""
+    """Archive un utilisateur non proprietaire sans supprimer son historique."""
     assert_permission(current_user, Permission.USER_UPDATE)
 
     user = db.get(User, user_id)
@@ -295,20 +299,15 @@ def delete_user(
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Vous ne pouvez pas supprimer votre propre compte")
 
-    db.query(User).filter(User.created_by_id == user.id).update({User.created_by_id: None})
-    db.query(UserPermission).filter(UserPermission.granted_by_id == user.id).update(
-        {UserPermission.granted_by_id: None}
-    )
-    db.query(UserPermission).filter(UserPermission.user_id == user.id).delete()
+    user.is_active = False
     log_action(
         db,
         current_user,
-        "user.delete",
+        "user.archive",
         "user",
         user.id,
-        f"Suppression utilisateur {user.username}",
+        f"Archivage utilisateur {user.username}",
         {"role": user.role.value, "email": user.email},
     )
-    db.delete(user)
     db.commit()
     return None

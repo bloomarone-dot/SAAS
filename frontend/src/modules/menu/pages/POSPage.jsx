@@ -9,10 +9,11 @@ export default function POSPage({ restaurantId, role, currentUser }) {
   const [activeOrderContext, setActiveOrderContext] = useState(null);
 
   // Fonction appelée quand on sélectionne une commande ou qu'on en ouvre une nouvelle
-  const handleOpenMenuForOrder = (orderId, tableNumber) => {
+  const handleOpenMenuForOrder = (orderId, tableNumber, tableRoom) => {
     setActiveOrderContext({
       orderId: orderId,
-      tableNumber: tableNumber
+      tableNumber: tableNumber,
+      tableRoom: tableRoom || "Rez-de-chaussée"
     });
   };
 
@@ -59,7 +60,7 @@ export default function POSPage({ restaurantId, role, currentUser }) {
                 ← Retour au Plan de Salle
               </button>
               <h2 className="text-lg font-bold text-gray-900 mt-1">
-                Prise de commande — Table {activeOrderContext.tableNumber}
+                Prise de commande — {activeOrderContext.tableRoom} · Table {activeOrderContext.tableNumber}
               </h2>
             </div>
             <div className="bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-full border border-blue-100">

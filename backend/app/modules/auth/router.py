@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -18,6 +20,8 @@ from app.security import (
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+RETURN_DEV_RESET_TOKEN = os.getenv("RETURN_DEV_RESET_TOKEN", "true").lower() == "true"
 
 
 def normalize_phone(value: str) -> str:
@@ -71,10 +75,11 @@ def forgot_password(payload: ForgotPasswordIn, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         return ForgotPasswordOut(message=generic_message)
 
-    return ForgotPasswordOut(
-        message=generic_message,
-        reset_token=create_password_reset_token(user.id),
-    )
+    reset_token = create_password_reset_token(user.id)
+    if ENVIRONMENT in {"production", "prod"} or not RETURN_DEV_RESET_TOKEN:
+        return ForgotPasswordOut(message=generic_message)
+
+    return ForgotPasswordOut(message=generic_message, reset_token=reset_token)
 
 
 @router.post("/reset-password")

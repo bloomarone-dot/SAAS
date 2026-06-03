@@ -25,7 +25,7 @@ const roleLabels = {
   COMPTABLE: "Comptable",
 };
 
-export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
+export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, showCreateOnMount = false }) {
   const [users, setUsers] = useState([]);
   const [permissionGroups, setPermissionGroups] = useState([]);
   const [rolePresets, setRolePresets] = useState([]);
@@ -35,7 +35,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(null);
   const [formPermissions, setFormPermissions] = useState([]);
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(showCreateOnMount);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -65,7 +65,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
       const matchesSearch =
         !query ||
         `${user.first_name} ${user.last_name}`.toLowerCase().includes(query) ||
-        user.email.toLowerCase().includes(query) ||
+        (user.email ?? "").toLowerCase().includes(query) ||
         user.username.toLowerCase().includes(query);
       const matchesRole = roleFilter === "ALL" || user.role === roleFilter;
       const matchesStatus =
@@ -77,7 +77,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     return sortRows(rows, sort, {
       name: (user) => `${user.first_name} ${user.last_name}`,
       username: (user) => user.username,
-      email: (user) => user.email,
+      email: (user) => user.email ?? "",
       role: (user) => roleLabels[user.role] ?? user.role,
       branch: (user) => branches.find((branch) => branch.id === user.branch_id)?.name ?? "",
       status: (user) => Number(user.is_active),
@@ -98,6 +98,10 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
   useEffect(() => {
     loadAccessData();
   }, []);
+
+  useEffect(() => {
+    setShowCreateForm(showCreateOnMount);
+  }, [showCreateOnMount]);
 
   useEffect(() => {
     if (!selectedUser) {
@@ -187,6 +191,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     try {
       const payload = {
         ...form,
+        email: form.email.trim() || null,
         branch_id: form.branch_id || null,
         permissions: formPermissions,
       };
@@ -232,6 +237,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
         method: "PATCH",
         body: JSON.stringify({
           ...editForm,
+          email: editForm.email.trim() || null,
           branch_id: editForm.branch_id || null,
           permissions: draftPermissions,
         }),
@@ -263,12 +269,19 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
   }
 
   async function deleteUser(user) {
+    if (
+      !window.confirm(
+        `Archiver l'utilisateur ${user.first_name} ${user.last_name} ?\n\nLe compte restera en base de données et pourra être restauré.`
+      )
+    ) {
+      return;
+    }
     setIsLoading(true);
     try {
       await api(`/api/v1/users/${user.id}`, { method: "DELETE" });
-      setUsers((current) => current.filter((item) => item.id !== user.id));
-      setSelectedUserId("");
-      onMessage("Utilisateur supprimé.");
+      setUsers((current) => current.map((item) => (item.id === user.id ? { ...item, is_active: false } : item)));
+      setSelectedUserId(user.id);
+      onMessage("Utilisateur archivé. Il peut être restauré depuis cette liste.");
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -280,8 +293,8 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     <section className="space-y-6">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
-          <p className="text-xs font-black uppercase tracking-normal text-[#f04438]">Administration restaurant</p>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Utilisateurs & permissions</h1>
+          <p className="text-xs font-black uppercase tracking-normal text-[var(--dashboard-primary)]">Administration restaurant</p>
+          <h1 className="mt-2 text-4xl font-black text-[var(--dashboard-secondary)]">Utilisateurs & permissions</h1>
           <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
             Gérez les comptes du personnel, appliquez les rôles métier et contrôlez les accès par module.
           </p>
@@ -290,7 +303,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
           <button
             type="button"
             onClick={() => setShowCreateForm((value) => !value)}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20]"
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)]"
           >
             <DashboardIcon name="UserPlus" size={17} />
             {showCreateForm ? "Fermer le formulaire" : "Ajouter un utilisateur"}
@@ -298,7 +311,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
           <button
             type="button"
             onClick={loadAccessData}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition-all hover:border-[#f04438] hover:text-[#f04438]"
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition-all hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
           >
             <DashboardIcon name="Activity" size={17} />
             Actualiser
@@ -310,13 +323,13 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
         {stats.map((item) => (
           <div key={item.label} className="border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
-              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#fff4ed] text-[var(--dashboard-primary)]">
                 <DashboardIcon name={item.icon} size={19} />
               </div>
               <span className="text-xs font-black uppercase text-slate-400">Admin</span>
             </div>
             <p className="mt-5 text-sm font-bold text-slate-500">{item.label}</p>
-            <p className="mt-1 text-3xl font-black text-[#070528]">{item.value}</p>
+            <p className="mt-1 text-3xl font-black text-[var(--dashboard-secondary)]">{item.value}</p>
           </div>
         ))}
       </div>
@@ -325,10 +338,10 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
         <form onSubmit={createUser} className="border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-black text-[#070528]">Créer un compte</h2>
+              <h2 className="text-2xl font-black text-[var(--dashboard-secondary)]">Créer un compte</h2>
               <p className="mt-1 text-sm font-medium text-slate-500">Ajoutez un membre et appliquez un rôle de départ.</p>
             </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#f04438] text-white">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--dashboard-primary)] text-white">
               <DashboardIcon name="UserPlus" size={19} />
             </div>
           </div>
@@ -336,11 +349,11 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <Field name="first_name" label="Prénom" value={form.first_name} onChange={updateFormField} required />
             <Field name="last_name" label="Nom" value={form.last_name} onChange={updateFormField} required />
-            <Field name="email" label="Email" type="email" value={form.email} onChange={updateFormField} required />
+            <Field name="email" label="Email" type="email" value={form.email} onChange={updateFormField} />
             <Field name="username" label="Nom utilisateur" value={form.username} onChange={updateFormField} required />
             <Field name="password" label="Mot de passe" type="password" value={form.password} onChange={updateFormField} required />
             <Field name="phone" label="Téléphone" value={form.phone} onChange={updateFormField} />
-            <Select name="role" label="Rôle" value={form.role} onChange={updateFormField}>
+            <Select name="role" label="Rôle" value={form.role} onChange={updateFormField} required>
               {STAFF_ROLES.map((role) => (
                 <option key={role} value={role}>
                   {roleLabels[role]}
@@ -371,7 +384,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
           <button
             type="submit"
             disabled={isLoading}
-            className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <DashboardIcon name="Plus" size={17} />
             Créer l'utilisateur
@@ -410,7 +423,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
               >
                 <option value="ALL">Tous les statuts</option>
                 <option value="ACTIVE">Actifs</option>
-                <option value="INACTIVE">Désactivés</option>
+                <option value="INACTIVE">Archivés / désactivés</option>
               </select>
             </div>
           </div>
@@ -418,12 +431,12 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(420px,0.7fr)]">
             <div className="border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-200 px-5 py-4">
-                <h2 className="text-lg font-black text-[#070528]">Personnel</h2>
+                <h2 className="text-lg font-black text-[var(--dashboard-secondary)]">Personnel</h2>
                 <p className="text-sm font-medium text-slate-500">{filteredUsers.length} compte(s) affiché(s)</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[980px] border-collapse text-left">
-                  <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[#b42318]">
+                  <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[var(--dashboard-primary)]">
                     <tr>
                       <th className="px-5 py-4">
                         <SortButton label="Nom" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} />
@@ -461,7 +474,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                               {user.last_name?.[0]}
                             </div>
                             <div className="min-w-0">
-                              <p className="truncate font-black text-[#070528]">
+                              <p className="truncate font-black text-[var(--dashboard-secondary)]">
                                 {user.first_name} {user.last_name}
                               </p>
                               <p className="text-xs font-semibold text-slate-400">
@@ -471,14 +484,14 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                           </div>
                         </td>
                         <td className="px-5 py-4 text-sm font-bold text-slate-700">{user.username}</td>
-                        <td className="px-5 py-4 text-sm font-semibold text-slate-500">{user.email}</td>
-                        <td className="px-5 py-4 text-sm font-black text-[#f04438]">{roleLabels[user.role] ?? user.role}</td>
+                        <td className="px-5 py-4 text-sm font-semibold text-slate-500">{user.email || "Non renseigné"}</td>
+                        <td className="px-5 py-4 text-sm font-black text-[var(--dashboard-primary)]">{roleLabels[user.role] ?? user.role}</td>
                         <td className="px-5 py-4 text-sm font-semibold text-slate-500">
                           {branches.find((branch) => branch.id === user.branch_id)?.name ?? "Toutes"}
                         </td>
                         <td className="px-5 py-4">
                           <span className={`px-3 py-1 text-xs font-black ${user.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                            {user.is_active ? "Actif" : "Désactivé"}
+                            {user.is_active ? "Actif" : "Archivé"}
                           </span>
                         </td>
                         <td className="px-5 py-4">
@@ -486,20 +499,32 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                             <button
                               type="button"
                               onClick={() => setSelectedUserId(user.id)}
-                              className="inline-flex h-9 w-9 items-center justify-center border border-slate-200 text-slate-600 transition-all hover:border-[#f04438] hover:text-[#f04438]"
+                              className="inline-flex h-9 w-9 items-center justify-center border border-slate-200 text-slate-600 transition-all hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
                               title="Modifier"
                             >
                               <DashboardIcon name="Pencil" size={16} />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteUser(user)}
-                              disabled={user.id === currentUser.id || isLoading}
-                              className="inline-flex h-9 w-9 items-center justify-center border border-red-100 text-red-600 transition-all hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              title="Supprimer"
-                            >
-                              <DashboardIcon name="Trash2" size={16} />
-                            </button>
+                            {user.is_active ? (
+                              <button
+                                type="button"
+                                onClick={() => deleteUser(user)}
+                                disabled={user.id === currentUser.id || isLoading}
+                                className="inline-flex h-9 w-9 items-center justify-center border border-red-100 text-red-600 transition-all hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                title="Archiver"
+                              >
+                                <DashboardIcon name="Archive" size={16} />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => toggleStatus(user)}
+                                disabled={isLoading}
+                                className="inline-flex h-9 w-9 items-center justify-center border border-emerald-100 text-emerald-700 transition-all hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                title="Restaurer"
+                              >
+                                <DashboardIcon name="RotateCcw" size={16} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -509,10 +534,10 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
 
                 {!filteredUsers.length && (
                   <div className="px-5 py-16 text-center">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center bg-[#fff4ed] text-[#f04438]">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center bg-[#fff4ed] text-[var(--dashboard-primary)]">
                       <DashboardIcon name="Users" size={23} />
                     </div>
-                    <p className="mt-4 text-lg font-black text-[#070528]">Aucun utilisateur trouvé</p>
+                    <p className="mt-4 text-lg font-black text-[var(--dashboard-secondary)]">Aucun utilisateur trouvé</p>
                     <p className="mt-1 text-sm font-medium text-slate-500">Modifiez les filtres ou créez un compte.</p>
                   </div>
                 )}
@@ -524,12 +549,12 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                 <>
                   <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 md:flex-row md:items-start">
                     <div>
-                      <p className="text-xs font-black uppercase text-[#f04438]">{roleLabels[selectedUser.role]}</p>
-                      <h2 className="mt-1 text-2xl font-black text-[#070528]">
+                      <p className="text-xs font-black uppercase text-[var(--dashboard-primary)]">{roleLabels[selectedUser.role]}</p>
+                      <h2 className="mt-1 text-2xl font-black text-[var(--dashboard-secondary)]">
                         {selectedUser.first_name} {selectedUser.last_name}
                       </h2>
                       <p className="mt-1 text-sm font-semibold text-slate-500">
-                        {selectedUser.username} · {selectedUser.email}
+                        {selectedUser.username} · {selectedUser.email || "Email non renseigné"}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -537,29 +562,31 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                         type="button"
                         onClick={() => toggleStatus(selectedUser)}
                         disabled={selectedUser.id === currentUser.id || isLoading}
-                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-700 transition-all hover:border-[#f04438] hover:text-[#f04438] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-700 transition-all hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <DashboardIcon name="Power" size={15} />
-                        {selectedUser.is_active ? "Désactiver" : "Activer"}
+                        {selectedUser.is_active ? "Désactiver" : "Restaurer"}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteUser(selectedUser)}
-                        disabled={selectedUser.id === currentUser.id || isLoading}
-                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-100 px-3 text-xs font-black text-red-600 transition-all hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <DashboardIcon name="Trash2" size={15} />
-                        Supprimer
-                      </button>
+                      {selectedUser.is_active && (
+                        <button
+                          type="button"
+                          onClick={() => deleteUser(selectedUser)}
+                          disabled={selectedUser.id === currentUser.id || isLoading}
+                          className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-100 px-3 text-xs font-black text-red-600 transition-all hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <DashboardIcon name="Archive" size={15} />
+                          Archiver
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   <form onSubmit={saveSelectedUser} className="mt-6 border-b border-slate-200 pb-6">
-                    <h3 className="text-sm font-black uppercase text-[#070528]">Informations du personnel</h3>
+                    <h3 className="text-sm font-black uppercase text-[var(--dashboard-secondary)]">Informations du personnel</h3>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <Field name="first_name" label="Prénom" value={editForm?.first_name ?? ""} onChange={updateEditField} required />
                       <Field name="last_name" label="Nom" value={editForm?.last_name ?? ""} onChange={updateEditField} required />
-                      <Field name="email" label="Email" type="email" value={editForm?.email ?? ""} onChange={updateEditField} required />
+                      <Field name="email" label="Email" type="email" value={editForm?.email ?? ""} onChange={updateEditField} />
                       <Field name="username" label="Nom utilisateur" value={editForm?.username ?? ""} onChange={updateEditField} required />
                       <Field name="phone" label="Téléphone" value={editForm?.phone ?? ""} onChange={updateEditField} />
                       <Select name="role" label="Rôle" value={editForm?.role ?? "SERVEUR"} onChange={updateEditField}>
@@ -581,7 +608,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                     <button
                       type="submit"
                       disabled={isLoading}
-                      className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-4 text-xs font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-4 text-xs font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <DashboardIcon name="Pencil" size={15} />
                       Enregistrer les informations
@@ -607,7 +634,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                       type="button"
                       onClick={saveSelectedPermissions}
                       disabled={isLoading}
-                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <DashboardIcon name="ShieldCheck" size={17} />
                       Enregistrer les permissions
@@ -616,10 +643,10 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
                 </>
               ) : (
                 <div className="py-16 text-center">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-[#fff4ed] text-[var(--dashboard-primary)]">
                     <DashboardIcon name="ShieldCheck" size={23} />
                   </div>
-                  <p className="mt-4 text-lg font-black text-[#070528]">Sélectionnez un utilisateur</p>
+                  <p className="mt-4 text-lg font-black text-[var(--dashboard-secondary)]">Sélectionnez un utilisateur</p>
                 </div>
               )}
             </div>
@@ -629,25 +656,35 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
   );
 }
 
-function Field({ label, ...props }) {
+function RequiredLabel({ children, required }) {
+  return (
+    <span className="text-xs font-black text-[var(--dashboard-secondary)]">
+      {children} {required && <span className="text-red-500">*</span>}
+    </span>
+  );
+}
+
+function Field({ label, required, ...props }) {
   return (
     <label className="block">
-      <span className="text-xs font-black text-[#070528]">{label}</span>
+      <RequiredLabel required={required}>{label}</RequiredLabel>
       <input
         {...props}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+        required={required}
+        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-[#fee4e2]"
       />
     </label>
   );
 }
 
-function Select({ label, children, ...props }) {
+function Select({ label, required, children, ...props }) {
   return (
     <label className="block">
-      <span className="text-xs font-black text-[#070528]">{label}</span>
+      <RequiredLabel required={required}>{label}</RequiredLabel>
       <select
         {...props}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-black outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+        required={required}
+        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-black outline-none transition-all focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-[#fee4e2]"
       >
         {children}
       </select>
@@ -660,12 +697,12 @@ function PermissionMatrix({ className = "", title, groups, selected, lockedPermi
 
   return (
     <div className={className}>
-      <h3 className="text-sm font-black uppercase text-[#070528]">{title}</h3>
+      <h3 className="text-sm font-black uppercase text-[var(--dashboard-secondary)]">{title}</h3>
       <div className="mt-4 grid gap-4">
         {groups.map((group) => (
           <div key={group.key} className="border border-slate-200 bg-white p-4">
             <div className="mb-3">
-              <p className="text-sm font-black text-[#070528]">{group.label}</p>
+              <p className="text-sm font-black text-[var(--dashboard-secondary)]">{group.label}</p>
               <p className="mt-1 text-xs font-medium text-slate-500">{group.description}</p>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
@@ -676,7 +713,7 @@ function PermissionMatrix({ className = "", title, groups, selected, lockedPermi
                   <label
                     key={permission.key}
                     className={`flex min-h-12 cursor-pointer items-start gap-3 border px-3 py-2 text-sm transition-all ${
-                      isChecked ? "border-[#f04438]/30 bg-[#fff4ed]" : "border-slate-200 bg-white hover:bg-slate-50"
+                      isChecked ? "border-[var(--dashboard-primary)]/30 bg-[#fff4ed]" : "border-slate-200 bg-white hover:bg-slate-50"
                     } ${isLocked ? "cursor-not-allowed opacity-90" : ""}`}
                   >
                     <input
@@ -684,14 +721,14 @@ function PermissionMatrix({ className = "", title, groups, selected, lockedPermi
                       checked={isChecked}
                       disabled={isLocked}
                       onChange={() => onToggle(permission.key, isLocked)}
-                      className="mt-1 accent-[#f04438]"
+                      className="mt-1 accent-[var(--dashboard-primary)]"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block font-bold text-slate-800">{permission.label}</span>
                       <span className="block truncate text-xs font-medium text-slate-400">{permission.key}</span>
                     </span>
                     {isLocked && (
-                      <span className="rounded bg-white px-2 py-1 text-[10px] font-black uppercase text-[#f04438]">
+                      <span className="rounded bg-white px-2 py-1 text-[10px] font-black uppercase text-[var(--dashboard-primary)]">
                         Rôle
                       </span>
                     )}

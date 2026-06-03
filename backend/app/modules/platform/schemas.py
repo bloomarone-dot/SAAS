@@ -22,6 +22,34 @@ class SubscriptionPublic(OrmModel):
     updated_at: datetime
 
 
+class PlatformPaymentPublic(BaseModel):
+    id: str
+    restaurant_id: str
+    restaurant_name: str
+    restaurant_slug: str
+    reference: str
+    amount: int
+    currency: str
+    status: str
+    method: str
+    paid_at: Optional[datetime] = None
+    due_date: Optional[date] = None
+
+
+class PlatformActivityPublic(BaseModel):
+    id: str
+    restaurant_id: Optional[str] = None
+    restaurant_name: Optional[str] = None
+    user_id: Optional[str] = None
+    user_role: Optional[str] = None
+    action: str
+    entity_type: str
+    entity_id: Optional[str] = None
+    description: str
+    details_json: Optional[str] = None
+    created_at: datetime
+
+
 class SubscriptionUpdateIn(BaseModel):
     plan: str = Field(min_length=2, max_length=80)
     amount: int = Field(ge=0)
@@ -63,4 +91,3 @@ class PlatformOverview(BaseModel):
     currency: str
     last_checked_at: datetime
     checks: list[dict[str, str]]
-

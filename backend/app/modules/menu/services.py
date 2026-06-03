@@ -33,7 +33,9 @@ class MenuService:
         category = db.get(CategoryModel, category_id)
         if not category or category.restaurant_id != restaurant_id:
             return False
-        db.delete(category)
+        category.is_active = False
+        for dish in category.items:
+            dish.is_available = False
         db.commit()
         return True
 
@@ -50,6 +52,7 @@ class MenuService:
             name=dish_data.name,
             description=dish_data.description,
             price=dish_data.price,
+            cost_per_dish=dish_data.cost_per_dish,
             image_url=dish_data.image_url,
             is_available=dish_data.is_available,
         )
@@ -119,7 +122,7 @@ class MenuService:
         dish = db.get(DishModel, dish_id)
         if not dish or dish.restaurant_id != restaurant_id:
             return False
-        db.delete(dish)
+        dish.is_available = False
         db.commit()
         return True
 

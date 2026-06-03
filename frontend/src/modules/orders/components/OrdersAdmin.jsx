@@ -1,13 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
+import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
-const statuses = ["Toutes", "Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Annulée"];
-const nextStatuses = ["Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Annulée"];
+const statuses = ["Toutes", "Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
+const nextStatuses = ["Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
+
+function money(value) {
+  return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+}
+
+function paymentTone(order) {
+  if (["Payée", "Payee"].includes(order.status)) return "green";
+  if (order.status === "Annulée") return "red";
+  return "orange";
+}
 
 export function OrdersAdmin({ apiBaseUrl, onMessage }) {
   const [orders, setOrders] = useState([]);
   const [status, setStatus] = useState("Toutes");
+  const [search, setSearch] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState("");
   const [editingOrderId, setEditingOrderId] = useState("");
   const [editForm, setEditForm] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -15,6 +29,8 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
   useEffect(() => {
     loadOrders();
   }, [apiBaseUrl]);
+
+  useAutoRefresh(() => loadOrders({ silent: true }), 12000, [apiBaseUrl]);
 
   async function api(path, options = {}) {
     const token = localStorage.getItem("access_token");
@@ -31,14 +47,16 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
     return data;
   }
 
-  async function loadOrders() {
-    setIsLoading(true);
+  async function loadOrders({ silent = false } = {}) {
+    if (!silent) setIsLoading(true);
     try {
-      setOrders(await api("/api/v1/orders"));
+      const data = await api("/api/v1/orders?limit=200");
+      setOrders(data);
+      setSelectedOrderId((current) => current || data[0]?.id || "");
     } catch (error) {
-      onMessage(error.message);
+      if (!silent) onMessage(error.message);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }
 
@@ -49,6 +67,7 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
         body: JSON.stringify({ status: newStatus }),
       });
       setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setSelectedOrderId(updated.id);
       onMessage(`Commande ${updated.order_number} mise à jour.`);
     } catch (error) {
       onMessage(error.message);
@@ -57,6 +76,7 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
 
   function startEdit(order) {
     setEditingOrderId(order.id);
+    setSelectedOrderId(order.id);
     setEditForm({
       customer_name: order.customer_name ?? "",
       customer_phone: order.customer_phone ?? "",
@@ -89,6 +109,7 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
         }),
       });
       setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setSelectedOrderId(updated.id);
       setEditingOrderId("");
       setEditForm(null);
       onMessage(`Commande ${updated.order_number} modifiée.`);
@@ -100,15 +121,13 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
   }
 
   async function deleteOrder(order) {
+    if (!window.confirm(`Archiver la commande ${order.order_number} ?\n\nElle restera en base de données et pourra être restaurée en changeant son statut.`)) return;
     setIsLoading(true);
     try {
       await api(`/api/v1/orders/${order.id}`, { method: "DELETE" });
       setOrders((current) => current.filter((item) => item.id !== order.id));
-      if (editingOrderId === order.id) {
-        setEditingOrderId("");
-        setEditForm(null);
-      }
-      onMessage(`Commande ${order.order_number} supprimée.`);
+      setSelectedOrderId("");
+      onMessage(`Commande ${order.order_number} archivée.`);
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -116,182 +135,213 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
     }
   }
 
-  const visibleOrders = useMemo(
-    () => orders.filter((order) => status === "Toutes" || order.status === status),
-    [orders, status]
-  );
-  const total = visibleOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+  const visibleOrders = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return orders.filter((order) => {
+      const matchesStatus = status === "Toutes" || order.status === status;
+      const matchesSearch = !query || [
+        order.order_number,
+        order.customer_name,
+        order.customer_phone,
+        order.fulfillment_type,
+        order.order_source,
+        order.server_name,
+        order.table_name,
+        order.table_room,
+        order.status,
+      ].join(" ").toLowerCase().includes(query);
+      return matchesStatus && matchesSearch;
+    });
+  }, [orders, search, status]);
+  const selectedOrder = orders.find((order) => order.id === selectedOrderId) || visibleOrders[0] || null;
+  const todayOrders = orders.filter((order) => new Date(order.created_at).toDateString() === new Date().toDateString());
 
   return (
-    <section className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
-        <div>
-          <p className="text-xs font-black uppercase tracking-normal text-[var(--dashboard-primary)]">Commandes clients</p>
-          <h1 className="mt-2 text-4xl font-black text-slate-950">Commandes en ligne</h1>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-            Suivez les commandes reçues depuis la vitrine et mettez à jour leur progression.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={loadOrders}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
-        >
-          <DashboardIcon name="Activity" size={17} />
-          Actualiser
-        </button>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-[1fr_auto_auto]">
-        <label className="flex h-12 items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 shadow-sm">
-          <DashboardIcon name="SlidersHorizontal" size={17} className="text-slate-400" />
-          <select value={status} onChange={(event) => setStatus(event.target.value)} className="w-full bg-transparent text-sm font-black outline-none">
-            {statuses.map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </label>
-        <Metric label="Commandes" value={visibleOrders.length} />
-        <Metric label="Total" value={`${total.toLocaleString("fr-FR")} FCFA`} />
-      </div>
+    <AdminPage
+      eyebrow="Commandes"
+      title="Gestion des commandes"
+      subtitle="Consultez et gérez toutes les commandes de votre restaurant."
+      action={<SecondaryAction icon="Download" onClick={() => exportCsv(visibleOrders)}>Exporter</SecondaryAction>}
+    >
+      <AdminKpis items={[
+        { label: "Commandes du jour", value: todayOrders.length, icon: "ShoppingCart", trend: "aujourd'hui" },
+        { label: "En attente", value: orders.filter((order) => ["Nouvelle", "Acceptée"].includes(order.status)).length, icon: "Clock3", tone: "warn" },
+        { label: "En préparation", value: orders.filter((order) => order.status === "En préparation").length, icon: "ChefHat" },
+        { label: "Prêtes", value: orders.filter((order) => order.status === "Prête").length, icon: "Utensils" },
+      ]} />
 
       {editForm && (
-        <form onSubmit={saveOrder} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-            <div>
-              <h2 className="text-lg font-black text-slate-950">Modifier la commande</h2>
-              <p className="mt-1 text-sm font-semibold text-slate-500">Corrigez les informations client, le statut, le paiement ou les frais.</p>
-            </div>
-            <button type="button" onClick={() => { setEditingOrderId(""); setEditForm(null); }} className="h-10 rounded-lg border border-slate-200 px-4 text-xs font-black text-slate-700">
-              Annuler
-            </button>
-          </div>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <Field name="customer_name" label="Client" value={editForm.customer_name} onChange={updateEditField} required />
-            <Field name="customer_phone" label="Téléphone" value={editForm.customer_phone} onChange={updateEditField} required />
+        <AdminCard title="Modifier la commande" action={<SecondaryAction onClick={() => { setEditingOrderId(""); setEditForm(null); }}>Annuler</SecondaryAction>}>
+          <form onSubmit={saveOrder} className="grid gap-4 md:grid-cols-3">
+            <Field name="customer_name" label="Client" required value={editForm.customer_name} onChange={updateEditField} />
+            <Field name="customer_phone" label="Téléphone" required value={editForm.customer_phone} onChange={updateEditField} />
             <Field name="customer_address" label="Adresse" value={editForm.customer_address} onChange={updateEditField} />
-            <Select name="status" label="Statut" value={editForm.status} onChange={updateEditField} options={nextStatuses} />
-            <Select name="fulfillment_type" label="Service" value={editForm.fulfillment_type} onChange={updateEditField} options={["Livraison", "Sur place", "À emporter"]} />
+            <Field label="Statut">
+              <select name="status" value={editForm.status} onChange={updateEditField} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none">
+                {nextStatuses.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </Field>
+            <Field name="fulfillment_type" label="Canal" value={editForm.fulfillment_type} onChange={updateEditField} />
             <Field name="payment_method" label="Paiement" value={editForm.payment_method} onChange={updateEditField} />
             <Field name="discount_amount" label="Remise" type="number" min="0" value={editForm.discount_amount} onChange={updateEditField} />
             <Field name="delivery_fee" label="Livraison" type="number" min="0" value={editForm.delivery_fee} onChange={updateEditField} />
             <Field name="notes" label="Notes" value={editForm.notes} onChange={updateEditField} />
-          </div>
-          <button type="submit" disabled={isLoading} className="mt-5 inline-flex h-11 items-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white disabled:opacity-60">
-            <DashboardIcon name="Pencil" size={16} />
-            Enregistrer
-          </button>
-        </form>
+            <div className="md:col-span-3"><PrimaryAction icon="Pencil" type="submit" disabled={isLoading}>Enregistrer</PrimaryAction></div>
+          </form>
+        </AdminCard>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        {isLoading ? (
-          <div className="px-6 py-12 text-center text-sm font-black text-slate-500">Chargement des commandes...</div>
-        ) : visibleOrders.length === 0 ? (
-          <div className="px-6 py-12 text-center">
-            <DashboardIcon name="ClipboardList" size={28} className="mx-auto text-slate-400" />
-            <p className="mt-3 text-lg font-black text-slate-950">Aucune commande</p>
-            <p className="mt-1 text-sm font-semibold text-slate-500">Les commandes clients apparaîtront ici dès validation sur la vitrine.</p>
+      <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
+        <AdminCard>
+          <div className="mb-4 flex flex-wrap gap-3 border-b border-slate-100 pb-4">
+            {statuses.map((item) => (
+              <button key={item} type="button" onClick={() => setStatus(item)} className={`h-10 border-b-2 px-3 text-sm font-black ${status === item ? "border-[var(--dashboard-primary)] text-[var(--dashboard-primary)]" : "border-transparent text-slate-500"}`}>
+                {item} <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs">{item === "Toutes" ? orders.length : orders.filter((order) => order.status === item).length}</span>
+              </button>
+            ))}
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
-                <tr>
-                  <th className="px-5 py-4">Commande</th>
-                  <th className="px-5 py-4">Client</th>
-                  <th className="px-5 py-4">Articles</th>
-                  <th className="px-5 py-4">Total</th>
-                  <th className="px-5 py-4">Statut</th>
-                  <th className="px-5 py-4">Créée le</th>
-                  <th className="px-5 py-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {visibleOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-slate-50">
-                    <td className="px-5 py-4 font-black text-slate-950">{order.order_number}</td>
-                    <td className="px-5 py-4">
-                      <p className="font-black text-slate-900">{order.customer_name}</p>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">{order.customer_phone}</p>
-                      <p className="mt-1 max-w-[220px] truncate text-xs font-semibold text-slate-500">{order.customer_address || order.fulfillment_type}</p>
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      {order.items.map((item) => (
-                        <p key={item.id} className="font-semibold">{item.quantity} x {item.name}</p>
-                      ))}
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="font-black text-slate-950">{Number(order.total_amount).toLocaleString("fr-FR")} FCFA</p>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">
-                        Remise {Number(order.discount_amount || 0).toLocaleString("fr-FR")} · Livraison {Number(order.delivery_fee || 0).toLocaleString("fr-FR")}
-                      </p>
-                    </td>
-                    <td className="px-5 py-4"><StatusBadge status={order.status} /></td>
-                    <td className="px-5 py-4 font-semibold text-slate-500">{new Date(order.created_at).toLocaleString("fr-FR")}</td>
-                    <td className="px-5 py-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        <select
-                          value={order.status}
-                          onChange={(event) => updateStatus(order, event.target.value)}
-                          className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black outline-none focus:border-[var(--dashboard-primary)]"
-                        >
-                          {nextStatuses.map((item) => <option key={item}>{item}</option>)}
-                        </select>
-                        <button type="button" onClick={() => startEdit(order)} className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-700 hover:border-[var(--dashboard-primary)]">
-                          Modifier
-                        </button>
-                        <button type="button" onClick={() => deleteOrder(order)} className="h-10 rounded-lg border border-red-100 px-3 text-xs font-black text-red-600 hover:bg-red-50">
-                          Supprimer
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_170px_170px_auto]">
+            <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une commande, client, table..." />
+            <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none">
+              {statuses.map((item) => <option key={item}>{item}</option>)}
+            </select>
+            <input type="date" className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none" />
+            <SecondaryAction icon="Activity" onClick={loadOrders}>Actualiser</SecondaryAction>
           </div>
-        )}
+          <OrdersTable orders={visibleOrders} selectedOrderId={selectedOrder?.id} onSelect={setSelectedOrderId} onEdit={startEdit} onDelete={deleteOrder} onStatus={updateStatus} />
+        </AdminCard>
+
+        <div className="space-y-5">
+          <AdminCard title="Détail de la commande">
+            {selectedOrder ? <OrderDetail order={selectedOrder} onStatus={updateStatus} /> : <EmptyState title="Aucune commande" />}
+          </AdminCard>
+          <AdminCard title="Activité récente">
+            <div className="space-y-4">
+              {orders.slice(0, 5).map((order) => (
+                <div key={order.id} className="border-l-2 border-[var(--dashboard-primary)] pl-3">
+                  <p className="text-sm font-black text-slate-950">{order.order_number}</p>
+                  <p className="text-xs font-semibold text-slate-500">Statut changé en <span className="text-[var(--dashboard-primary)]">{order.status}</span></p>
+                  <p className="mt-1 text-xs text-slate-400">{new Date(order.updated_at).toLocaleString("fr-FR")}</p>
+                </div>
+              ))}
+            </div>
+          </AdminCard>
+        </div>
       </div>
-    </section>
+    </AdminPage>
   );
 }
 
-function Field({ label, ...props }) {
+function OrdersTable({ orders, selectedOrderId, onSelect, onEdit, onDelete, onStatus }) {
+  if (!orders.length) return <EmptyState icon="ClipboardList" title="Aucune commande" text="Les commandes clients apparaîtront ici." />;
   return (
-    <label className="block">
-      <span className="mb-2 block text-xs font-black uppercase text-slate-500">{label}</span>
-      <input {...props} className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[var(--dashboard-primary)]" />
-    </label>
-  );
-}
-
-function Select({ label, options, ...props }) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-xs font-black uppercase text-slate-500">{label}</span>
-      <select {...props} className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[var(--dashboard-primary)]">
-        {options.map((item) => <option key={item}>{item}</option>)}
-      </select>
-    </label>
-  );
-}
-
-function Metric({ label, value }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white px-5 py-3 shadow-sm">
-      <p className="text-xs font-black uppercase text-slate-400">{label}</p>
-      <p className="mt-1 text-lg font-black text-slate-950">{value}</p>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1120px] text-left text-sm">
+        <thead className="text-xs font-black text-slate-500">
+          <tr>
+            <th className="py-3">Référence</th>
+            <th className="py-3">Client / Table</th>
+            <th className="py-3">Source</th>
+            <th className="py-3">Serveuse</th>
+            <th className="py-3">Total</th>
+            <th className="py-3">Statut commande</th>
+            <th className="py-3">Paiement</th>
+            <th className="py-3">Date</th>
+            <th className="py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {orders.map((order) => (
+            <tr key={order.id} onClick={() => onSelect(order.id)} className={`cursor-pointer ${selectedOrderId === order.id ? "bg-emerald-50" : "hover:bg-slate-50"}`}>
+              <td className="py-3 font-black text-slate-950">{order.order_number}</td>
+              <td className="py-3">
+                <p className="font-black text-slate-900">{order.table_id ? `Table ${order.table_name || order.table_id}` : order.customer_name}</p>
+                <p className="text-xs font-semibold text-slate-500">{order.table_id ? order.table_room || "Salle non précisée" : order.customer_phone}</p>
+              </td>
+              <td className="py-3">
+                <StatusPill tone={order.order_source === "En ligne" ? "purple" : "green"}>{order.order_source || order.fulfillment_type}</StatusPill>
+                <p className="mt-1 text-xs font-semibold text-slate-500">{order.fulfillment_type}</p>
+              </td>
+              <td className="py-3 font-semibold text-slate-600">{order.server_name || "-"}</td>
+              <td className="py-3 font-black text-slate-900">{money(order.total_amount)}</td>
+              <td className="py-3"><StatusBadge status={order.status} /></td>
+              <td className="py-3"><StatusPill tone={paymentTone(order)}>{["Payée", "Payee"].includes(order.status) ? "Payé" : "En attente"}</StatusPill></td>
+              <td className="py-3 font-semibold text-slate-500">{new Date(order.created_at).toLocaleDateString("fr-FR")}</td>
+              <td className="py-3 text-right" onClick={(event) => event.stopPropagation()}>
+                <IconButton icon="Eye" title="Voir" onClick={() => onSelect(order.id)} />
+                <IconButton icon="Pencil" title="Modifier" onClick={() => onEdit(order)} />
+                <select value={order.status} onChange={(event) => onStatus(order, event.target.value)} className="ml-2 h-9 rounded-lg border border-slate-200 px-2 text-xs font-black outline-none">
+                  {nextStatuses.map((item) => <option key={item}>{item}</option>)}
+                </select>
+                <IconButton icon="Trash2" title="Supprimer" tone="red" onClick={() => onDelete(order)} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
+function OrderDetail({ order, onStatus }) {
+  const visibleItems = order.items.filter((item) => item.sale_channel !== "EMBALLAGE");
+  const subtotal = visibleItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
+  return (
+    <div className="space-y-5">
+      <div>
+        <p className="text-2xl font-black text-[var(--dashboard-secondary)]">{order.order_number}</p>
+        <p className="mt-1 text-sm font-semibold text-slate-500">{order.customer_name} · {new Date(order.created_at).toLocaleString("fr-FR")}</p>
+        <p className="mt-1 text-xs font-bold text-slate-500">
+          {order.order_source || order.fulfillment_type} · {order.table_id ? `${order.table_room || "Salle"} / Table ${order.table_name || order.table_id}` : "Commande client"} · Serveuse : {order.server_name || "-"}
+        </p>
+        <div className="mt-2"><StatusBadge status={order.status} /></div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-100 p-3 text-center">
+        <Metric label="Articles" value={visibleItems.length} />
+        <Metric label="Sous-total" value={money(subtotal)} />
+        <Metric label="Total" value={money(order.total_amount)} />
+      </div>
+      <div className="divide-y divide-slate-100">
+        {visibleItems.map((item) => (
+          <div key={item.id} className="flex justify-between py-2 text-sm">
+            <span className="font-semibold text-slate-600">{item.quantity} x {item.name}</span>
+            <strong>{money(item.line_total)}</strong>
+          </div>
+        ))}
+      </div>
+      {order.notes && <div className="rounded-lg bg-orange-50 p-3 text-sm font-semibold text-orange-700">{order.notes}</div>}
+      <div className="space-y-2">
+        {["En préparation", "Prête", "Livrée", "Annulée"].map((status) => (
+          <button key={status} type="button" onClick={() => onStatus(order, status)} className="flex w-full items-center justify-between rounded-lg border border-slate-200 p-3 text-left text-sm font-black text-slate-700 hover:border-[var(--dashboard-primary)]">
+            {status}<DashboardIcon name="ChevronDown" size={15} className="-rotate-90" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }) {
+  return <div><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-1 font-black text-slate-950">{value}</p></div>;
+}
+
 function StatusBadge({ status }) {
-  const colors = {
-    Nouvelle: "bg-blue-50 text-blue-700",
-    Acceptée: "bg-emerald-50 text-emerald-700",
-    "En préparation": "bg-amber-50 text-amber-700",
-    Prête: "bg-violet-50 text-violet-700",
-    Livrée: "bg-slate-100 text-slate-700",
-    Annulée: "bg-red-50 text-red-700",
+  const tones = {
+    Nouvelle: "blue",
+    Acceptée: "green",
+    "En préparation": "orange",
+    Prête: "green",
+    Livrée: "slate",
+    Payée: "green",
+    Annulée: "red",
   };
-  return <span className={`rounded-md px-3 py-1 text-xs font-black ${colors[status] ?? colors.Nouvelle}`}>{status}</span>;
+  return <StatusPill tone={tones[status] ?? "slate"}>{status}</StatusPill>;
+}
+
+function exportCsv(rows) {
+  const csv = ["Référence;Client;Source;Serveuse;Salle;Canal;Total;Statut;Date", ...rows.map((order) => `${order.order_number};${order.customer_name};${order.order_source || ""};${order.server_name || ""};${order.table_room || ""};${order.fulfillment_type};${order.total_amount};${order.status};${order.created_at}`)].join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  link.download = "commandes.csv";
+  link.click();
 }

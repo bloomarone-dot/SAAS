@@ -83,8 +83,10 @@ def delete_category(
     category = db.get(MenuCategory, category_id)
     if not category or category.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Categorie introuvable")
-    log_action(db, current_user, "catalog.category_delete", "menu_category", category.id, f"Suppression catégorie carte {category.name}")
-    db.delete(category)
+    category.is_active = False
+    for item in category.items:
+        item.is_available = False
+    log_action(db, current_user, "catalog.category_archive", "menu_category", category.id, f"Archivage catégorie carte {category.name}")
     db.commit()
     return None
 
@@ -117,7 +119,7 @@ def create_item(
         category.description if category else None,
     )
     db.add(item)
-    log_action(db, current_user, "catalog.item_create", "menu_item", item.id, f"Création plat vendable {item.name}", {"price": item.price})
+    log_action(db, current_user, "catalog.item_create", "menu_item", item.id, f"Création plat {item.name}", {"price": item.price})
     db.commit()
     db.refresh(item)
     return item
@@ -145,7 +147,7 @@ def update_item(
         category.name if category else None,
         category.description if category else None,
     )
-    log_action(db, current_user, "catalog.item_update", "menu_item", item.id, f"Modification plat vendable {item.name}", {"fields": sorted(payload_data)})
+    log_action(db, current_user, "catalog.item_update", "menu_item", item.id, f"Modification plat {item.name}", {"fields": sorted(payload_data)})
     db.commit()
     db.refresh(item)
     return item
@@ -161,7 +163,7 @@ def delete_item(
     item = db.get(MenuItem, item_id)
     if not item or item.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Plat introuvable")
-    log_action(db, current_user, "catalog.item_delete", "menu_item", item.id, f"Suppression plat vendable {item.name}")
-    db.delete(item)
+    item.is_available = False
+    log_action(db, current_user, "catalog.item_archive", "menu_item", item.id, f"Archivage plat vendable {item.name}")
     db.commit()
     return None

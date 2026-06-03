@@ -89,7 +89,9 @@ export default function DishForm({ categories, onDishCreated }) {
         )}
 
         <label className="block">
-          <span className="text-xs font-black text-[#070528]">Catégorie</span>
+          <span className="text-xs font-black text-[#070528]">
+            Catégorie <span className="text-red-500">*</span>
+          </span>
           <select
             required
             value={categoryId}
@@ -107,7 +109,9 @@ export default function DishForm({ categories, onDishCreated }) {
         </label>
 
         <label className="block">
-          <span className="text-xs font-black text-[#070528]">Nom du plat</span>
+          <span className="text-xs font-black text-[#070528]">
+            Nom du plat <span className="text-red-500">*</span>
+          </span>
           <input
             type="text"
             required
@@ -120,7 +124,9 @@ export default function DishForm({ categories, onDishCreated }) {
         </label>
 
         <label className="block">
-          <span className="text-xs font-black text-[#070528]">Prix de vente</span>
+          <span className="text-xs font-black text-[#070528]">
+            Prix de vente <span className="text-red-500">*</span>
+          </span>
           <input
             type="number"
             required

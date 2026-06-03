@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.dependencies import require_tenant_user
+from app.dependencies import assert_permission, require_tenant_user
 from app.modules.orders.models import CustomerOrder
+from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
 from .models import TableModel, TableStatus
 from .schemas import (
@@ -24,10 +25,19 @@ router = APIRouter(
 
 # 1. CRÉER UNE TABLE
 @router.post("", response_model=TableResponse, status_code=status.HTTP_201_CREATED)
-def create_table(restaurant_id: str, obj_in: TableCreate, db: Session = Depends(get_db)):
+def create_table(
+    restaurant_id: str,
+    obj_in: TableCreate,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_table_update_allowed(current_user)
+    if restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=403, detail="Restaurant non autorise")
+
     # Vérifier si le numéro de table existe déjà pour ce restaurant
     existing_table = db.query(TableModel).filter(
-        TableModel.restaurant_id == restaurant_id,
+        TableModel.restaurant_id == current_user.restaurant_id,
         TableModel.number == obj_in.name
     ).first()
     
@@ -38,8 +48,9 @@ def create_table(restaurant_id: str, obj_in: TableCreate, db: Session = Depends(
         )
 
     db_table = TableModel(
-        restaurant_id=restaurant_id,
+        restaurant_id=current_user.restaurant_id,
         number=obj_in.name,
+        room=obj_in.room,
         capacity=obj_in.capacity,
         status=TableStatus.LIBRE
     )
@@ -50,25 +61,45 @@ def create_table(restaurant_id: str, obj_in: TableCreate, db: Session = Depends(
 
 # 2. LISTER LES TABLES D'UN RESTAURANT
 @router.get("/restaurant/{restaurant_id}", response_model=List[TableResponse])
-def get_restaurant_tables(restaurant_id: str, db: Session = Depends(get_db)):
-    tables = db.query(TableModel).filter(TableModel.restaurant_id == restaurant_id).all()
-    active_orders_by_table = {
-        table.id: get_active_orders(db, table.id)
-        for table in tables
-    }
+def get_restaurant_tables(
+    restaurant_id: str,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_table_read_allowed(current_user)
+    if restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=403, detail="Restaurant non autorise")
+
+    tables = db.query(TableModel).filter(
+        TableModel.restaurant_id == current_user.restaurant_id,
+        TableModel.is_active.is_(True),
+    ).all()
+    table_ids = [table.id for table in tables]
+    active_orders_by_table = get_active_orders_by_table(db, table_ids, current_user.restaurant_id)
     return [serialize_table(table, active_orders_by_table.get(table.id, [])) for table in tables]
 
 # 3. MODIFIER UNE TABLE (Changer le statut : Libre -> Occupée)
 @router.patch("/{table_id}", response_model=TableResponse)
-def update_table_status(table_id: int, obj_in: TableUpdate, db: Session = Depends(get_db)):
-    db_table = db.query(TableModel).filter(TableModel.id == table_id).first()
-    if not db_table:
-        raise HTTPException(status_code=404, detail="Table introuvable.")
+def update_table_status(
+    table_id: int,
+    obj_in: TableUpdate,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_table_update_allowed(current_user)
+    db_table = get_table_for_user(db, table_id, current_user)
 
     # Mettre à jour uniquement les champs envoyés
     update_data = obj_in.dict(exclude_unset=True)
     if "name" in update_data:
         update_data["number"] = update_data.pop("name")
+        existing_table = db.query(TableModel).filter(
+            TableModel.restaurant_id == current_user.restaurant_id,
+            TableModel.number == update_data["number"],
+            TableModel.id != db_table.id,
+        ).first()
+        if existing_table:
+            raise HTTPException(status_code=400, detail=f"La table {update_data['number']} existe déjà.")
     for field, value in update_data.items():
         setattr(db_table, field, value)
 
@@ -78,12 +109,17 @@ def update_table_status(table_id: int, obj_in: TableUpdate, db: Session = Depend
 
 # 4. SUPPRIMER UNE TABLE
 @router.delete("/{table_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_table(table_id: int, db: Session = Depends(get_db)):
-    db_table = db.query(TableModel).filter(TableModel.id == table_id).first()
-    if not db_table:
-        raise HTTPException(status_code=404, detail="Table introuvable.")
+def delete_table(
+    table_id: int,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_table_update_allowed(current_user)
+    db_table = get_table_for_user(db, table_id, current_user)
+    if get_active_orders(db, db_table.id):
+        raise HTTPException(status_code=400, detail="Impossible de supprimer une table avec commande active.")
     
-    db.delete(db_table)
+    db_table.is_active = False
     db.commit()
     return None
 
@@ -152,6 +188,18 @@ def get_table_for_user(db: Session, table_id: int, user: User) -> TableModel:
     return db_table
 
 
+def assert_table_read_allowed(user: User) -> None:
+    if user.role in {Role.ADMIN, Role.MANAGER}:
+        return
+    assert_permission(user, Permission.SERVICE_READ)
+
+
+def assert_table_update_allowed(user: User) -> None:
+    if user.role in {Role.ADMIN, Role.MANAGER}:
+        return
+    assert_permission(user, Permission.SERVICE_UPDATE)
+
+
 def get_active_orders(db: Session, table_id: int) -> list[CustomerOrder]:
     inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee"}
     return (
@@ -161,6 +209,25 @@ def get_active_orders(db: Session, table_id: int) -> list[CustomerOrder]:
         .order_by(CustomerOrder.created_at.asc())
         .all()
     )
+
+
+def get_active_orders_by_table(db: Session, table_ids: list[int], restaurant_id: str) -> dict[int, list[CustomerOrder]]:
+    if not table_ids:
+        return {}
+    inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee"}
+    orders = (
+        db.query(CustomerOrder)
+        .filter(CustomerOrder.restaurant_id == restaurant_id)
+        .filter(CustomerOrder.table_id.in_(table_ids))
+        .filter(~CustomerOrder.status.in_(inactive_statuses))
+        .order_by(CustomerOrder.created_at.asc())
+        .all()
+    )
+    grouped: dict[int, list[CustomerOrder]] = {}
+    for order in orders:
+        if order.table_id is not None:
+            grouped.setdefault(order.table_id, []).append(order)
+    return grouped
 
 
 def serialize_table_order(order: CustomerOrder, table: TableModel, db: Session) -> TableOrderResponse:
@@ -186,6 +253,7 @@ def serialize_table(table: TableModel, active_orders: list[CustomerOrder]) -> Ta
         restaurant_id=table.restaurant_id,
         name=table.number,
         number=table.number,
+        room=table.room,
         capacity=int(table.capacity or 0),
         status=table.status,
         occupied_seats=occupied_seats,

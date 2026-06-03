@@ -4,20 +4,23 @@ from .models import TableStatus
 
 class TableBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=40, example="T1")
+    room: str = Field(default="Rez-de-chaussée", min_length=1, max_length=80)
     capacity: int = Field(default=2, ge=1, example=4)
 
 class TableCreate(TableBase):
     pass
 
 class TableUpdate(BaseModel):
-    name: Optional[str] = None
-    capacity: Optional[int] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    room: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    capacity: Optional[int] = Field(default=None, ge=1)
     status: Optional[TableStatus] = None
 
 class TableResponse(TableBase):
     id: int
     restaurant_id: str
     number: str
+    room: str
     status: TableStatus
     occupied_seats: int = 0
     free_seats: int = 0

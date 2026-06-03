@@ -53,7 +53,7 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
 
     try {
       const result = await tableApi.createOrder(table.id, { party_size: requestedSeats });
-      onOpenMenuForOrder(result.order.id, table.name || table.number);
+      onOpenMenuForOrder(result.order.id, table.name || table.number, table.room);
       onClose();
     } catch (err) {
       setError(err.message || "Erreur lors de l'ouverture de la commande.");
@@ -61,7 +61,7 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
   }
 
   function openExistingOrder(order) {
-    onOpenMenuForOrder(order.id, table.name || table.number);
+    onOpenMenuForOrder(order.id, table.name || table.number, table.room);
     onClose();
   }
 
@@ -72,7 +72,7 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
           <div>
             <h3 className="text-lg font-black">Table {table.name || table.number}</h3>
             <p className="text-xs font-semibold text-white/70">
-              {occupiedSeats}/{table.capacity} place(s) occupée(s) · {freeSeats} libre(s)
+              {table.room || 'Rez-de-chaussée'} · {occupiedSeats}/{table.capacity} place(s) occupée(s) · {freeSeats} libre(s)
             </p>
           </div>
           <button type="button" onClick={onClose} className="text-2xl font-black text-white/70 hover:text-white">&times;</button>

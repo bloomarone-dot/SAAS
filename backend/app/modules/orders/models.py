@@ -46,6 +46,7 @@ class CustomerOrderItem(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     order_id: Mapped[str] = mapped_column(String(36), ForeignKey("customer_orders.id"), index=True, nullable=False)
     menu_item_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("menu_items.id"), nullable=True)
+    stock_item_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("stock_items.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     sale_channel: Mapped[str] = mapped_column(String(20), default="REPAS", nullable=False, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)

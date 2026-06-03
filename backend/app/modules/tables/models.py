@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, Enum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, Enum, ForeignKey, Integer, String
 
 from app.database import Base
 
@@ -15,7 +15,9 @@ class TableModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     restaurant_id = Column(String(36), ForeignKey("restaurants.id", ondelete="CASCADE"), nullable=False)
     number = Column(String(40), nullable=False)
+    room = Column(String(80), default="Rez-de-chaussée", nullable=False)
     capacity = Column(Integer, default=2)
+    is_active = Column(Boolean, default=True, nullable=False)
     status = Column(
         Enum(TableStatus, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         default=TableStatus.LIBRE,

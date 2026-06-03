@@ -4,27 +4,34 @@ import POSPage from './modules/menu/pages/POSPage';
 import KitchenPage from './modules/menu/pages/KitchenPage';
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
+import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
 import { LoginPanel } from "@/features/auth/components/LoginPanel";
 import { SuperadminRestaurants } from "@/features/restaurants/components/SuperadminRestaurants";
 import LandingPage from "@/LandingPage";
 import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
 import { AuditLogsAdmin } from "@/modules/admin/components/AuditLogsAdmin";
 import { CatalogAdmin } from "@/modules/admin/components/CatalogAdmin";
+import { PromotionsAdmin } from "@/modules/admin/components/PromotionsAdmin";
 import { RestaurantSettingsAdmin } from "@/modules/admin/components/RestaurantSettingsAdmin";
 import { StaffPermissionsAdmin } from "@/modules/admin/components/StaffPermissionsAdmin";
 import CategoriesPage from "@/modules/menu/pages/CategoriesPage";
 import DishesPage from "@/modules/menu/pages/DishesPage";
-import { ServerClients, ServerHistory, ServerInvoices } from "@/modules/menu/components/ServerClientSections";
+import { ServerClients, ServerFreeTables, ServerHistory, ServerInvoices, ServerOpenTables, ServerOrderWorkspace } from "@/modules/menu/components/ServerClientSections";
 import { OrdersAdmin } from "@/modules/orders/components/OrdersAdmin";
 import {
+  SuperadminActivation,
+  SuperadminGlobalStats,
   SuperadminOwners,
-  SuperadminPlatform,
+  SuperadminPayments,
+  SuperadminPlatformActivity,
   SuperadminSettings,
   SuperadminSubscriptions,
+  SuperadminRestaurantDetail,
 } from "@/modules/platform/components/SuperadminSections";
 import { StockDashboard } from "@/components/dashboard/roles/StockDashboard";
 import { StockOperations } from "@/modules/stock/components/StockOperations";
 import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
+import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
 const initialLogin = { login: "", password: "" };
 const initialRestaurant = {
@@ -35,11 +42,36 @@ const initialRestaurant = {
   owner_password: "",
   owner_first_name: "",
   owner_last_name: "",
+  owner_phone: "",
+  owner_alt_phone: "",
 };
 
 function getApiBaseUrl() {
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (import.meta.env.VITE_API_URL) {
+    try {
+      const configured = new URL(import.meta.env.VITE_API_URL);
+      const pageHost = window.location.hostname;
+      if (
+        configured.hostname === "localhost" &&
+        pageHost &&
+        pageHost !== "localhost" &&
+        pageHost !== "127.0.0.1" &&
+        !isDockerBridgeHost(pageHost)
+      ) {
+        configured.hostname = pageHost;
+        return configured.toString().replace(/\/$/, "");
+      }
+    } catch {
+      return import.meta.env.VITE_API_URL;
+    }
+    return import.meta.env.VITE_API_URL;
+  }
   return `${window.location.protocol}//${window.location.hostname}:8001`;
+}
+
+function isDockerBridgeHost(hostname) {
+  const parts = hostname.split(".").map((part) => Number(part));
+  return parts.length === 4 && parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
 }
 
 const rolePaths = {
@@ -106,6 +138,7 @@ export default function App() {
   const [restaurantTheme, setRestaurantTheme] = useState(null);
   const [adminSummary, setAdminSummary] = useState(null);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
+  const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showLogin, setShowLogin] = useState(() => shouldShowLoginForPath());
@@ -165,6 +198,11 @@ export default function App() {
     };
   }, [apiBaseUrl, session?.role]);
 
+  useAutoRefresh(async () => {
+    if (session?.role === "SUPERADMIN") await fetchRestaurants({ silent: true });
+    if (session?.role === "ADMIN") await fetchAdminSummary({ silent: true });
+  }, 15000, [session?.role, apiBaseUrl]);
+
   useEffect(() => {
     function handlePopState() {
       if (session) {
@@ -178,7 +216,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [session]);
 
-  async function fetchRestaurants() {
+  async function fetchRestaurants({ silent = false } = {}) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
 
@@ -189,11 +227,11 @@ export default function App() {
       if (!response.ok) return;
       setRestaurants(await response.json());
     } catch {
-      setMessage("Impossible de charger la liste des restaurants.");
+      if (!silent) setMessage("Impossible de charger la liste des restaurants.");
     }
   }
 
-  async function fetchAdminSummary() {
+  async function fetchAdminSummary({ silent = false } = {}) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
 
@@ -203,12 +241,12 @@ export default function App() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setMessage(data.detail ?? "Impossible de charger les indicateurs du tableau de bord.");
+        if (!silent) setMessage(data.detail ?? "Impossible de charger les indicateurs du tableau de bord.");
         return;
       }
       setAdminSummary(data);
     } catch (error) {
-      setMessage(error.message || "Impossible de charger les indicateurs du tableau de bord.");
+      if (!silent) setMessage(error.message || "Impossible de charger les indicateurs du tableau de bord.");
     }
   }
 
@@ -224,8 +262,8 @@ export default function App() {
       const restaurant = await response.json();
       setRestaurantTheme({
         name: restaurant.name,
-        primary: restaurant.primary_color || "#f04438",
-        secondary: restaurant.secondary_color || "#07133d",
+        primary: restaurant.primary_color || "#078d50",
+        secondary: restaurant.secondary_color || "#003f2f",
       });
     } catch {
       // Theme loading should never block dashboard usage.
@@ -272,7 +310,7 @@ export default function App() {
       if (data.user.role === "ADMIN") fetchAdminSummary();
       if (data.user.restaurant_id) fetchRestaurantTheme();
     } catch {
-      setMessage("API indisponible. Vérifie que le backend est démarré.");
+      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
     } finally {
       setIsLoading(false);
     }
@@ -298,7 +336,7 @@ export default function App() {
       setMessage(data.message);
       return data.reset_token ?? null;
     } catch {
-      setMessage("API indisponible. Vérifie que le backend est démarré.");
+      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
       return null;
     } finally {
       setIsLoading(false);
@@ -325,7 +363,7 @@ export default function App() {
       setMessage(data.message ?? "Mot de passe réinitialisé.");
       return true;
     } catch {
-      setMessage("API indisponible. Vérifie que le backend est démarré.");
+      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
       return false;
     } finally {
       setIsLoading(false);
@@ -361,7 +399,7 @@ export default function App() {
         `Restaurant "${data.restaurant.name}" créé. Propriétaire: ${data.owner.username}`
       );
     } catch {
-      setMessage("API indisponible. Vérifie que le backend est démarré.");
+      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
     } finally {
       setIsLoading(false);
     }
@@ -429,6 +467,7 @@ export default function App() {
       user={session}
       activeView={activeView}
       theme={restaurantTheme}
+      apiBaseUrl={apiBaseUrl}
       onNavigate={(view) => {
         setActiveView(view);
         setMessage("");
@@ -436,6 +475,12 @@ export default function App() {
         if (view === "restaurants") {
           setShowRestaurantForm(false);
           fetchRestaurants();
+        }
+        if (view === "create-restaurant") {
+          setShowRestaurantForm(true);
+        }
+        if (view === "restaurant-detail") {
+          setSelectedRestaurantId(null);
         }
         if (view === "dashboard" && session.role === "ADMIN") {
           fetchAdminSummary();
@@ -461,24 +506,37 @@ export default function App() {
 
   function renderContent() {
     if (session.role !== "SUPERADMIN") {
-      const stockViews = ["stocks", "stock", "movements", "suppliers", "inventory", "purchases", "accounting", "reports"];
+      const stockViews = ["stocks", "stock", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
 
-      if (activeView === "staff" && session.role === "ADMIN") {
+      if (["staff", "create-user", "user-detail", "roles"].includes(activeView) && session.role === "ADMIN") {
         return (
           <StaffPermissionsAdmin
             apiBaseUrl={apiBaseUrl}
             currentUser={session}
             onMessage={setMessage}
             onThemeChange={setRestaurantTheme}
+            showCreateOnMount={activeView === "create-user"}
           />
         );
       }
 
-      if (activeView === "branches" && session.role === "ADMIN") {
-        return <BranchesAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+      if (["branches", "create-branch"].includes(activeView) && session.role === "ADMIN") {
+        return <BranchesAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} focusCreate={activeView === "create-branch"} />;
       }
 
-      if (activeView === "tables" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+      if (activeView === "open-table" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+        return <ServerOpenTables restaurantId={session.restaurant_id} />;
+      }
+
+      if (activeView === "free-table" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+        return <ServerFreeTables restaurantId={session.restaurant_id} />;
+      }
+
+      if (["orders", "new-table-order", "add-order-items", "send-kitchen", "ready-notifications", "served-orders", "request-bill"].includes(activeView) && session.role === "SERVEUR") {
+        return <ServerOrderWorkspace restaurantId={session.restaurant_id} role={session.role} view={activeView} />;
+      }
+
+      if (["tables", "table-assignment"].includes(activeView) && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
         return <POSPage restaurantId={session.restaurant_id} role={session.role} currentUser={session} />;
       }
 
@@ -494,16 +552,33 @@ export default function App() {
         return <ServerHistory />;
       }
 
-      if (["orders", "preparation", "ready"].includes(activeView) && session.role === "CUISINE") {
-        return <KitchenPage filter={activeView} />;
+      if (["orders", "preparation", "ready", "kitchen-detail", "notes", "start-preparation", "dish-ready", "order-ready", "urgent", "preparation-history"].includes(activeView) && session.role === "CUISINE") {
+        const filter = ["ready", "dish-ready", "order-ready"].includes(activeView)
+          ? "ready"
+          : ["preparation", "start-preparation", "preparation-history"].includes(activeView)
+            ? "preparation"
+            : activeView === "urgent"
+              ? "urgent"
+              : activeView === "notes"
+                ? "notes"
+            : "orders";
+        return <KitchenPage filter={filter} />;
       }
 
-      if (activeView === "orders" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+      if (["orders", "order-detail", "edit-order", "service-followup", "kitchen-followup"].includes(activeView) && ["ADMIN", "MANAGER"].includes(session.role)) {
         return <OrdersAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
       if (activeView === "products" && session.role === "ADMIN") {
         return <CatalogAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+      }
+
+      if (["cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation", "receipts", "print-receipt", "cancel-payment", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView) && ["ADMIN", "CAISSE"].includes(session.role)) {
+        return <RoleDashboard role="CAISSE" overrides={{ ...overrides, __activeView: activeView }} />;
+      }
+
+      if (["discounts", "promotions"].includes(activeView) && session.role === "ADMIN") {
+        return <PromotionsAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
       if (activeView === "settings" && session.role === "ADMIN") {
@@ -520,12 +595,13 @@ export default function App() {
         return <AuditLogsAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
-      if (activeView === "menu-categories" && ["ADMIN", "CUISINE"].includes(session.role)) {
-        return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} />;
+      if (["menu-categories", "create-category"].includes(activeView) && ["ADMIN", "CUISINE"].includes(session.role)) {
+        return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={activeView === "create-category"} />;
       }
 
-      if (activeView === "menu-dishes" && ["ADMIN", "CUISINE"].includes(session.role)) {
-        return <DishesPage restaurantId={session.restaurant_id} role={session.role} />;
+      if (["menu-dishes", "create-dish", "availability", "dish-unavailable"].includes(activeView) && ["ADMIN", "CUISINE"].includes(session.role)) {
+        const initialAvailabilityFilter = activeView === "dish-unavailable" ? "UNAVAILABLE" : "ALL";
+        return <DishesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={activeView === "create-dish"} initialAvailabilityFilter={initialAvailabilityFilter} />;
       }
 
       if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
@@ -535,21 +611,35 @@ export default function App() {
         }} />;
       }
 
+      if (activeView === "damages" && session.role === "CUISINE") {
+        return <StockOperations apiBaseUrl={apiBaseUrl} role={session.role} mode="inventory" onMessage={setMessage} />;
+      }
+
       if (stockViews.includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
+        const stockModeMap = {
+          "stock-in": "movements",
+          "stock-out": "movements",
+          transfer: "movements",
+          damages: "inventory",
+        };
         return (
           <StockOperations
             apiBaseUrl={apiBaseUrl}
             role={session.role}
-            mode={activeView}
+            mode={stockModeMap[activeView] || activeView}
             onMessage={setMessage}
           />
         );
       }
 
+      if (roleWorkspaceSupports(activeView)) {
+        return <RoleWorkspacePage role={session.role} view={activeView} overrides={overrides} />;
+      }
+
       return <RoleDashboard role={session.role} overrides={overrides} />;
     }
 
-    if (activeView === "restaurants") {
+    if (activeView === "restaurants" || activeView === "create-restaurant") {
       return (
         <SuperadminRestaurants
           restaurants={restaurants}
@@ -557,14 +647,56 @@ export default function App() {
           onChange={updateRestaurantField}
           onSubmit={submitRestaurant}
           isLoading={isLoading}
-          showForm={showRestaurantForm}
-          onToggleForm={() => setShowRestaurantForm((value) => !value)}
+          showForm={activeView === "create-restaurant" || showRestaurantForm}
+          onToggleForm={() => {
+            if (activeView === "create-restaurant") {
+              setActiveView("restaurants");
+              pushAppRoute(session.role, "restaurants");
+              setShowRestaurantForm(false);
+              return;
+            }
+            setShowRestaurantForm((value) => !value);
+          }}
+          onViewRestaurant={(restaurant) => {
+            setSelectedRestaurantId(restaurant.id);
+            setActiveView("restaurant-detail");
+            pushAppRoute(session.role, "restaurant-detail");
+          }}
+        />
+      );
+    }
+
+    if (activeView === "restaurant-detail") {
+      return (
+        <SuperadminRestaurantDetail
+          apiBaseUrl={apiBaseUrl}
+          restaurants={restaurants}
+          selectedRestaurantId={selectedRestaurantId}
+          onSelectRestaurant={setSelectedRestaurantId}
+          onMessage={setMessage}
+        />
+      );
+    }
+
+    if (activeView === "activation") {
+      return (
+        <SuperadminActivation
+          apiBaseUrl={apiBaseUrl}
+          restaurants={restaurants}
+          onRefreshRestaurants={fetchRestaurants}
+          onMessage={setMessage}
         />
       );
     }
 
     if (activeView === "owners") {
-      return <SuperadminOwners restaurants={restaurants} />;
+      return (
+        <SuperadminOwners
+          apiBaseUrl={apiBaseUrl}
+          restaurants={restaurants}
+          onMessage={setMessage}
+        />
+      );
     }
 
     if (activeView === "subscriptions") {
@@ -577,19 +709,34 @@ export default function App() {
       );
     }
 
+    if (activeView === "payments") {
+      return <SuperadminPayments apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+    }
+
     if (activeView === "platform") {
+      return <SuperadminSettings apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+    }
+
+    if (activeView === "stats") {
       return (
-        <SuperadminPlatform
+        <SuperadminGlobalStats
           apiBaseUrl={apiBaseUrl}
           restaurants={restaurants}
           onMessage={setMessage}
-          onRefreshRestaurants={fetchRestaurants}
         />
       );
     }
 
+    if (activeView === "activity") {
+      return <SuperadminPlatformActivity apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+    }
+
     if (activeView === "settings") {
       return <SuperadminSettings apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+    }
+
+    if (roleWorkspaceSupports(activeView)) {
+      return <RoleWorkspacePage role={session.role} view={activeView} overrides={overrides} />;
     }
 
     return <RoleDashboard role={session.role} overrides={overrides} />;

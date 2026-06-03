@@ -339,12 +339,15 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
   );
 }
 
-function Field({ label, ...props }) {
+function Field({ label, required, ...props }) {
   return (
     <label className="block">
-      <span className="text-xs font-black text-[#070528]">{label}</span>
+      <span className="text-xs font-black text-[#070528]">
+        {label} {required && <span className="text-red-500">*</span>}
+      </span>
       <input
         {...props}
+        required={required}
         className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2] disabled:bg-slate-50 disabled:text-slate-400"
       />
     </label>

@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardIcon } from '@/components/dashboard/icons';
+import { useAutoRefresh } from '@/utils/useAutoRefresh';
 import { tableApi } from '../services/tableApi';
 
-const emptyTable = { name: '', capacity: 4 };
+const emptyTable = { name: '', capacity: 4, room: 'Rez-de-chaussée' };
+const defaultRooms = ['Rez-de-chaussée', 'Terrasse'];
 
 const tableSlots = [
   { left: 15, top: 10, shape: 'round' },
@@ -26,6 +28,7 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
   const [tables, setTables] = useState([]);
   const [form, setForm] = useState(emptyTable);
   const [showForm, setShowForm] = useState(false);
+  const [roomFilter, setRoomFilter] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -33,22 +36,32 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
     loadTables();
   }, [restaurantId]);
 
-  const positionedTables = useMemo(() => {
-    return [...tables]
-      .sort((a, b) => tableSortValue(a) - tableSortValue(b))
-      .map((table, index) => ({ ...table, slot: tableSlots[index % tableSlots.length] }));
+  useAutoRefresh(() => loadTables({ silent: true }), 8000, [restaurantId]);
+
+  const rooms = useMemo(() => {
+    const values = [...defaultRooms, ...tables.map((table) => table.room).filter(Boolean)];
+    return [...new Set(values)];
   }, [tables]);
 
-  async function loadTables() {
-    setLoading(true);
-    setError('');
+  const positionedTables = useMemo(() => {
+    return [...tables]
+      .filter((table) => roomFilter === 'ALL' || (table.room || 'Rez-de-chaussée') === roomFilter)
+      .sort((a, b) => tableSortValue(a) - tableSortValue(b))
+      .map((table, index) => ({ ...table, slot: tableSlots[index % tableSlots.length] }));
+  }, [roomFilter, tables]);
+
+  async function loadTables({ silent = false } = {}) {
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const data = await tableApi.getTables(restaurantId);
       setTables(data);
     } catch {
-      setError('Impossible de charger le plan de salle.');
+      if (!silent) setError('Impossible de charger le plan de salle.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -58,6 +71,7 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
       const created = await tableApi.createTable(restaurantId, {
         name: form.name.trim(),
         capacity: Number(form.capacity || 1),
+        room: form.room || 'Rez-de-chaussée',
       });
       setTables((current) => [...current, created]);
       setForm(emptyTable);
@@ -79,8 +93,9 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
           <Legend color="bg-amber-400" label="En attente d'addition" />
         </div>
         <div className="flex gap-2">
-          <select className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm">
-            <option>Salle principale</option>
+          <select value={roomFilter} onChange={(event) => setRoomFilter(event.target.value)} className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm">
+            <option value="ALL">Toutes les salles</option>
+            {rooms.map((room) => <option key={room} value={room}>{room}</option>)}
           </select>
           <button type="button" onClick={loadTables} className="inline-flex h-11 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-700">
             <DashboardIcon name="Activity" size={15} /> Actualiser
@@ -92,9 +107,11 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
       </div>
 
       {showForm && (
-        <form onSubmit={createTable} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_160px_auto]">
+        <form onSubmit={createTable} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_180px_140px_auto]">
           <label className="space-y-1">
-            <span className="text-xs font-black text-slate-500">Nom de la table</span>
+            <span className="text-xs font-black text-slate-500">
+              Nom de la table <span className="text-red-500">*</span>
+            </span>
             <input
               required
               value={form.name}
@@ -104,7 +121,22 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
             />
           </label>
           <label className="space-y-1">
-            <span className="text-xs font-black text-slate-500">Places</span>
+            <span className="text-xs font-black text-slate-500">
+              Salle <span className="text-red-500">*</span>
+            </span>
+            <select
+              required
+              value={form.room}
+              onChange={(event) => setForm((current) => ({ ...current, room: event.target.value }))}
+              className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438]"
+            >
+              {rooms.map((room) => <option key={room} value={room}>{room}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-black text-slate-500">
+              Places <span className="text-red-500">*</span>
+            </span>
             <input
               required
               min="1"
@@ -187,7 +219,7 @@ function VisualTable({ table, slot, fallbackNumber, onClick }) {
       onClick={onClick}
       className="absolute -translate-x-1/2 -translate-y-1/2"
       style={{ left: `${slot.left}%`, top: `${slot.top}%` }}
-      title={`${label} - ${table.capacity} places`}
+      title={`${label} - ${table.room || 'Rez-de-chaussée'} - ${table.capacity} places`}
     >
       <span className="relative block h-24 w-28">
         <Chairs round={isRound} color={palette.chair} />
@@ -196,7 +228,7 @@ function VisualTable({ table, slot, fallbackNumber, onClick }) {
           <span className="text-[10px] font-black leading-none">{occupiedSeats}/{table.capacity}</span>
         </span>
         <span className="absolute -bottom-1 left-1/2 z-20 -translate-x-1/2 rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-700 shadow">
-          {freeSeats} libre(s)
+          {table.room || 'Rez-de-chaussée'} · {freeSeats} libre(s)
         </span>
       </span>
     </button>

@@ -87,7 +87,7 @@ export function Panel({ title, action, link, children }) {
             {action}
           </button>
         )}
-        {link && <button className="text-xs font-black text-[#f04438]">{link}</button>}
+        {link && <button className="text-xs font-black text-[var(--dashboard-primary)]">{link}</button>}
       </div>
       {children}
     </div>
@@ -104,15 +104,15 @@ export function LineChart() {
         ))}
         <defs>
           <linearGradient id="salesGradient" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--dashboard-primary, #f04438)" stopOpacity="0.28" />
-            <stop offset="100%" stopColor="var(--dashboard-primary, #f04438)" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--dashboard-primary, #078d50)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--dashboard-primary, #078d50)" stopOpacity="0" />
           </linearGradient>
         </defs>
         <path d={`M ${points} L 390 155 L 0 155 Z`} fill="url(#salesGradient)" />
-        <polyline points={points} fill="none" stroke="var(--dashboard-primary, #f04438)" strokeWidth="3" />
+        <polyline points={points} fill="none" stroke="var(--dashboard-primary, #078d50)" strokeWidth="3" />
         {points.split(" ").map((point) => {
           const [cx, cy] = point.split(",");
-          return <circle key={point} cx={cx} cy={cy} r="4" fill="var(--dashboard-primary, #f04438)" stroke="white" strokeWidth="2" />;
+          return <circle key={point} cx={cx} cy={cy} r="4" fill="var(--dashboard-primary, #078d50)" stroke="white" strokeWidth="2" />;
         })}
       </svg>
       <div className="-mt-4 grid grid-cols-7 text-center text-xs font-bold text-slate-500">
@@ -259,7 +259,7 @@ export function BarChart() {
       {bars.map(([expense, revenue], index) => (
         <div key={index} className="flex flex-1 flex-col items-center gap-3">
           <div className="flex h-[190px] items-end gap-3">
-            <span className="w-8 rounded-t-md bg-[#f04438]" style={{ height: `${expense}%` }} />
+            <span className="w-8 rounded-t-md bg-[var(--dashboard-primary)]" style={{ height: `${expense}%` }} />
             <span className="w-8 rounded-t-md bg-[#31b86f]" style={{ height: `${revenue}%` }} />
           </div>
           <span className="text-xs font-bold text-slate-500">Sem {index + 1}</span>

@@ -10,11 +10,14 @@ from app.dependencies import assert_permission, get_current_user, require_tenant
 from app.modules.branches.models import Branch
 from app.modules.restaurants.models import Restaurant
 from app.modules.restaurants.schemas import (
+    RestaurantDetailPublic,
     RestaurantProvisionIn,
     RestaurantProvisionOut,
     RestaurantPublic,
     RestaurantSettingsIn,
+    RestaurantStatusIn,
 )
+from app.modules.platform.models import RestaurantSubscription
 from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
 from app.security import hash_password
@@ -22,7 +25,7 @@ from app.security import hash_password
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 LOGO_UPLOAD_DIR = Path("uploads/logos")
-ALLOWED_LOGO_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/svg+xml": ".svg"}
+ALLOWED_LOGO_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 
 
 @router.get("", response_model=list[RestaurantPublic])
@@ -55,18 +58,17 @@ def provision_restaurant(
     if current_user.role != Role.SUPERADMIN:
         raise HTTPException(status_code=403, detail="Seul un super administrateur peut creer un restaurant")
 
-    email = payload.owner_email.lower().strip()
+    email = payload.owner_email.lower().strip() if payload.owner_email else None
     username = payload.owner_username.lower().strip()
 
     existing_restaurant = db.query(Restaurant).filter(Restaurant.slug == payload.slug).one_or_none()
     if existing_restaurant:
         raise HTTPException(status_code=409, detail="Ce slug restaurant est deja utilise")
 
-    existing_user = (
-        db.query(User)
-        .filter(or_(User.email == email, User.username == username))
-        .one_or_none()
-    )
+    user_filters = [User.username == username]
+    if email:
+        user_filters.append(User.email == email)
+    existing_user = db.query(User).filter(or_(*user_filters)).one_or_none()
     if existing_user:
         raise HTTPException(status_code=409, detail="Email ou nom utilisateur deja utilise")
 
@@ -78,8 +80,21 @@ def provision_restaurant(
         secondary_color=payload.secondary_color,
         currency=payload.currency.upper(),
         timezone=payload.timezone,
+        phone=payload.owner_phone,
+        whatsapp_phone=payload.owner_alt_phone,
+        email=email,
     )
     db.add(restaurant)
+    db.flush()
+
+    main_branch = Branch(
+        restaurant_id=restaurant.id,
+        name="Siège",
+        city="Ville à renseigner",
+        address="Adresse principale à renseigner",
+        phone=payload.owner_phone,
+    )
+    db.add(main_branch)
     db.flush()
 
     owner = User(
@@ -91,6 +106,7 @@ def provision_restaurant(
         phone=payload.owner_phone,
         role=Role.ADMIN,
         restaurant_id=restaurant.id,
+        branch_id=main_branch.id,
         is_owner=True,
     )
     db.add(owner)
@@ -111,6 +127,77 @@ def get_my_restaurant(current_user: User = Depends(require_tenant_user), db: Ses
     restaurant = db.get(Restaurant, current_user.restaurant_id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant introuvable")
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
+    return restaurant
+
+
+@router.get("/{restaurant_id}", response_model=RestaurantDetailPublic)
+def get_restaurant_detail(
+    restaurant_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retourne les donnees reelles d'un restaurant pour le superadmin."""
+    if current_user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Seul un super administrateur peut consulter ce restaurant")
+
+    restaurant = db.get(Restaurant, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
+    subscription = (
+        db.query(RestaurantSubscription)
+        .filter(RestaurantSubscription.restaurant_id == restaurant.id)
+        .one_or_none()
+    )
+    return RestaurantDetailPublic(
+        restaurant=restaurant,
+        owner=restaurant.owner,
+        subscription={
+            "plan": subscription.plan,
+            "amount": subscription.amount,
+            "currency": subscription.currency,
+            "status": subscription.status,
+            "renewal_date": subscription.renewal_date,
+            "notes": subscription.notes,
+        }
+        if subscription
+        else None,
+    )
+
+
+@router.patch("/{restaurant_id}/status", response_model=RestaurantPublic)
+def update_restaurant_status(
+    restaurant_id: str,
+    payload: RestaurantStatusIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Active ou suspend un tenant restaurant."""
+    if current_user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Seul un super administrateur peut modifier ce statut")
+
+    restaurant = db.get(Restaurant, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    restaurant.is_active = payload.is_active
+    subscription = (
+        db.query(RestaurantSubscription)
+        .filter(RestaurantSubscription.restaurant_id == restaurant.id)
+        .one_or_none()
+    )
+    if subscription and not payload.is_active:
+        subscription.status = "Suspendu"
+    db.commit()
+    db.refresh(restaurant)
     restaurant.branches_count = max(
         1,
         db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
@@ -161,7 +248,7 @@ async def upload_my_restaurant_logo(
 
     extension = ALLOWED_LOGO_TYPES.get(file.content_type or "")
     if not extension:
-        raise HTTPException(status_code=400, detail="Format logo invalide. Utilisez PNG, JPG, WEBP ou SVG.")
+        raise HTTPException(status_code=400, detail="Format logo invalide. Utilisez PNG, JPG ou WEBP.")
 
     content = await file.read()
     if len(content) > 2 * 1024 * 1024:

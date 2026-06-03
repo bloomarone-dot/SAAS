@@ -20,7 +20,6 @@ ALLOWED_MENU_IMAGE_TYPES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
-    "image/svg+xml": ".svg",
 }
 
 
@@ -39,7 +38,7 @@ async def upload_menu_image(
     assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_UPDATE, Permission.KITCHEN_UPDATE))
     extension = ALLOWED_MENU_IMAGE_TYPES.get(file.content_type or "")
     if not extension:
-        raise HTTPException(status_code=400, detail="Format image invalide. Utilisez PNG, JPG, WEBP ou SVG.")
+        raise HTTPException(status_code=400, detail="Format image invalide. Utilisez PNG, JPG ou WEBP.")
 
     content = await file.read()
     if len(content) > 3 * 1024 * 1024:
@@ -60,14 +59,7 @@ def get_public_menu(slug: str, db: Session = Depends(get_db)):
         .one_or_none()
     )
     if not restaurant:
-        restaurant = (
-            db.query(Restaurant)
-            .filter(Restaurant.is_active.is_(True))
-            .order_by(Restaurant.created_at.asc())
-            .first()
-        )
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Aucun restaurant actif disponible")
+        raise HTTPException(status_code=404, detail="Restaurant indisponible")
 
     categories = (
         db.query(CategoryModel)

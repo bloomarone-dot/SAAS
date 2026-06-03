@@ -37,6 +37,7 @@ class MenuItem(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     price: Mapped[float] = mapped_column(Float, nullable=False)
+    cost_per_dish: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     sale_channel: Mapped[str] = mapped_column(String(20), default="REPAS", nullable=False, index=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

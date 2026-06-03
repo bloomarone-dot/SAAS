@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
-import { DashboardIcon } from "@/components/dashboard/icons";
 const loginHeroImage = "/Images/ImageLogin.jpg";
+const logoImage = "/logo.jpeg";
 
 export function LoginPanel({
   value,
@@ -45,36 +45,64 @@ export function LoginPanel({
   }
 
   return (
-    <main className="grid min-h-screen bg-slate-100 lg:grid-cols-[1.05fr_0.95fr]">
-      <section className="relative hidden overflow-hidden bg-slate-950 lg:flex">
+    <main className="grid min-h-screen bg-slate-50 lg:grid-cols-[0.95fr_1.05fr]">
+      <section className="relative hidden overflow-hidden bg-[#003f2f] lg:flex">
         <img
           src={loginHeroImage}
           alt="Restaurant"
-          className="absolute inset-0 h-full w-full object-cover opacity-80"
+          className="absolute inset-0 h-full w-full object-cover opacity-85"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/45 to-transparent" />
-        <div className="relative mt-auto max-w-2xl p-16 text-white">
-          <h1 className="text-6xl font-black leading-tight">
-            Pilotez vos restaurants depuis un seul espace.
-          </h1>
+        <div className="absolute inset-0 bg-gradient-to-t from-[#002b21] via-[#003f2f]/45 to-transparent" />
+        <div className="relative flex h-full w-full flex-col justify-between p-12 text-white">
+          <div className="flex items-center gap-3">
+            <img
+              src={logoImage}
+              alt="Logo Le Bon Coin"
+              className="h-12 w-12 rounded-lg object-cover shadow-sm ring-1 ring-white/30"
+            />
+            <div>
+              <p className="text-2xl font-black leading-tight">Le Bon Coin</p>
+              <p className="text-sm font-semibold text-white/75">Gestion de restaurant</p>
+            </div>
+          </div>
+          <div className="max-w-xl">
+            <p className="mb-4 w-fit rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-normal text-emerald-100">
+              Espace sécurisé
+            </p>
+            <h1 className="text-5xl font-black leading-tight">
+              Pilotez vos restaurants depuis un seul espace.
+            </h1>
+            <p className="mt-5 text-base font-medium leading-7 text-white/75">
+              Connectez-vous pour gérer les commandes, la caisse, le stock, l’équipe et les rapports.
+            </p>
+          </div>
         </div>
       </section>
 
-      <section className="flex items-center justify-center bg-white/70 p-8 backdrop-blur-xl lg:p-16">
+      <section className="flex items-center justify-center bg-white p-6 lg:p-16">
         <div className="w-full max-w-md">
-          <div className="mb-10 text-center">
-            <h2 className="mb-4 text-5xl font-black text-slate-900">
-              {mode === "login" ? "Se Connecter" : "Mot de passe"}
+          <div className="mb-8 text-center">
+            <img
+              src={logoImage}
+              alt="Logo Le Bon Coin"
+              className="mx-auto mb-5 h-16 w-16 rounded-xl object-cover shadow-sm ring-1 ring-emerald-100 lg:hidden"
+            />
+            <h2 className="mb-3 text-4xl font-black text-[#003f2f]">
+              {mode === "login" ? "Le Bon Coin" : "Mot de passe oublié"}
             </h2>
             <p className="text-sm leading-relaxed text-slate-500">
               {mode === "login"
-                ? "Connectez-vous avec votre email, identifiant ou numéro de téléphone."
-                : "Réinitialisez votre accès au tableau de bord."}
+                ? "Connectez-vous à votre espace de gestion restaurant."
+                : "Saisissez votre identifiant pour réinitialiser votre accès."}
             </p>
           </div>
 
           {mode === "login" && (
-            <form onSubmit={onSubmit} className="space-y-6">
+            <form onSubmit={onSubmit} className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <label className="block">
+                <span className="mb-2 block text-xs font-black text-slate-700">
+                  Adresse e-mail ou identifiant <span className="text-red-500">*</span>
+                </span>
               <input
                 name="login"
                 value={value.login}
@@ -82,9 +110,14 @@ export function LoginPanel({
                 autoComplete="username"
                 required
                 placeholder="Email, nom utilisateur ou téléphone"
-                className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
               />
+              </label>
 
+              <label className="block">
+                <span className="mb-2 block text-xs font-black text-slate-700">
+                  Mot de passe <span className="text-red-500">*</span>
+                </span>
               <div className="relative">
                 <input
                   name="password"
@@ -94,18 +127,19 @@ export function LoginPanel({
                   autoComplete="current-password"
                   required
                   placeholder="Mot de passe"
-                  className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 pr-14 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                  className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((current) => !current)}
-                  className="absolute right-4 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-[#fee4e2]"
+                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-emerald-50"
                   aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                   title={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+              </label>
 
               <div className="flex items-center justify-between text-sm">
                 <label className="flex cursor-pointer items-center gap-2 text-slate-500">
@@ -123,7 +157,7 @@ export function LoginPanel({
                     setResetLogin(value.login);
                     setMode("forgot");
                   }}
-                  className="font-medium text-[#f04438] hover:underline"
+                  className="font-bold text-[#078d50] hover:underline"
                 >
                   Mot de passe oublié ?
                 </button>
@@ -132,33 +166,33 @@ export function LoginPanel({
               <button
                 type="submit"
                 disabled={isLoading}
-                className="h-14 w-full rounded-full bg-[#f04438] font-bold tracking-wide text-white shadow-xl shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-70"
+                className="h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isLoading ? "CONNEXION..." : "SE CONNECTER"}
+                {isLoading ? "Connexion..." : "Se connecter"}
               </button>
             </form>
           )}
 
           {mode === "forgot" && (
-            <form onSubmit={submitForgotPassword} className="space-y-6">
+            <form onSubmit={submitForgotPassword} className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <input
                 value={resetLogin}
                 onChange={(event) => setResetLogin(event.target.value)}
                 required
                 placeholder="Email, nom utilisateur ou téléphone"
-                className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
               />
               <button
                 type="submit"
                 disabled={isLoading}
-                className="h-14 w-full rounded-full bg-[#f04438] font-bold tracking-wide text-white shadow-xl shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-70"
+                className="h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isLoading ? "GÉNÉRATION..." : "GÉNÉRER LE CODE"}
+                {isLoading ? "Envoi..." : "Envoyer le lien"}
               </button>
               <button
                 type="button"
                 onClick={() => setMode("login")}
-                className="h-12 w-full rounded-full border border-slate-200 bg-white text-sm font-black text-slate-600 transition-all hover:border-[#f04438] hover:text-[#f04438]"
+                className="h-12 w-full rounded-lg border border-slate-200 bg-white text-sm font-black text-slate-600 transition-all hover:border-[#078d50] hover:text-[#078d50]"
               >
                 Retour à la connexion
               </button>
@@ -166,13 +200,13 @@ export function LoginPanel({
           )}
 
           {mode === "reset" && (
-            <form onSubmit={submitResetPassword} className="space-y-6">
+            <form onSubmit={submitResetPassword} className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <textarea
                 value={resetToken}
                 onChange={(event) => setResetToken(event.target.value)}
                 required
                 placeholder="Code de réinitialisation"
-                className="min-h-24 w-full rounded-3xl border border-slate-200 bg-white px-6 py-4 text-sm shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
               />
               <div className="relative">
                 <input
@@ -182,12 +216,12 @@ export function LoginPanel({
                   required
                   minLength={8}
                   placeholder="Nouveau mot de passe"
-                  className="h-14 w-full rounded-full border border-slate-200 bg-white px-6 pr-14 shadow-sm outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                  className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
                 />
                 <button
                   type="button"
                   onClick={() => setShowNewPassword((current) => !current)}
-                  className="absolute right-4 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-[#fee4e2]"
+                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-emerald-50"
                   aria-label={showNewPassword ? "Masquer le nouveau mot de passe" : "Afficher le nouveau mot de passe"}
                   title={showNewPassword ? "Masquer le nouveau mot de passe" : "Afficher le nouveau mot de passe"}
                 >
@@ -197,14 +231,14 @@ export function LoginPanel({
               <button
                 type="submit"
                 disabled={isLoading}
-                className="h-14 w-full rounded-full bg-[#f04438] font-bold tracking-wide text-white shadow-xl shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-70"
+                className="h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isLoading ? "VALIDATION..." : "RÉINITIALISER"}
+                {isLoading ? "Validation..." : "Réinitialiser"}
               </button>
               <button
                 type="button"
                 onClick={() => setMode("login")}
-                className="h-12 w-full rounded-full border border-slate-200 bg-white text-sm font-black text-slate-600 transition-all hover:border-[#f04438] hover:text-[#f04438]"
+                className="h-12 w-full rounded-lg border border-slate-200 bg-white text-sm font-black text-slate-600 transition-all hover:border-[#078d50] hover:text-[#078d50]"
               >
                 Retour à la connexion
               </button>
@@ -217,8 +251,8 @@ export function LoginPanel({
             </p>
           )}
 
-          <div className="mt-12 text-center text-xs text-slate-400">
-            © 2026 Plateforme Restaurant SaaS
+          <div className="mt-8 text-center text-xs text-slate-400">
+            © 2026 Le Bon Coin. Tous droits réservés.
           </div>
         </div>
       </section>

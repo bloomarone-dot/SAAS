@@ -10,6 +10,7 @@ import {
   SimpleRows,
   SummaryCard,
 } from "../DashboardPrimitives";
+import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
 const locationLabels = {
   MAGASIN: "Magasin",
@@ -64,6 +65,8 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
     loadDashboard();
   }, [apiBaseUrl]);
 
+  useAutoRefresh(() => loadDashboard({ silent: true }), 30000, [apiBaseUrl]);
+
   async function api(path) {
     const token = localStorage.getItem("access_token");
     const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -74,9 +77,11 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
     return data;
   }
 
-  async function loadDashboard() {
-    setIsLoading(true);
-    setMessage("");
+  async function loadDashboard({ silent = false } = {}) {
+    if (!silent) {
+      setIsLoading(true);
+      setMessage("");
+    }
     try {
       const [summaryData, itemData, movementData, damageData, reportData] = await Promise.all([
         api("/api/v1/stock/summary"),
@@ -91,9 +96,9 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
       setDamages(damageData);
       setReport(reportData);
     } catch (error) {
-      setMessage(error.message);
+      if (!silent) setMessage(error.message);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }
 

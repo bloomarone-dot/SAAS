@@ -8,6 +8,7 @@ export function RestaurantTable({
   hasRestaurants = restaurants.length > 0,
   hasFilters = false,
   onAdd,
+  onView,
   onClearFilters,
 }) {
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
@@ -134,7 +135,11 @@ export function RestaurantTable({
                   {new Date(restaurant.created_at).toLocaleDateString("fr-FR")}
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <button className="border border-[#eadfd7] px-3 py-1.5 text-xs font-black text-[#172033] hover:border-[#f04438] hover:text-[#f04438]">
+                  <button
+                    type="button"
+                    onClick={() => onView?.(restaurant)}
+                    className="border border-[#eadfd7] px-3 py-1.5 text-xs font-black text-[#172033] hover:border-[#f04438] hover:text-[#f04438]"
+                  >
                     Voir
                   </button>
                 </td>

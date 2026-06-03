@@ -49,12 +49,13 @@ class RestaurantProvisionIn(BaseModel):
     secondary_color: str = Field(default="#1F2937", pattern=r"^#[0-9A-Fa-f]{6}$")
     currency: str = Field(default="XAF", min_length=3, max_length=3)
     timezone: str = Field(default="Africa/Douala", max_length=50)
-    owner_email: str = Field(max_length=191)
+    owner_email: Optional[str] = Field(default=None, max_length=191)
     owner_username: str = Field(min_length=3, max_length=50)
     owner_password: str = Field(min_length=8, max_length=128)
     owner_first_name: str = Field(min_length=1, max_length=100)
     owner_last_name: str = Field(min_length=1, max_length=100)
-    owner_phone: Optional[str] = Field(default=None, max_length=30)
+    owner_phone: str = Field(min_length=5, max_length=30)
+    owner_alt_phone: Optional[str] = Field(default=None, max_length=30)
 
 
 class RestaurantProvisionOut(BaseModel):
@@ -62,6 +63,20 @@ class RestaurantProvisionOut(BaseModel):
 
     restaurant: RestaurantPublic
     owner: UserPublic
+
+
+class RestaurantDetailPublic(BaseModel):
+    """Fiche superadmin d'un restaurant avec son proprietaire."""
+
+    restaurant: RestaurantPublic
+    owner: Optional[UserPublic] = None
+    subscription: Optional[dict] = None
+
+
+class RestaurantStatusIn(BaseModel):
+    """Payload d'activation ou suspension d'un tenant restaurant."""
+
+    is_active: bool
 
 
 class RestaurantSettingsIn(BaseModel):

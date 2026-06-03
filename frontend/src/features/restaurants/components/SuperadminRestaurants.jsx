@@ -12,6 +12,7 @@ export function SuperadminRestaurants({
   isLoading,
   showForm,
   onToggleForm,
+  onViewRestaurant,
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -129,6 +130,7 @@ export function SuperadminRestaurants({
           hasRestaurants={restaurants.length > 0}
           hasFilters={query.trim() !== "" || status !== "all"}
           onAdd={onToggleForm}
+          onView={onViewRestaurant}
           onClearFilters={() => {
             setQuery("");
             setStatus("all");

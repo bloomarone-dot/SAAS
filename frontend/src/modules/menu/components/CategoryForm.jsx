@@ -77,7 +77,9 @@ export default function CategoryForm({ restaurantId, onCategoryCreated }) {
         )}
 
         <label className="block">
-          <span className="text-xs font-black text-[#070528]">Nom de la catégorie</span>
+          <span className="text-xs font-black text-[#070528]">
+            Nom de la catégorie <span className="text-red-500">*</span>
+          </span>
           <input
             type="text"
             required

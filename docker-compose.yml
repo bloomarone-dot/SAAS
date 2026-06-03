@@ -29,8 +29,11 @@ services:
       MYSQL_HOST: db
       MYSQL_PORT: 3306
       MYSQL_DATABASE: restaurant_saas
+      ENVIRONMENT: development
       SECRET_KEY: change-this-secret-in-production
       ACCESS_TOKEN_EXPIRE_MINUTES: 720
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5178,http://127.0.0.1:5178
+      RETURN_DEV_RESET_TOKEN: "true"
       SUPERADMIN_EMAIL: superadmin@restaurant.test
       SUPERADMIN_USERNAME: superadmin
       SUPERADMIN_PASSWORD: Superadmin123!

@@ -20,43 +20,55 @@
 }
 
 @layer utilities {
-  .tenant-theme .text-\[\#f04438\] {
+  .app-theme .text-\[\#f04438\],
+  .app-theme .text-\[\#9a3412\] {
     color: var(--dashboard-primary) !important;
   }
 
-  .tenant-theme .bg-\[\#f04438\] {
+  .app-theme .bg-\[\#f04438\],
+  .app-theme .bg-\[\#fff4ed\] {
     background-color: var(--dashboard-primary) !important;
   }
 
-  .tenant-theme .border-\[\#f04438\] {
+  .app-theme .border-\[\#f04438\],
+  .app-theme .border-\[\#fed7aa\] {
     border-color: var(--dashboard-primary) !important;
   }
 
-  .tenant-theme .hover\:text-\[\#f04438\]:hover {
+  .app-theme .hover\:text-\[\#f04438\]:hover {
     color: var(--dashboard-primary) !important;
   }
 
-  .tenant-theme .hover\:border-\[\#f04438\]:hover,
-  .tenant-theme .focus\:border-\[\#f04438\]:focus,
-  .tenant-theme .focus-within\:border-\[\#f04438\]:focus-within {
+  .app-theme .hover\:border-\[\#f04438\]:hover,
+  .app-theme .focus\:border-\[\#f04438\]:focus,
+  .app-theme .focus-within\:border-\[\#f04438\]:focus-within {
     border-color: var(--dashboard-primary) !important;
   }
 
-  .tenant-theme .accent-\[\#f04438\] {
+  .app-theme .accent-\[\#f04438\] {
     accent-color: var(--dashboard-primary) !important;
   }
 
-  .tenant-theme .bg-\[\#fff4ed\] {
+  .app-theme .bg-\[\#fff4ed\],
+  .app-theme .bg-\[\#fffaf5\] {
     background-color: color-mix(in srgb, var(--dashboard-primary) 10%, white) !important;
   }
 
-  .tenant-theme .text-\[\#07133d\],
-  .tenant-theme .text-\[\#070528\] {
+  .app-theme .text-\[\#07133d\],
+  .app-theme .text-\[\#070528\] {
     color: var(--dashboard-secondary) !important;
   }
 
-  .tenant-theme .bg-\[\#07133d\],
-  .tenant-theme .bg-\[\#070528\] {
+  .app-theme .bg-\[\#07133d\],
+  .app-theme .bg-\[\#070528\] {
     background-color: var(--dashboard-secondary) !important;
+  }
+
+  .app-theme .border-\[\#eadfd7\] {
+    border-color: color-mix(in srgb, var(--dashboard-primary) 24%, white) !important;
+  }
+
+  .superadmin-theme .bg-\[\#f04438\] {
+    background-image: linear-gradient(135deg, var(--dashboard-primary), var(--dashboard-accent));
   }
 }

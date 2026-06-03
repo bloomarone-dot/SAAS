@@ -8,8 +8,15 @@ from datetime import datetime, timedelta, timezone
 
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))
 PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30"))
+
+if ENVIRONMENT in {"production", "prod"} and (
+    SECRET_KEY in {"", "change-me-in-production", "change-this-secret-in-production"}
+    or len(SECRET_KEY) < 32
+):
+    raise RuntimeError("SECRET_KEY must be set to a strong value in production")
 
 
 def hash_password(password: str) -> str:

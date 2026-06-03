@@ -9,6 +9,7 @@ const emptyItem = {
   name: "",
   description: "",
   price: "",
+  cost_per_dish: "",
   image_url: "",
   is_available: true,
 };
@@ -50,6 +51,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
       name: (item) => item.name,
       category: (item) => categories.find((category) => category.id === item.category_id)?.name ?? "",
       price: (item) => Number(item.price),
+      cost: (item) => Number(item.cost_per_dish || 0),
       status: (item) => Number(item.is_available),
       created_at: (item) => item.created_at,
     });
@@ -138,6 +140,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
         body: JSON.stringify({
           ...itemForm,
           price: Number(itemForm.price),
+          cost_per_dish: Number(itemForm.cost_per_dish || 0),
           image_url: itemForm.image_url || null,
           description: itemForm.description || null,
         }),
@@ -169,11 +172,12 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
   }
 
   async function deleteItem(item) {
+    if (!window.confirm(`Archiver le plat ${item.name} ?\n\nLe plat restera en base de données et pourra être remis en vente.`)) return;
     setIsLoading(true);
     try {
       await api(`/api/v1/catalog/items/${item.id}`, { method: "DELETE" });
-      setItems((current) => current.filter((entry) => entry.id !== item.id));
-      onMessage("Plat supprimé du catalogue.");
+      setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, is_available: false } : entry)));
+      onMessage("Plat archivé du catalogue.");
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -186,7 +190,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
           <p className="text-xs font-black uppercase text-[#f04438]">Administrateur / Propriétaire</p>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Carte vendable</h1>
+          <h1 className="mt-2 text-4xl font-black text-[#070528]">Carte</h1>
           <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
             Gérez les plats et produits visibles à la vente. Les ingrédients et marchandises sont suivis dans Stock &gt; Produits stock.
           </p>
@@ -235,8 +239,11 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <Field name="name" label="Nom du plat" value={itemForm.name} onChange={updateItemField} required />
               <Field name="price" label="Prix de vente" type="number" min="0" value={itemForm.price} onChange={updateItemField} required />
+              <Field name="cost_per_dish" label="Coût par plat" type="number" min="0" value={itemForm.cost_per_dish} onChange={updateItemField} />
               <label className="block">
-                <span className="text-xs font-black text-[#070528]">Catégorie</span>
+                <span className="text-xs font-black text-[#070528]">
+                  Catégorie <span className="text-red-500">*</span>
+                </span>
                 <select
                   name="category_id"
                   value={itemForm.category_id}
@@ -311,6 +318,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
                   <th className="px-5 py-4"><SortButton label="Plat" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th className="px-5 py-4"><SortButton label="Catégorie" column="category" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th className="px-5 py-4"><SortButton label="Prix" column="price" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+                  <th className="px-5 py-4"><SortButton label="Coût" column="cost" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th className="px-5 py-4"><SortButton label="Statut" column="status" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th className="px-5 py-4 text-right">Actions</th>
                 </tr>
@@ -326,6 +334,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
                       {categories.find((category) => category.id === item.category_id)?.name ?? "-"}
                     </td>
                     <td className="px-5 py-4 text-sm font-black text-[#070528]">{formatPrice(item.price)}</td>
+                    <td className="px-5 py-4 text-sm font-bold text-slate-700">{formatPrice(item.cost_per_dish)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex px-3 py-1 text-xs font-black ${item.is_available ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
                         {item.is_available ? "Disponible" : "Indisponible"}
@@ -374,12 +383,15 @@ function SectionTitle({ title, icon }) {
   );
 }
 
-function Field({ label, ...props }) {
+function Field({ label, required, ...props }) {
   return (
     <label className="block">
-      <span className="text-xs font-black text-[#070528]">{label}</span>
+      <span className="text-xs font-black text-[#070528]">
+        {label} {required && <span className="text-red-500">*</span>}
+      </span>
       <input
         {...props}
+        required={required}
         className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
       />
     </label>

@@ -11,7 +11,7 @@ class UserPublic(OrmModel):
     """Representation publique d'un utilisateur retournee par l'API."""
 
     id: str
-    email: str
+    email: Optional[str] = None
     username: str
     first_name: str
     last_name: str
@@ -29,7 +29,7 @@ class UserPublic(OrmModel):
 class UserCreateIn(BaseModel):
     """Payload de creation d'un membre du personnel."""
 
-    email: str = Field(max_length=191)
+    email: Optional[str] = Field(default=None, max_length=191)
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=128)
     first_name: str = Field(min_length=1, max_length=100)
@@ -63,4 +63,3 @@ class UserStatusUpdateIn(BaseModel):
     """Payload d'activation ou de desactivation d'un compte utilisateur."""
 
     is_active: bool
-
