@@ -238,6 +238,7 @@ function getApiBaseUrl() {
     }
     return import.meta.env.VITE_API_URL;
   }
+  if (import.meta.env.PROD) return window.location.origin;
   return `${window.location.protocol}//${window.location.hostname}:8001`;
 }
 
