@@ -3,11 +3,7 @@ from datetime import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
-<<<<<<< HEAD
 from app.modules.finance.orange_money import initiate_om_payment
-=======
-
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
 from app.modules.audit.service import log_action
@@ -91,50 +87,43 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
     db.add(order)
     db.commit()
     db.refresh(order)
-    return get_order_or_404(db, order.id, restaurant.id)
+    return get_order_or_404(db, order.id, current_user.restaurant_id)
 
 
-<<<<<<< HEAD
 @router.post("/{order_id}/initiate-om", response_model=OrderPublic)
 async def initiate_om_payment_route(
     order_id: str,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db)
 ):
-    # 1. Récupération de la commande
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
-    
-    # 2. Vérification des conditions
+
     if order.status in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
     if order.total_amount <= 0:
         raise HTTPException(status_code=400, detail="Montant invalide")
 
-    # 3. Appel au service finance pour initier le paiement
     payment_result = await initiate_om_payment(
-        amount=float(order.total_amount), 
-        phone_number=order.customer_phone, 
+        amount=float(order.total_amount),
+        phone_number=order.customer_phone,
         order_number=order.order_number
     )
-    
-    # 4. Mise à jour des informations de paiement dans la commande
+
     order.transaction_id = payment_result.get("transaction_id")
-    order.payment_status = "En attente" # État initial avant confirmation
+    order.payment_status = "En attente"
     order.payment_method = "Mobile Money"
-    
-    # 5. Log de l'action
+
     log_action(
         db, current_user, "payment.om_initiate", "order", order.id,
-        f"Paiement OM initié pour {order.order_number}",
+        f"Paiement OM initie pour {order.order_number}",
         {"transaction_id": order.transaction_id}
     )
-    
+
     db.commit()
     db.refresh(order)
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
-=======
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
+
 @router.get("", response_model=list[OrderPublic])
 def list_orders(
     status_filter: str | None = Query(default=None, alias="status"),

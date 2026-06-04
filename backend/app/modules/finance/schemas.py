@@ -101,11 +101,8 @@ class PaymentPublic(BaseModel):
     order_number: str
     customer_name: str
     payment_method: str
-<<<<<<< HEAD
     payment_status: str = "En attente"
     transaction_id: Optional[str] = None
-=======
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
     amount: float
     status: str
     created_at: datetime
@@ -197,8 +194,3 @@ class FinancialStatementOut(BaseModel):
     rotation: list[StockRotationOut]
     expenses: list[ExpensePublic]
     payments: list[PaymentPublic]
-<<<<<<< HEAD
-
-    
-=======
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf

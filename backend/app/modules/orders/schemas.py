@@ -89,11 +89,8 @@ class OrderPublic(OrmModel):
     table_name: Optional[str] = None
     table_room: Optional[str] = None
     payment_method: str
-<<<<<<< HEAD
     payment_status: str = "En attente"
     transaction_id: Optional[str] = None
-=======
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
     discount_amount: float
     delivery_fee: float
     total_amount: float

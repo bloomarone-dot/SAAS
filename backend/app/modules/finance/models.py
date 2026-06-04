@@ -51,8 +51,4 @@ class PromotionCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-<<<<<<< HEAD
     )
-=======
-    )
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf

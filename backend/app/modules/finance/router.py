@@ -338,11 +338,8 @@ def list_payments(
             order_number=order.order_number,
             customer_name=order.customer_name,
             payment_method=order.payment_method,
-<<<<<<< HEAD
             payment_status=getattr(order, "payment_status", "En attente"),
             transaction_id=getattr(order, "transaction_id", None),
-=======
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
             amount=order.total_amount,
             status=order.status,
             created_at=order.created_at,
@@ -587,8 +584,4 @@ def financial_statements(
         rotation=stock_rotation(start, end, current_user, db),
         expenses=expenses,
         payments=payments,
-<<<<<<< HEAD
     )
-=======
-    )
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
