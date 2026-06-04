@@ -126,7 +126,10 @@ export function getMenuForUser(user) {
     if (!item.roles.includes(user.role)) return false;
     if (item.ownerOnly && !user.is_owner) return false;
     if (user.is_owner) return true;
-    if (item.permissions?.length && !item.permissions.some((permission) => userPermissions.has(permission))) {
+    if (
+      item.permissions?.length &&
+      !item.permissions.some((permission) => userPermissions.has(permission))
+    ) {
       return false;
     }
     return true;
@@ -142,7 +145,11 @@ export const APP_MENUS = {
       icon: "Store",
       children: [
         { key: "restaurants", label: "Liste restaurants", icon: "Store" },
-        { key: "create-restaurant", label: "Création restaurant", icon: "Plus" },
+        {
+          key: "create-restaurant",
+          label: "Création restaurant",
+          icon: "Plus",
+        },
         { key: "restaurant-detail", label: "Détail restaurant", icon: "Eye" },
         { key: "activation", label: "Activation / suspension", icon: "Power" },
       ],
@@ -162,7 +169,6 @@ export const APP_MENUS = {
       label: "Plateforme",
       icon: "BarChart3",
       children: [
-        { key: "platform", label: "Paramètres SaaS", icon: "Settings" },
         { key: "stats", label: "Statistiques globales", icon: "BarChart3" },
         { key: "activity", label: "Journal plateforme", icon: "History" },
       ],
@@ -179,7 +185,6 @@ export const APP_MENUS = {
         { key: "staff", label: "Liste utilisateurs", icon: "Users" },
         { key: "create-user", label: "Création utilisateur", icon: "UserPlus" },
         { key: "user-detail", label: "Détail utilisateur", icon: "User" },
-        { key: "roles", label: "Rôles & permissions", icon: "ShieldCheck" },
       ],
     },
     {
@@ -200,8 +205,6 @@ export const APP_MENUS = {
       icon: "ClipboardList",
       children: [
         { key: "orders", label: "Liste commandes", icon: "ClipboardList" },
-        { key: "order-detail", label: "Détail commande", icon: "Eye" },
-        { key: "edit-order", label: "Modifier / annuler", icon: "Pencil" },
       ],
     },
     {
@@ -291,8 +294,16 @@ export const APP_MENUS = {
       icon: "BarChart3",
       children: [
         { key: "daily-report", label: "Rapport journalier", icon: "FileText" },
-        { key: "service-performance", label: "Performance service", icon: "TrendingUp" },
-        { key: "kitchen-performance", label: "Performance cuisine", icon: "ChefHat" },
+        {
+          key: "service-performance",
+          label: "Performance service",
+          icon: "TrendingUp",
+        },
+        {
+          key: "kitchen-performance",
+          label: "Performance cuisine",
+          icon: "ChefHat",
+        },
       ],
     },
   ],
@@ -305,11 +316,19 @@ export const APP_MENUS = {
       children: [
         { key: "orders", label: "Suivi commandes", icon: "ClipboardList" },
         { key: "new-table-order", label: "Nouvelle commande", icon: "Plus" },
-        { key: "add-order-items", label: "Ajouter plats", icon: "UtensilsCrossed" },
+        {
+          key: "add-order-items",
+          label: "Ajouter plats",
+          icon: "UtensilsCrossed",
+        },
         { key: "send-kitchen", label: "Envoyer cuisine", icon: "ChefHat" },
         { key: "ready-notifications", label: "Commandes prêtes", icon: "Bell" },
         { key: "served-orders", label: "Marquer servie", icon: "CheckCircle2" },
-        { key: "request-bill", label: "Demander addition", icon: "ReceiptText" },
+        {
+          key: "request-bill",
+          label: "Demander addition",
+          icon: "ReceiptText",
+        },
       ],
     },
     {
@@ -355,10 +374,18 @@ export const APP_MENUS = {
       label: "Carte",
       icon: "UtensilsCrossed",
       children: [
-        { key: "menu-categories", label: "Catégories carte", icon: "ClipboardList" },
+        {
+          key: "menu-categories",
+          label: "Catégories carte",
+          icon: "ClipboardList",
+        },
         { key: "menu-dishes", label: "Plats", icon: "UtensilsCrossed" },
         { key: "availability", label: "Disponibilités", icon: "CheckCircle2" },
-        { key: "dish-unavailable", label: "Plat indisponible", icon: "AlertTriangle" },
+        {
+          key: "dish-unavailable",
+          label: "Plat indisponible",
+          icon: "AlertTriangle",
+        },
       ],
     },
     { key: "preparation", label: "En préparation", icon: "FileText" },
@@ -381,9 +408,17 @@ export const APP_MENUS = {
       icon: "Box",
       children: [
         { key: "stock", label: "Liste produits", icon: "Box" },
-        { key: "create-stock-product", label: "Création produit", icon: "Plus" },
+        {
+          key: "create-stock-product",
+          label: "Création produit",
+          icon: "Plus",
+        },
         { key: "thresholds", label: "Seuils d’alerte", icon: "Bell" },
-        { key: "low-stock", label: "Alertes stock faible", icon: "AlertTriangle" },
+        {
+          key: "low-stock",
+          label: "Alertes stock faible",
+          icon: "AlertTriangle",
+        },
       ],
     },
     {
@@ -407,7 +442,11 @@ export const APP_MENUS = {
         { key: "suppliers", label: "Fournisseurs", icon: "Truck" },
         { key: "stock-purchases", label: "Achats stock", icon: "ShoppingCart" },
         { key: "production", label: "Fiches production", icon: "FileText" },
-        { key: "ingredients", label: "Ingrédients / plats", icon: "UtensilsCrossed" },
+        {
+          key: "ingredients",
+          label: "Ingrédients / plats",
+          icon: "UtensilsCrossed",
+        },
       ],
     },
     {
@@ -417,7 +456,11 @@ export const APP_MENUS = {
       children: [
         { key: "rotation", label: "Rotation stock", icon: "Activity" },
         { key: "stock-report", label: "Rapport stock", icon: "BarChart3" },
-        { key: "period-summary", label: "Récapitulatif période", icon: "CalendarDays" },
+        {
+          key: "period-summary",
+          label: "Récapitulatif période",
+          icon: "CalendarDays",
+        },
       ],
     },
   ],
@@ -428,8 +471,16 @@ export const APP_MENUS = {
     { key: "margins", label: "Marges par plat", icon: "TrendingUp" },
     { key: "profits", label: "Bénéfices", icon: "BarChart3" },
     { key: "received-payments", label: "Paiements reçus", icon: "CreditCard" },
-    { key: "cash-collections", label: "Encaissements caisse", icon: "ReceiptText" },
-    { key: "counted-damages", label: "Avaries comptabilisées", icon: "AlertTriangle" },
+    {
+      key: "cash-collections",
+      label: "Encaissements caisse",
+      icon: "ReceiptText",
+    },
+    {
+      key: "counted-damages",
+      label: "Avaries comptabilisées",
+      icon: "AlertTriangle",
+    },
     { key: "stock-valuation", label: "Stock valorisé", icon: "Box" },
     {
       key: "financial-report",
@@ -440,7 +491,11 @@ export const APP_MENUS = {
         { key: "cashflow", label: "Flux de trésorerie", icon: "Activity" },
         { key: "balance", label: "Bilan", icon: "Calculator" },
         { key: "ledger", label: "Grand livre", icon: "FileText" },
-        { key: "financial-report", label: "Rapport financier", icon: "BarChart3" },
+        {
+          key: "financial-report",
+          label: "Rapport financier",
+          icon: "BarChart3",
+        },
       ],
     },
   ],
@@ -451,14 +506,26 @@ export const APP_MENUS = {
       label: "Paiements",
       icon: "Wallet",
       children: [
-        { key: "unpaid-orders", label: "Commandes non payées", icon: "ClipboardList" },
-        { key: "cash-order-detail", label: "Commande à encaisser", icon: "Eye" },
+        {
+          key: "unpaid-orders",
+          label: "Commandes non payées",
+          icon: "ClipboardList",
+        },
+        {
+          key: "cash-order-detail",
+          label: "Commande à encaisser",
+          icon: "Eye",
+        },
         { key: "discounts", label: "Remise autorisée", icon: "TrendingDown" },
         { key: "payment-method", label: "Mode paiement", icon: "CreditCard" },
         { key: "cash", label: "Espèces", icon: "Wallet" },
         { key: "mobile", label: "Mobile Money", icon: "Phone" },
         { key: "card", label: "Carte", icon: "CreditCard" },
-        { key: "payment-validation", label: "Validation paiement", icon: "CheckCircle2" },
+        {
+          key: "payment-validation",
+          label: "Validation paiement",
+          icon: "CheckCircle2",
+        },
       ],
     },
     {
@@ -488,7 +555,8 @@ export const APP_MENUS = {
 export const ROLE_DASHBOARDS = {
   SUPERADMIN: {
     title: "Dashboard Superadmin",
-    subtitle: "Création des restaurants, suivi de la plateforme et activation des comptes.",
+    subtitle:
+      "Création des restaurants, suivi de la plateforme et activation des comptes.",
     accent: "#0F8AB1",
     cards: [
       { title: "Restaurants", value: "0", icon: "Building2" },
@@ -499,7 +567,8 @@ export const ROLE_DASHBOARDS = {
   },
   ADMIN: {
     title: "Dashboard Administrateur",
-    subtitle: "Pilotage global du restaurant, des équipes, des ventes et des performances.",
+    subtitle:
+      "Pilotage global du restaurant, des équipes, des ventes et des performances.",
     accent: "#0F8AB1",
     cards: [
       { title: "Chiffre d'affaires", value: "0 FCFA", icon: "TrendingUp" },
@@ -510,7 +579,8 @@ export const ROLE_DASHBOARDS = {
   },
   MANAGER: {
     title: "Dashboard Manager",
-    subtitle: "Supervision opérationnelle du service, de la cuisine, du stock et des objectifs.",
+    subtitle:
+      "Supervision opérationnelle du service, de la cuisine, du stock et des objectifs.",
     accent: "#7c3aed",
     cards: [
       { title: "Commandes du jour", value: "0", icon: "ShoppingCart" },
@@ -531,7 +601,8 @@ export const ROLE_DASHBOARDS = {
   },
   CUISINE: {
     title: "Dashboard Cuisine",
-    subtitle: "Organisation des préparations et priorisation des commandes urgentes.",
+    subtitle:
+      "Organisation des préparations et priorisation des commandes urgentes.",
     accent: "#10b981",
     cards: [
       { title: "À préparer", value: "0", icon: "ChefHat" },
@@ -541,7 +612,8 @@ export const ROLE_DASHBOARDS = {
   },
   STOCK: {
     title: "Dashboard Stock / Comptabilité",
-    subtitle: "Contrôle des produits, livraisons, dépenses et alertes de stock.",
+    subtitle:
+      "Contrôle des produits, livraisons, dépenses et alertes de stock.",
     accent: "#2563eb",
     cards: [
       { title: "Produits", value: "0", icon: "Package" },
@@ -552,7 +624,8 @@ export const ROLE_DASHBOARDS = {
   },
   COMPTABLE: {
     title: "Dashboard Comptable",
-    subtitle: "Synthèse des recettes, dépenses, marges et clôtures financières.",
+    subtitle:
+      "Synthèse des recettes, dépenses, marges et clôtures financières.",
     accent: "#2563eb",
     cards: [
       { title: "Recettes", value: "0 FCFA", icon: "Wallet" },
@@ -563,7 +636,8 @@ export const ROLE_DASHBOARDS = {
   },
   CAISSE: {
     title: "Dashboard Caisse",
-    subtitle: "Encaissements, tickets, paiements en attente et clôture de caisse.",
+    subtitle:
+      "Encaissements, tickets, paiements en attente et clôture de caisse.",
     accent: "#f59e0b",
     cards: [
       { title: "Encaissements", value: "0 FCFA", icon: "Wallet" },

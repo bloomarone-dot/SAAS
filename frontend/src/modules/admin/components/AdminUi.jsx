@@ -1,4 +1,5 @@
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { validationFor } from "@/utils/validation";
 
 export function AdminPage({ eyebrow, title, subtitle, action, children }) {
   return (
@@ -103,6 +104,7 @@ export function Field({ label, required, as = "input", children, className = "",
       {children ?? (
         <Component
           {...props}
+          {...validationFor(props.name)}
           className="min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold outline-none transition focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-emerald-50"
         />
       )}

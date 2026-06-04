@@ -4,6 +4,8 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.modules.shared.schemas import OrmModel
+
+NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 .,'’()&/-]{1,159}$"
 from app.modules.stock.models import StockCostCenterType, StockInventoryStatus, StockLocation, StockLossReason, StockMovementType, StockProductType
 
 
@@ -26,7 +28,7 @@ class StockItemPublic(OrmModel):
 
 
 class StockItemIn(BaseModel):
-    name: str = Field(min_length=2, max_length=160)
+    name: str = Field(min_length=2, max_length=160, pattern=NAME_PATTERN)
     product_type: StockProductType = StockProductType.INGREDIENT
     unit: str = Field(default="Kilogramme", max_length=30)
     quantity: float = Field(default=0, ge=0)
@@ -41,7 +43,7 @@ class StockItemIn(BaseModel):
 
 
 class StockItemUpdateIn(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    name: Optional[str] = Field(default=None, min_length=2, max_length=160, pattern=NAME_PATTERN)
     product_type: Optional[StockProductType] = None
     unit: Optional[str] = Field(default=None, max_length=30)
     quantity: Optional[float] = Field(default=None, ge=0)

@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field
 from app.modules.shared.schemas import OrmModel
 from app.modules.users.schemas import UserPublic
 
+NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 .,'’()&/-]{1,190}$"
+PERSON_NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '-]{1,79}$"
+USERNAME_PATTERN = r"^[a-zA-Z0-9._-]{3,50}$"
+PHONE_PATTERN = r"^\+?[0-9 ()-]{5,30}$"
+CURRENCY_PATTERN = r"^[A-Za-z]{3}$"
+TIMEZONE_PATTERN = r"^[A-Za-z_]+/[A-Za-z0-9_+\-/]+$"
+
 
 class RestaurantPublic(OrmModel):
     """Representation publique d'un restaurant/tenant."""
@@ -42,20 +49,20 @@ class RestaurantPublic(OrmModel):
 class RestaurantProvisionIn(BaseModel):
     """Donnees necessaires pour creer un restaurant et son proprietaire."""
 
-    name: str = Field(min_length=2, max_length=191)
-    slug: str = Field(min_length=2, max_length=191, pattern=r"^[a-z0-9-]+$")
+    name: str = Field(min_length=2, max_length=191, pattern=NAME_PATTERN)
+    slug: str = Field(min_length=2, max_length=191, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     logo_url: Optional[str] = Field(default=None, max_length=500)
     primary_color: str = Field(default="#E4572E", pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_color: str = Field(default="#1F2937", pattern=r"^#[0-9A-Fa-f]{6}$")
-    currency: str = Field(default="XAF", min_length=3, max_length=3)
-    timezone: str = Field(default="Africa/Douala", max_length=50)
+    currency: str = Field(default="XAF", min_length=3, max_length=3, pattern=CURRENCY_PATTERN)
+    timezone: str = Field(default="Africa/Douala", max_length=50, pattern=TIMEZONE_PATTERN)
     owner_email: Optional[str] = Field(default=None, max_length=191)
-    owner_username: str = Field(min_length=3, max_length=50)
+    owner_username: str = Field(min_length=3, max_length=50, pattern=USERNAME_PATTERN)
     owner_password: str = Field(min_length=8, max_length=128)
-    owner_first_name: str = Field(min_length=1, max_length=100)
-    owner_last_name: str = Field(min_length=1, max_length=100)
-    owner_phone: str = Field(min_length=5, max_length=30)
-    owner_alt_phone: Optional[str] = Field(default=None, max_length=30)
+    owner_first_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
+    owner_last_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
+    owner_phone: str = Field(min_length=5, max_length=30, pattern=PHONE_PATTERN)
+    owner_alt_phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
 
 
 class RestaurantProvisionOut(BaseModel):
@@ -82,15 +89,15 @@ class RestaurantStatusIn(BaseModel):
 class RestaurantSettingsIn(BaseModel):
     """Champs configurables par le proprietaire du restaurant."""
 
-    name: Optional[str] = Field(default=None, min_length=2, max_length=191)
+    name: Optional[str] = Field(default=None, min_length=2, max_length=191, pattern=NAME_PATTERN)
     logo_url: Optional[str] = Field(default=None, max_length=500)
     description: Optional[str] = None
     address: Optional[str] = Field(default=None, max_length=255)
-    city: Optional[str] = Field(default=None, max_length=120)
-    country: Optional[str] = Field(default=None, max_length=120)
+    city: Optional[str] = Field(default=None, max_length=120, pattern=NAME_PATTERN)
+    country: Optional[str] = Field(default=None, max_length=120, pattern=NAME_PATTERN)
     postal_box: Optional[str] = Field(default=None, max_length=80)
-    phone: Optional[str] = Field(default=None, max_length=30)
-    whatsapp_phone: Optional[str] = Field(default=None, max_length=30)
+    phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
+    whatsapp_phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
     email: Optional[str] = Field(default=None, max_length=191)
     opening_hours: Optional[str] = Field(default=None, max_length=255)
     is_open: Optional[bool] = None
@@ -98,8 +105,8 @@ class RestaurantSettingsIn(BaseModel):
     delivery_fee: Optional[float] = Field(default=None, ge=0)
     website_url: Optional[str] = Field(default=None, max_length=500)
     tax_id: Optional[str] = Field(default=None, max_length=100)
-    legal_name: Optional[str] = Field(default=None, max_length=191)
+    legal_name: Optional[str] = Field(default=None, max_length=191, pattern=NAME_PATTERN)
     primary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
-    currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
-    timezone: Optional[str] = Field(default=None, max_length=50)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=3, pattern=CURRENCY_PATTERN)
+    timezone: Optional[str] = Field(default=None, max_length=50, pattern=TIMEZONE_PATTERN)

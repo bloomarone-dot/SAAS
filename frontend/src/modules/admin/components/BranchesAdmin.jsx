@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
+import { validationFor } from "@/utils/validation";
 
 const initialBranch = {
   name: "",
@@ -46,15 +47,6 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
       created_at: (branch) => branch.created_at,
     });
   }, [branches, cityFilter, search, sort]);
-
-  const stats = useMemo(
-    () => [
-      { label: "Branches", value: branches.length, icon: "MapPin" },
-      { label: "Villes", value: cities.length, icon: "Building2" },
-      { label: "Actives", value: branches.filter((branch) => branch.is_active).length, icon: "CheckCircle2" },
-    ],
-    [branches, cities.length]
-  );
 
   useEffect(() => {
     fetchBranches();
@@ -133,36 +125,21 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
         </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {stats.map((item) => (
-          <div key={item.label} className="border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
-              <DashboardIcon name={item.icon} size={19} />
-            </div>
-            <p className="mt-5 text-sm font-bold text-slate-500">{item.label}</p>
-            <p className="mt-1 text-3xl font-black text-[#070528]">{item.value}</p>
-          </div>
-        ))}
-      </div>
-
       <div className={`grid gap-6 ${focusCreate ? "xl:grid-cols-1" : "xl:grid-cols-[0.8fr_1.2fr]"}`}>
-        <form onSubmit={createBranch} className="border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
+        <form onSubmit={createBranch} className="border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-2xl font-black text-[#070528]">Créer une branche</h2>
               <p className="mt-1 text-sm font-medium text-slate-500">
                 Ajoutez un point de vente avec son adresse et son contact.
               </p>
             </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#f04438] text-white">
-              <DashboardIcon name="Plus" size={19} />
-            </div>
           </div>
 
-          <div className="mt-6 grid gap-4">
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
             <Field name="name" label="Nom de la branche" value={form.name} onChange={updateField} required />
             <Field name="city" label="Ville" value={form.city} onChange={updateField} required />
-            <Field name="address" label="Adresse complète" value={form.address} onChange={updateField} required />
+            <Field name="address" label="Adresse complète" value={form.address} onChange={updateField} required className="md:col-span-2" />
             <Field name="phone" label="Téléphone" value={form.phone} onChange={updateField} />
           </div>
 
@@ -254,14 +231,15 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
   );
 }
 
-function Field({ label, required, ...props }) {
+function Field({ label, required, className = "", ...props }) {
   return (
-    <label className="block">
+    <label className={`block ${className}`}>
       <span className="text-xs font-black text-[#070528]">
         {label} {required && <span className="text-red-500">*</span>}
       </span>
       <input
         {...props}
+        {...validationFor(props.name)}
         required={required}
         className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
       />

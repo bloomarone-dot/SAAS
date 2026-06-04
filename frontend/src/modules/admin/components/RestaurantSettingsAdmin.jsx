@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { validationFor } from "@/utils/validation";
 
 const emptySettings = {
   name: "",
@@ -33,16 +34,6 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
 
   const token = localStorage.getItem("access_token");
   const canUpdate = currentUser?.is_owner;
-
-  const stats = useMemo(
-    () => [
-      { label: "Devise", value: form.currency || "-", icon: "Wallet" },
-      { label: "Ville", value: form.city || "-", icon: "MapPin" },
-      { label: "Contact", value: form.whatsapp_phone || form.phone || form.email || "-", icon: "Phone" },
-      { label: "Ouverture", value: form.is_open ? "Ouvert" : "Fermé", icon: "CheckCircle2" },
-    ],
-    [form.city, form.currency, form.email, form.is_open, form.phone, form.whatsapp_phone]
-  );
 
   useEffect(() => {
     loadSettings();
@@ -206,135 +197,157 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {stats.map((item) => (
-          <div key={item.label} className="border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
-              <DashboardIcon name={item.icon} size={19} />
-            </div>
-            <p className="mt-5 text-sm font-bold text-slate-500">{item.label}</p>
-            <p className="mt-1 truncate text-2xl font-black text-[#070528]">{item.value}</p>
+      <form onSubmit={saveSettings} className="border border-slate-200 bg-white p-5 shadow-sm lg:p-6">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-5">
+          <div>
+            <h2 className="text-2xl font-black text-[#070528]">Informations restaurant</h2>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              Ces valeurs alimentent l’identité, les reçus et l’espace restaurant.
+            </p>
           </div>
-        ))}
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <form onSubmit={saveSettings} className="border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-black text-[#070528]">Informations restaurant</h2>
-              <p className="mt-1 text-sm font-medium text-slate-500">
-                Ces valeurs alimentent l’identité, les reçus et l’espace restaurant.
-              </p>
-            </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#f04438] text-white">
-              <DashboardIcon name="Settings" size={19} />
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={!canUpdate || isLoading} />
-            <Field name="legal_name" label="Raison sociale" value={form.legal_name} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="currency" label="Devise" value={form.currency} onChange={updateField} maxLength={3} required disabled={!canUpdate || isLoading} />
-            <Field name="timezone" label="Fuseau horaire" value={form.timezone} onChange={updateField} required disabled={!canUpdate || isLoading} />
-            <Field name="phone" label="Téléphone" value={form.phone} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="whatsapp_phone" label="WhatsApp" value={form.whatsapp_phone} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="email" label="Email public" type="email" value={form.email} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="address" label="Adresse" value={form.address} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="city" label="Ville" value={form.city} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="country" label="Pays" value={form.country} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="postal_box" label="Boîte postale" value={form.postal_box} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="opening_hours" label="Horaires d'ouverture" value={form.opening_hours} onChange={updateField} placeholder="Ex: Lun-Dim 09:00 - 22:00" disabled={!canUpdate || isLoading} />
-            <Field name="payment_methods" label="Modes de paiement" value={form.payment_methods} onChange={updateField} placeholder="Ex: Orange Money, MTN MoMo, Cash" disabled={!canUpdate || isLoading} />
-            <Field name="delivery_fee" label="Frais de livraison" type="number" min="0" value={form.delivery_fee} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="website_url" label="Site web" value={form.website_url} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="tax_id" label="Identifiant fiscal / registre" value={form.tax_id} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <LogoUpload onChange={uploadLogo} disabled={!canUpdate || isLoading} />
-            <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 md:col-span-2">
-              <input
-                name="is_open"
-                type="checkbox"
-                checked={form.is_open}
-                onChange={updateField}
-                disabled={!canUpdate || isLoading}
-                className="h-5 w-5 accent-[#f04438]"
-              />
-              <span className="text-sm font-black text-[#070528]">
-                Restaurant ouvert aux commandes et visites
-              </span>
-            </label>
-            <label className="block md:col-span-2">
-              <span className="text-xs font-black text-[#070528]">Description</span>
-              <textarea
-                name="description"
-                value={form.description}
-                onChange={updateField}
-                rows={3}
-                disabled={!canUpdate || isLoading}
-                placeholder="Présentation courte du restaurant, spécialités, ambiance..."
-                className="mt-2 w-full border border-slate-200 bg-white px-3 py-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2] disabled:bg-slate-50 disabled:text-slate-400"
-              />
-            </label>
-            <ColorField name="primary_color" label="Couleur principale" value={form.primary_color} onChange={updateField} disabled={!canUpdate || isLoading} />
-            <ColorField name="secondary_color" label="Couleur secondaire" value={form.secondary_color} onChange={updateField} disabled={!canUpdate || isLoading} />
-          </div>
-
-          <button
-            type="submit"
-            disabled={!canUpdate || isLoading}
-            className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <DashboardIcon name="CheckCircle2" size={17} />
-            Enregistrer les paramètres
-          </button>
-        </form>
-
-        <div className="border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-black text-[#070528]">Aperçu</h2>
-              <p className="mt-1 text-sm font-medium text-slate-500">
-                Prévisualisation rapide de l’identité restaurant.
-              </p>
-            </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
-              <DashboardIcon name="Store" size={19} />
-            </div>
-          </div>
-
-          <div className="mt-6 border border-slate-200 p-5">
-            <div className="flex items-center gap-4">
-              <div
-                className="flex h-16 w-16 items-center justify-center rounded-lg text-xl font-black text-white"
-                style={{ backgroundColor: form.primary_color || "#E4572E" }}
-              >
-                {form.logo_url ? (
-                  <img src={form.logo_url} alt="" className="h-full w-full rounded-lg object-cover" />
-                ) : (
-                  form.name?.[0] ?? "R"
-                )}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-xl font-black text-[#070528]">{form.name || "Nom du restaurant"}</p>
-                <p className="mt-1 text-sm font-bold text-slate-500">{form.city || "Ville"} · {form.currency || "XAF"}</p>
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-2 border-t border-slate-100 pt-5 text-sm font-semibold text-slate-600">
-              <PreviewLine icon="MapPin" value={[form.address, form.city, form.country].filter(Boolean).join(", ") || "Adresse non renseignée" } />
-              <PreviewLine icon="Phone" value={form.phone || "Téléphone non renseigné"} />
-              <PreviewLine icon="FileText" value={form.postal_box ? `BP ${form.postal_box}` : "Boîte postale non renseignée"} />
-              <PreviewLine icon="Chrome" value={form.website_url || "Site web non renseigné"} />
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <Swatch label="Principale" value={form.primary_color} />
-              <Swatch label="Secondaire" value={form.secondary_color} />
-            </div>
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#f04438] text-white">
+            <DashboardIcon name="Settings" size={19} />
           </div>
         </div>
-      </div>
+
+        <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid gap-5 lg:grid-cols-2">
+            <SettingsGroup title="Identité">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={!canUpdate || isLoading} />
+                <Field name="legal_name" label="Raison sociale" value={form.legal_name} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="tax_id" label="Identifiant fiscal / registre" value={form.tax_id} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="currency" label="Devise" value={form.currency} onChange={updateField} maxLength={3} required disabled={!canUpdate || isLoading} />
+              </div>
+              <label className="mt-4 block">
+                <span className="text-xs font-black text-[#070528]">Description</span>
+                <textarea
+                  name="description"
+                  value={form.description}
+                  onChange={updateField}
+                  rows={3}
+                  disabled={!canUpdate || isLoading}
+                  placeholder="Présentation courte du restaurant, spécialités, ambiance..."
+                  className="mt-2 w-full border border-slate-200 bg-white px-3 py-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2] disabled:bg-slate-50 disabled:text-slate-400"
+                />
+              </label>
+            </SettingsGroup>
+
+            <SettingsGroup title="Localisation">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field name="address" label="Adresse" value={form.address} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="city" label="Ville" value={form.city} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="country" label="Pays" value={form.country} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="postal_box" label="Boîte postale" value={form.postal_box} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <div className="md:col-span-2">
+                  <Field name="timezone" label="Fuseau horaire" value={form.timezone} onChange={updateField} required disabled={!canUpdate || isLoading} />
+                </div>
+              </div>
+            </SettingsGroup>
+
+            <SettingsGroup title="Contacts & vente">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field name="phone" label="Téléphone" value={form.phone} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="whatsapp_phone" label="WhatsApp" value={form.whatsapp_phone} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="email" label="Email public" type="email" value={form.email} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="website_url" label="Site web" value={form.website_url} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="opening_hours" label="Horaires d'ouverture" value={form.opening_hours} onChange={updateField} placeholder="Ex: Lun-Dim 09:00 - 22:00" disabled={!canUpdate || isLoading} />
+                <Field name="delivery_fee" label="Frais de livraison" type="number" min="0" value={form.delivery_fee} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <div className="md:col-span-2">
+                  <Field name="payment_methods" label="Modes de paiement" value={form.payment_methods} onChange={updateField} placeholder="Ex: Orange Money, MTN MoMo, Cash" disabled={!canUpdate || isLoading} />
+                </div>
+              </div>
+              <label className="mt-4 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
+                <input
+                  name="is_open"
+                  type="checkbox"
+                  checked={form.is_open}
+                  onChange={updateField}
+                  disabled={!canUpdate || isLoading}
+                  className="h-5 w-5 accent-[#f04438]"
+                />
+                <span className="text-sm font-black text-[#070528]">
+                  Restaurant ouvert aux commandes et visites
+                </span>
+              </label>
+            </SettingsGroup>
+
+            <SettingsGroup title="Marque">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <LogoUpload onChange={uploadLogo} disabled={!canUpdate || isLoading} />
+                <ColorField name="primary_color" label="Couleur principale" value={form.primary_color} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <ColorField name="secondary_color" label="Couleur secondaire" value={form.secondary_color} onChange={updateField} disabled={!canUpdate || isLoading} />
+              </div>
+            </SettingsGroup>
+          </div>
+
+          <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+            <div className="border border-slate-200 bg-white p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-[#070528]">Aperçu</h2>
+                  <p className="mt-1 text-sm font-medium text-slate-500">
+                    Prévisualisation rapide de l’identité restaurant.
+                  </p>
+                </div>
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#fff4ed] text-[#f04438]">
+                  <DashboardIcon name="Store" size={19} />
+                </div>
+              </div>
+
+              <div className="mt-5 border border-slate-200 p-4">
+                <div className="flex items-center gap-4">
+                  <div
+                    className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg text-xl font-black text-white"
+                    style={{ backgroundColor: form.primary_color || "#E4572E" }}
+                  >
+                    {form.logo_url ? (
+                      <img src={form.logo_url} alt="" className="h-full w-full rounded-lg object-cover" />
+                    ) : (
+                      form.name?.[0] ?? "R"
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-xl font-black text-[#070528]">{form.name || "Nom du restaurant"}</p>
+                    <p className="mt-1 text-sm font-bold text-slate-500">{form.city || "Ville"} · {form.currency || "XAF"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 space-y-2 border-t border-slate-100 pt-5 text-sm font-semibold text-slate-600">
+                  <PreviewLine icon="MapPin" value={[form.address, form.city, form.country].filter(Boolean).join(", ") || "Adresse non renseignée" } />
+                  <PreviewLine icon="Phone" value={form.phone || "Téléphone non renseigné"} />
+                  <PreviewLine icon="FileText" value={form.postal_box ? `BP ${form.postal_box}` : "Boîte postale non renseignée"} />
+                  <PreviewLine icon="Chrome" value={form.website_url || "Site web non renseigné"} />
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <Swatch label="Principale" value={form.primary_color} />
+                  <Swatch label="Secondaire" value={form.secondary_color} />
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={!canUpdate || isLoading}
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <DashboardIcon name="CheckCircle2" size={17} />
+              Enregistrer les paramètres
+            </button>
+          </aside>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function SettingsGroup({ title, children }) {
+  return (
+    <section className="border border-slate-200 bg-slate-50/40 p-4">
+      <h3 className="mb-4 text-sm font-black uppercase text-[#070528]">{title}</h3>
+      {children}
     </section>
   );
 }
@@ -347,6 +360,7 @@ function Field({ label, required, ...props }) {
       </span>
       <input
         {...props}
+        {...validationFor(props.name)}
         required={required}
         className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2] disabled:bg-slate-50 disabled:text-slate-400"
       />

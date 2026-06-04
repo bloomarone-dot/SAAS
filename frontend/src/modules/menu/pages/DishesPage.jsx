@@ -23,6 +23,7 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const createOnly = showCreateOnMount && !activeOrderId;
 
   const categoryNameById = useMemo(() => new Map(categories.map((category) => [category.id, category.name])), [categories]);
   const activeCategories = useMemo(
@@ -130,7 +131,9 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
       });
       setDishes((current) => [created, ...current]);
       setForm({ ...emptyDish, category_id: form.category_id });
-      setShowForm(false);
+      if (!createOnly) {
+        setShowForm(false);
+      }
     } catch (err) {
       setError(err.message || "Ajout du plat impossible.");
     }
@@ -202,14 +205,14 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   return (
     <AdminPage
       eyebrow={role === "CUISINE" ? "Cuisine" : "Plats"}
-      title="Gestion des plats"
-      subtitle={activeOrderId ? "Ajoutez les plats à la commande de table puis envoyez-les en cuisine." : "Gérez votre carte, les tarifs, la disponibilité et les performances des plats."}
-      action={
+      title={createOnly ? "Créer un plat" : "Gestion des plats"}
+      subtitle={activeOrderId ? "Ajoutez les plats à la commande de table puis envoyez-les en cuisine." : createOnly ? "Renseignez les informations du plat à ajouter à la carte." : "Gérez votre carte, les tarifs, la disponibilité et les performances des plats."}
+      action={!createOnly && (
         <div className="flex flex-wrap gap-3">
           {!activeOrderId && <PrimaryAction icon="Plus" onClick={() => setShowForm((value) => !value)}>{showForm ? "Fermer" : "Nouveau plat"}</PrimaryAction>}
           <SecondaryAction icon="Download" onClick={() => exportCsv(visibleDishes, categoryNameById)}>Exporter</SecondaryAction>
         </div>
-      }
+      )}
     >
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-600">{error}</div>}
       {notice && <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">{notice}</div>}
@@ -222,12 +225,12 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         />
       )}
 
-      <AdminKpis items={[
+      {!createOnly && <AdminKpis items={[
         { label: "Plats disponibles", value: dishes.filter((dish) => dish.is_available).length, icon: "UtensilsCrossed", trend: "à jour" },
         { label: "Indisponibles", value: dishes.filter((dish) => !dish.is_available).length, icon: "Power", tone: "warn" },
         { label: "Catégories couvertes", value: activeCategories.length, icon: "ClipboardList" },
         { label: "Prix moyen", value: money(averagePrice), icon: "Wallet" },
-      ]} />
+      ]} />}
 
       {showForm && (
         <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
@@ -238,7 +241,7 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
+      {!createOnly && <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
         <AdminCard>
           <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_180px_180px_auto]">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher un plat..." />
@@ -285,7 +288,7 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
             </div>
           </AdminCard>
         </div>
-      </div>
+      </div>}
     </AdminPage>
   );
 }

@@ -14,11 +14,13 @@ from app.modules.platform.schemas import (
     PlatformOverview,
     PlatformSettingsPublic,
     PlatformSettingsUpdateIn,
+    PlatformUserPasswordResetIn,
     SubscriptionPublic,
     SubscriptionUpdateIn,
 )
 from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
+from app.security import hash_password
 
 
 router = APIRouter(prefix="/platform", tags=["platform"])
@@ -177,6 +179,24 @@ def get_settings(
     db: Session = Depends(get_db),
 ):
     return read_settings(db)
+
+
+@router.patch("/users/{user_id}/password")
+def reset_platform_user_password(
+    user_id: str,
+    payload: PlatformUserPasswordResetIn,
+    current_user: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if user.role == Role.SUPERADMIN:
+        raise HTTPException(status_code=400, detail="Ce compte plateforme ne peut pas etre modifie ici")
+
+    user.password_hash = hash_password(payload.password)
+    db.commit()
+    return {"message": "Mot de passe réinitialisé."}
 
 
 @router.patch("/settings", response_model=PlatformSettingsPublic)

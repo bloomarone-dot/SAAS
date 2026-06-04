@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
+import { validationFor } from "@/utils/validation";
 
 const emptyCategory = { name: "", description: "" };
 const emptyItem = {
@@ -56,16 +57,6 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
       created_at: (item) => item.created_at,
     });
   }, [availabilityFilter, categories, categoryFilter, items, search, sort]);
-
-  const stats = useMemo(
-    () => [
-      { label: "Catégories", value: categories.length, icon: "ClipboardList" },
-      { label: "Plats", value: items.length, icon: "UtensilsCrossed" },
-      { label: "Disponibles", value: items.filter((item) => item.is_available).length, icon: "CheckCircle2" },
-      { label: "Prix moyen", value: formatPrice(average(items.map((item) => item.price))), icon: "Wallet" },
-    ],
-    [categories.length, items]
-  );
 
   useEffect(() => {
     loadCatalog();
@@ -203,18 +194,6 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
           <DashboardIcon name="Activity" size={17} />
           Actualiser
         </button>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {stats.map((item) => (
-          <div key={item.label} className="border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex h-11 w-11 items-center justify-center bg-[#fff4ed] text-[#f04438]">
-              <DashboardIcon name={item.icon} size={19} />
-            </div>
-            <p className="mt-5 text-sm font-bold text-slate-500">{item.label}</p>
-            <p className="mt-1 text-3xl font-black text-[#070528]">{item.value}</p>
-          </div>
-        ))}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
@@ -364,21 +343,11 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
   );
 }
 
-function average(values) {
-  if (!values.length) return 0;
-  return values.reduce((total, value) => total + Number(value || 0), 0) / values.length;
-}
-
 function SectionTitle({ title, icon }) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <h2 className="text-2xl font-black text-[#070528]">{title}</h2>
-        <p className="mt-1 text-sm font-medium text-slate-500">Information directement exploitable par le restaurant.</p>
-      </div>
-      <div className="flex h-11 w-11 items-center justify-center bg-[#f04438] text-white">
-        <DashboardIcon name={icon} size={19} />
-      </div>
+    <div className="border-b border-slate-100 pb-4">
+      <h2 className="text-2xl font-black text-[#070528]">{title}</h2>
+      <p className="mt-1 text-sm font-medium text-slate-500">Information directement exploitable par le restaurant.</p>
     </div>
   );
 }
@@ -391,6 +360,7 @@ function Field({ label, required, ...props }) {
       </span>
       <input
         {...props}
+        {...validationFor(props.name)}
         required={required}
         className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
       />

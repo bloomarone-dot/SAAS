@@ -17,7 +17,7 @@ function paymentTone(order) {
   return "orange";
 }
 
-export function OrdersAdmin({ apiBaseUrl, onMessage }) {
+export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
   const [orders, setOrders] = useState([]);
   const [status, setStatus] = useState("Toutes");
   const [search, setSearch] = useState("");
@@ -25,6 +25,7 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
   const [editingOrderId, setEditingOrderId] = useState("");
   const [editForm, setEditForm] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const reviewOnly = currentUser?.role === "ADMIN";
 
   useEffect(() => {
     loadOrders();
@@ -159,8 +160,8 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
   return (
     <AdminPage
       eyebrow="Commandes"
-      title="Gestion des commandes"
-      subtitle="Consultez et gérez toutes les commandes de votre restaurant."
+      title={reviewOnly ? "Suivi des commandes" : "Gestion des commandes"}
+      subtitle={reviewOnly ? "Consultez les commandes et validez uniquement les annulations ou suppressions nécessaires." : "Consultez et gérez toutes les commandes de votre restaurant."}
       action={<SecondaryAction icon="Download" onClick={() => exportCsv(visibleOrders)}>Exporter</SecondaryAction>}
     >
       <AdminKpis items={[
@@ -170,7 +171,7 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
         { label: "Prêtes", value: orders.filter((order) => order.status === "Prête").length, icon: "Utensils" },
       ]} />
 
-      {editForm && (
+      {!reviewOnly && editForm && (
         <AdminCard title="Modifier la commande" action={<SecondaryAction onClick={() => { setEditingOrderId(""); setEditForm(null); }}>Annuler</SecondaryAction>}>
           <form onSubmit={saveOrder} className="grid gap-4 md:grid-cols-3">
             <Field name="customer_name" label="Client" required value={editForm.customer_name} onChange={updateEditField} />
@@ -208,12 +209,27 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
             <input type="date" className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none" />
             <SecondaryAction icon="Activity" onClick={loadOrders}>Actualiser</SecondaryAction>
           </div>
-          <OrdersTable orders={visibleOrders} selectedOrderId={selectedOrder?.id} onSelect={setSelectedOrderId} onEdit={startEdit} onDelete={deleteOrder} onStatus={updateStatus} />
+          <OrdersTable
+            orders={visibleOrders}
+            selectedOrderId={selectedOrder?.id}
+            reviewOnly={reviewOnly}
+            onSelect={setSelectedOrderId}
+            onEdit={startEdit}
+            onDelete={deleteOrder}
+            onStatus={updateStatus}
+          />
         </AdminCard>
 
         <div className="space-y-5">
           <AdminCard title="Détail de la commande">
-            {selectedOrder ? <OrderDetail order={selectedOrder} onStatus={updateStatus} /> : <EmptyState title="Aucune commande" />}
+            {selectedOrder ? (
+              <OrderDetail
+                order={selectedOrder}
+                reviewOnly={reviewOnly}
+                onStatus={updateStatus}
+                onDelete={deleteOrder}
+              />
+            ) : <EmptyState title="Aucune commande" />}
           </AdminCard>
           <AdminCard title="Activité récente">
             <div className="space-y-4">
@@ -232,7 +248,7 @@ export function OrdersAdmin({ apiBaseUrl, onMessage }) {
   );
 }
 
-function OrdersTable({ orders, selectedOrderId, onSelect, onEdit, onDelete, onStatus }) {
+function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, onDelete, onStatus }) {
   if (!orders.length) return <EmptyState icon="ClipboardList" title="Aucune commande" text="Les commandes clients apparaîtront ici." />;
   return (
     <div className="overflow-x-auto">
@@ -269,11 +285,26 @@ function OrdersTable({ orders, selectedOrderId, onSelect, onEdit, onDelete, onSt
               <td className="py-3 font-semibold text-slate-500">{new Date(order.created_at).toLocaleDateString("fr-FR")}</td>
               <td className="py-3 text-right" onClick={(event) => event.stopPropagation()}>
                 <IconButton icon="Eye" title="Voir" onClick={() => onSelect(order.id)} />
-                <IconButton icon="Pencil" title="Modifier" onClick={() => onEdit(order)} />
-                <select value={order.status} onChange={(event) => onStatus(order, event.target.value)} className="ml-2 h-9 rounded-lg border border-slate-200 px-2 text-xs font-black outline-none">
-                  {nextStatuses.map((item) => <option key={item}>{item}</option>)}
-                </select>
-                <IconButton icon="Trash2" title="Supprimer" tone="red" onClick={() => onDelete(order)} />
+                {reviewOnly ? (
+                  <>
+                    {order.status !== "Annulée" && order.status !== "Archivée" && (
+                      <button type="button" onClick={() => onStatus(order, "Annulée")} className="ml-2 rounded-lg border border-orange-200 px-3 py-2 text-xs font-black text-orange-700 hover:bg-orange-50">
+                        Valider annulation
+                      </button>
+                    )}
+                    <button type="button" onClick={() => onDelete(order)} className="ml-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-600 hover:bg-red-50">
+                      Archiver
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <IconButton icon="Pencil" title="Modifier" onClick={() => onEdit(order)} />
+                    <select value={order.status} onChange={(event) => onStatus(order, event.target.value)} className="ml-2 h-9 rounded-lg border border-slate-200 px-2 text-xs font-black outline-none">
+                      {nextStatuses.map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                    <IconButton icon="Trash2" title="Supprimer" tone="red" onClick={() => onDelete(order)} />
+                  </>
+                )}
               </td>
             </tr>
           ))}
@@ -283,7 +314,7 @@ function OrdersTable({ orders, selectedOrderId, onSelect, onEdit, onDelete, onSt
   );
 }
 
-function OrderDetail({ order, onStatus }) {
+function OrderDetail({ order, reviewOnly, onStatus, onDelete }) {
   const visibleItems = order.items.filter((item) => item.sale_channel !== "EMBALLAGE");
   const subtotal = visibleItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
   return (
@@ -310,13 +341,26 @@ function OrderDetail({ order, onStatus }) {
         ))}
       </div>
       {order.notes && <div className="rounded-lg bg-orange-50 p-3 text-sm font-semibold text-orange-700">{order.notes}</div>}
-      <div className="space-y-2">
-        {["En préparation", "Prête", "Livrée", "Annulée"].map((status) => (
-          <button key={status} type="button" onClick={() => onStatus(order, status)} className="flex w-full items-center justify-between rounded-lg border border-slate-200 p-3 text-left text-sm font-black text-slate-700 hover:border-[var(--dashboard-primary)]">
-            {status}<DashboardIcon name="ChevronDown" size={15} className="-rotate-90" />
+      {reviewOnly ? (
+        <div className="grid gap-2">
+          {order.status !== "Annulée" && order.status !== "Archivée" && (
+            <button type="button" onClick={() => onStatus(order, "Annulée")} className="flex w-full items-center justify-between rounded-lg border border-orange-200 p-3 text-left text-sm font-black text-orange-700 hover:bg-orange-50">
+              Valider l'annulation<DashboardIcon name="ChevronDown" size={15} className="-rotate-90" />
+            </button>
+          )}
+          <button type="button" onClick={() => onDelete(order)} className="flex w-full items-center justify-between rounded-lg border border-red-200 p-3 text-left text-sm font-black text-red-600 hover:bg-red-50">
+            Valider la suppression<DashboardIcon name="ChevronDown" size={15} className="-rotate-90" />
           </button>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {["En préparation", "Prête", "Livrée", "Annulée"].map((status) => (
+            <button key={status} type="button" onClick={() => onStatus(order, status)} className="flex w-full items-center justify-between rounded-lg border border-slate-200 p-3 text-left text-sm font-black text-slate-700 hover:border-[var(--dashboard-primary)]">
+              {status}<DashboardIcon name="ChevronDown" size={15} className="-rotate-90" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

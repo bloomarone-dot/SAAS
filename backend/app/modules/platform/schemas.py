@@ -59,6 +59,10 @@ class SubscriptionUpdateIn(BaseModel):
     notes: Optional[str] = None
 
 
+class PlatformUserPasswordResetIn(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+
+
 class PlatformSettingsPublic(BaseModel):
     platform_name: str
     support_email: str

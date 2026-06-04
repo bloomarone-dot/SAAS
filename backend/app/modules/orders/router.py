@@ -175,7 +175,7 @@ def validate_cashier_payment(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_can_update_cashier(current_user)
+    assert_can_collect_cashier(current_user)
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
     if order.status in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
@@ -215,7 +215,7 @@ def validate_mobile_money_payment(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_can_update_cashier(current_user)
+    assert_can_collect_cashier(current_user)
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
     if order.status in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
@@ -270,7 +270,7 @@ def apply_promotion_to_order(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_can_update_cashier(current_user)
+    assert_can_collect_cashier(current_user)
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
     if order.status in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Une facture payée ne peut plus recevoir de code promo")
@@ -567,6 +567,14 @@ def assert_can_update_cashier(user: User) -> None:
     raise HTTPException(status_code=403, detail="Permission de gestion caisse requise")
 
 
+def assert_can_collect_cashier(user: User) -> None:
+    if user.role in {Role.MANAGER, Role.CAISSE}:
+        return
+    if user.role != Role.ADMIN and has_permission(user, Permission.CASHIER_UPDATE):
+        return
+    raise HTTPException(status_code=403, detail="L'administrateur consulte la caisse et valide uniquement les annulations.")
+
+
 def cashier_period(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime, datetime]:
     if start_date and end_date:
         return start_date, end_date
@@ -607,7 +615,9 @@ def assert_status_transition_allowed(user: User, order: CustomerOrder, new_statu
         raise HTTPException(status_code=403, detail="Facture payee verrouillee. Seul l'administrateur peut la corriger.")
 
     if new_status == "Payée":
-        if user.role not in {Role.ADMIN, Role.MANAGER, Role.CAISSE} and not has_permission(user, Permission.CASHIER_UPDATE):
+        if user.role == Role.ADMIN:
+            raise HTTPException(status_code=403, detail="L'administrateur ne peut pas encaisser une commande.")
+        if user.role not in {Role.MANAGER, Role.CAISSE} and not has_permission(user, Permission.CASHIER_UPDATE):
             raise HTTPException(status_code=403, detail="Seule la caisse peut valider un paiement")
         if order.status not in PAYABLE_STATUSES:
             raise HTTPException(status_code=400, detail="La caisse ne peut encaisser que les commandes pretes ou servies")

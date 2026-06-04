@@ -8,6 +8,7 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
   const [sort, setSort] = useState({ key: "createdAt", direction: "desc" });
   const [selectedOwner, setSelectedOwner] = useState(null);
   const [isLoadingOwner, setIsLoadingOwner] = useState(false);
+  const [ownerPassword, setOwnerPassword] = useState("");
   const owners = useMemo(
     () =>
       restaurants.map((restaurant) => ({
@@ -44,6 +45,25 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
     try {
       const detail = await platformApi(apiBaseUrl, `/api/v1/restaurants/${owner.restaurantId}`);
       setSelectedOwner(detail.owner ? { ...detail.owner, restaurant: detail.restaurant } : { restaurant: detail.restaurant });
+      setOwnerPassword("");
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoadingOwner(false);
+    }
+  }
+
+  async function resetOwnerPassword(event) {
+    event.preventDefault();
+    if (!selectedOwner?.id) return;
+    setIsLoadingOwner(true);
+    try {
+      await platformApi(apiBaseUrl, `/api/v1/platform/users/${selectedOwner.id}/password`, {
+        method: "PATCH",
+        body: JSON.stringify({ password: ownerPassword }),
+      });
+      setOwnerPassword("");
+      onMessage("Mot de passe du propriétaire réinitialisé.");
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -121,6 +141,33 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
               <DetailLine label="Téléphone" value={selectedOwner.phone ?? "-"} />
               <DetailLine label="Restaurant" value={selectedOwner.restaurant?.name ?? "-"} />
               <DetailLine label="Statut" value={selectedOwner.is_active ? "Actif" : "Inactif"} />
+              {selectedOwner.id && (
+                <form onSubmit={resetOwnerPassword} className="border-t border-[#eadfd7] pt-4">
+                  <label className="block">
+                    <span className="text-xs font-black uppercase text-[#07133d]">Nouveau mot de passe</span>
+                    <input
+                      type="password"
+                      value={ownerPassword}
+                      onChange={(event) => setOwnerPassword(event.target.value)}
+                      minLength={8}
+                      required
+                      autoComplete="new-password"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-form-type="other"
+                      className="mt-2 h-11 w-full border border-[#eadfd7] bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438]"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={isLoadingOwner}
+                    className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 bg-[#07133d] px-4 text-xs font-black text-white transition-all hover:bg-[#172554] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <DashboardIcon name="KeyRound" size={15} />
+                    Réinitialiser le mot de passe
+                  </button>
+                </form>
+              )}
             </div>
           ) : (
             <p className="mt-3 text-sm font-semibold leading-6 text-[#64708b]">
@@ -136,6 +183,7 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
 export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRestaurantId, onSelectRestaurant, onMessage }) {
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [ownerPassword, setOwnerPassword] = useState("");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
   const restaurantId = selectedRestaurantId ?? "";
@@ -153,6 +201,7 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
     setIsLoading(true);
     try {
       setDetail(await platformApi(apiBaseUrl, `/api/v1/restaurants/${id}`));
+      setOwnerPassword("");
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -177,6 +226,24 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
     status: (restaurant) => Number(restaurant.is_active),
     created_at: (restaurant) => restaurant.created_at,
   });
+
+  async function resetDetailOwnerPassword(event) {
+    event.preventDefault();
+    if (!detail?.owner?.id) return;
+    setIsLoading(true);
+    try {
+      await platformApi(apiBaseUrl, `/api/v1/platform/users/${detail.owner.id}/password`, {
+        method: "PATCH",
+        body: JSON.stringify({ password: ownerPassword }),
+      });
+      setOwnerPassword("");
+      onMessage("Mot de passe de l'admin propriétaire réinitialisé.");
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   if (!restaurantId) {
     return (
@@ -269,6 +336,33 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
             <DetailLine label="Email" value={detail.owner?.email ?? "Non renseigné"} />
             <DetailLine label="Téléphone" value={detail.owner?.phone ?? "-"} />
             <DetailLine label="Compte" value={detail.owner?.is_active ? "Actif" : "Inactif"} />
+            {detail.owner?.id && (
+              <form onSubmit={resetDetailOwnerPassword} className="border-t border-[#eadfd7] pt-4">
+                <label className="block">
+                  <span className="text-xs font-black uppercase text-[#07133d]">Nouveau mot de passe</span>
+                  <input
+                    type="password"
+                    value={ownerPassword}
+                    onChange={(event) => setOwnerPassword(event.target.value)}
+                    minLength={8}
+                    required
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    className="mt-2 h-11 w-full border border-[#eadfd7] bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438]"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 bg-[#07133d] px-4 text-xs font-black text-white transition-all hover:bg-[#172554] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <DashboardIcon name="KeyRound" size={15} />
+                  Réinitialiser le mot de passe
+                </button>
+              </form>
+            )}
           </SettingsPanel>
           <SettingsPanel title="Abonnement">
             <DetailLine label="Plan" value={detail.subscription?.plan ?? "Non configuré"} />

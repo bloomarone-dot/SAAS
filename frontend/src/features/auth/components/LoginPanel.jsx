@@ -13,45 +13,8 @@ const noPasswordManagerAttrs = {
   "data-form-type": "other",
 };
 
-export function LoginPanel({
-  value,
-  onChange,
-  onSubmit,
-  onForgotPassword,
-  onResetPassword,
-  isLoading,
-  message,
-}) {
-  const [remember, setRemember] = useState(false);
-  const [mode, setMode] = useState("login");
-  const [resetLogin, setResetLogin] = useState("");
-  const [resetToken, setResetToken] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+export function LoginPanel({ value, onChange, onSubmit, isLoading, message }) {
   const [showPassword, setShowPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-
-  async function submitForgotPassword(event) {
-    event.preventDefault();
-    const token = await onForgotPassword(resetLogin);
-    if (token) {
-      setResetToken(token);
-      setMode("reset");
-    }
-  }
-
-  async function submitResetPassword(event) {
-    event.preventDefault();
-    const success = await onResetPassword({
-      token: resetToken,
-      password: newPassword,
-    });
-    if (success) {
-      setMode("login");
-      setResetLogin("");
-      setResetToken("");
-      setNewPassword("");
-    }
-  }
 
   return (
     <main className="grid min-h-screen bg-slate-50 lg:grid-cols-[0.95fr_1.05fr]">
@@ -100,109 +63,28 @@ export function LoginPanel({
               className="mx-auto mb-5 h-16 w-16 rounded-xl object-cover shadow-sm ring-1 ring-emerald-100 lg:hidden"
             />
             <h2 className="mb-3 text-4xl font-black text-[#003f2f]">
-              {mode === "login" ? "Le Bon Coin" : "Mot de passe oublié"}
+              Le Bon Coin
             </h2>
             <p className="text-sm leading-relaxed text-slate-500">
-              {mode === "login"
-                ? "Connectez-vous à votre espace de gestion restaurant."
-                : "Saisissez votre identifiant pour réinitialiser votre accès."}
+              Connectez-vous à votre espace de gestion restaurant.
             </p>
           </div>
 
-          {mode === "login" && (
-            <form
-              onSubmit={onSubmit}
-              autoComplete="off"
-              data-lpignore="true"
-              className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
-            >
-              <label className="block">
-                <span className="mb-2 block text-xs font-black text-slate-700">
-                  Adresse e-mail ou identifiant{" "}
-                  <span className="text-red-500">*</span>
-                </span>
-                <input
-                  name="login"
-                  value={value.login}
-                  onChange={onChange}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  required
-                  placeholder="Email, nom utilisateur ou téléphone"
-                  className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-2 block text-xs font-black text-slate-700">
-                  Mot de passe <span className="text-red-500">*</span>
-                </span>
-                <div className="relative">
-                  <input
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    value={value.password}
-                    onChange={onChange}
-                    {...noPasswordManagerAttrs}
-                    required
-                    placeholder="Mot de passe"
-                    className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((current) => !current)}
-                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-emerald-50"
-                    aria-label={
-                      showPassword
-                        ? "Masquer le mot de passe"
-                        : "Afficher le mot de passe"
-                    }
-                    title={
-                      showPassword
-                        ? "Masquer le mot de passe"
-                        : "Afficher le mot de passe"
-                    }
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </label>
-
-              <div className="flex items-center justify-between text-sm">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setResetLogin(value.login);
-                    setMode("forgot");
-                  }}
-                  className="font-bold text-[#078d50] hover:underline"
-                >
-                  Mot de passe oublié ?
-                </button>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isLoading ? "Connexion..." : "Se connecter"}
-              </button>
-            </form>
-          )}
-
-          {mode === "forgot" && (
-            <form
-              onSubmit={submitForgotPassword}
-              autoComplete="off"
-              data-lpignore="true"
-              className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
-            >
+          <form
+            onSubmit={onSubmit}
+            autoComplete="off"
+            data-lpignore="true"
+            className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+          >
+            <label className="block">
+              <span className="mb-2 block text-xs font-black text-slate-700">
+                Adresse e-mail ou identifiant{" "}
+                <span className="text-red-500">*</span>
+              </span>
               <input
-                value={resetLogin}
-                onChange={(event) => setResetLogin(event.target.value)}
+                name="login"
+                value={value.login}
+                onChange={onChange}
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="none"
@@ -211,82 +93,51 @@ export function LoginPanel({
                 placeholder="Email, nom utilisateur ou téléphone"
                 className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
               />
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isLoading ? "Envoi..." : "Envoyer le lien"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("login")}
-                className="h-12 w-full rounded-lg border border-slate-200 bg-white text-sm font-black text-slate-600 transition-all hover:border-[#078d50] hover:text-[#078d50]"
-              >
-                Retour à la connexion
-              </button>
-            </form>
-          )}
+            </label>
 
-          {mode === "reset" && (
-            <form
-              onSubmit={submitResetPassword}
-              autoComplete="off"
-              data-lpignore="true"
-              className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
-            >
-              <textarea
-                value={resetToken}
-                onChange={(event) => setResetToken(event.target.value)}
-                required
-                placeholder="Code de réinitialisation"
-                className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
-              />
+            <label className="block">
+              <span className="mb-2 block text-xs font-black text-slate-700">
+                Mot de passe <span className="text-red-500">*</span>
+              </span>
               <div className="relative">
                 <input
-                type={showNewPassword ? "text" : "password"}
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                {...noPasswordManagerAttrs}
-                required
-                  minLength={8}
-                  placeholder="Nouveau mot de passe"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  value={value.password}
+                  onChange={onChange}
+                  {...noPasswordManagerAttrs}
+                  required
+                  placeholder="Mot de passe"
                   className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#078d50] focus:ring-4 focus:ring-emerald-50"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowNewPassword((current) => !current)}
+                  onClick={() => setShowPassword((current) => !current)}
                   className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-4 focus:ring-emerald-50"
                   aria-label={
-                    showNewPassword
-                      ? "Masquer le nouveau mot de passe"
-                      : "Afficher le nouveau mot de passe"
+                    showPassword
+                      ? "Masquer le mot de passe"
+                      : "Afficher le mot de passe"
                   }
                   title={
-                    showNewPassword
-                      ? "Masquer le nouveau mot de passe"
-                      : "Afficher le nouveau mot de passe"
+                    showPassword
+                      ? "Masquer le mot de passe"
+                      : "Afficher le mot de passe"
                   }
                 >
-                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isLoading ? "Validation..." : "Réinitialiser"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("login")}
-                className="h-12 w-full rounded-lg border border-slate-200 bg-white text-sm font-black text-slate-600 transition-all hover:border-[#078d50] hover:text-[#078d50]"
-              >
-                Retour à la connexion
-              </button>
-            </form>
-          )}
+            </label>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isLoading ? "Connexion..." : "Se connecter"}
+            </button>
+          </form>
 
           {message && (
             <p className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
@@ -295,7 +146,7 @@ export function LoginPanel({
           )}
 
           <div className="mt-8 text-center text-xs text-slate-400">
-            © 2026 Le Bon Coin. Tous droits réservés.
+            © 2026 Bloomarone. Tous droits réservés.
           </div>
         </div>
       </section>

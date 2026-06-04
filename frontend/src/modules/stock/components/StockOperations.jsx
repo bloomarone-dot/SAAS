@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { enqueueOfflineAction, friendlyNetworkMessage, isNetworkError } from "@/utils/network";
+import { validationFor } from "@/utils/validation";
 
 const emptyItem = {
   name: "",
@@ -105,7 +106,7 @@ function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 }
 
-export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage }) {
+export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage, focusCreate = false }) {
   const [items, setItems] = useState([]);
   const [movements, setMovements] = useState([]);
   const [lots, setLots] = useState([]);
@@ -174,16 +175,6 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
     [damageForm.item_id, items]
   );
 
-  const kpis = useMemo(
-    () => [
-      { label: "Valeur stock", value: money(summary?.stock_value), icon: "Wallet" },
-      { label: "Food cost", value: `${Number(summary?.food_cost_percent || 0).toFixed(1)}%`, icon: "Percent" },
-      { label: "Produits", value: summary?.product_count ?? 0, icon: "Package" },
-      { label: "Stock faible", value: summary?.low_stock_count ?? 0, icon: "AlertTriangle" },
-      { label: "Lots DLC proche", value: summary?.expiring_lots_count ?? 0, icon: "Clock3" },
-    ],
-    [summary]
-  );
   const analyticSummary = useMemo(() => {
     const movementCost = (types) => movements
       .filter((movement) => types.includes(movement.movement_type))
@@ -747,13 +738,16 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
   const isInventoryView = mode === "inventory";
   const isAccountingView = ["accounting", "expenses"].includes(mode);
   const isReportView = ["reports", "sales-report", "profit-report", "server-report", "financial-report"].includes(mode);
+  const isCreateStockProduct = focusCreate && isStockHome;
+  const showExecutivePanels = !isCreateStockProduct && (isAccountingView || isReportView);
+  const showOperationalSummary = !isCreateStockProduct && (isStockHome || isMovementView || isSupplyView || isInventoryView);
   const effectiveMovementType = isSupplyView ? "IN" : movementForm.movement_type;
-  const showReferenceForm = isStockHome || isSupplyView;
+  const showReferenceForm = isStockHome;
   const showMovementForm = isMovementView || isSupplyView;
   const showDamageForm = isInventoryView || isAccountingView;
-  const showProductionForms = isStockHome;
-  const showStockTable = isStockHome || isInventoryView || isSupplyView;
-  const showHistory = isMovementView || isSupplyView || isInventoryView;
+  const showProductionForms = isStockHome && !isCreateStockProduct;
+  const showStockTable = (isStockHome || isInventoryView) && !isCreateStockProduct;
+  const showHistory = (isMovementView || isInventoryView) && !isCreateStockProduct;
   const showFinance = isAccountingView;
   const showReports = isReportView;
   const showLeftColumn = showReferenceForm || showMovementForm || showDamageForm;
@@ -764,39 +758,43 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
           <p className="text-xs font-black uppercase text-[#f04438]">Gestionnaire stock / Comptable</p>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">{pageCopy.title}</h1>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">{pageCopy.subtitle}</p>
+          <h1 className="mt-2 text-4xl font-black text-[#070528]">{isCreateStockProduct ? "Créer un produit stock" : pageCopy.title}</h1>
+          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
+            {isCreateStockProduct ? "Renseignez les informations du produit à suivre dans le stock." : pageCopy.subtitle}
+          </p>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={exportExcel} className="inline-flex h-12 items-center gap-2 border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]">
-            <DashboardIcon name="FileText" size={17} />
-            Exporter en Excel
-          </button>
-          <button type="button" onClick={exportPdf} className="inline-flex h-12 items-center gap-2 border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]">
-            <DashboardIcon name="ReceiptText" size={17} />
-            Exporter en PDF
-          </button>
+        {!isCreateStockProduct && <div className="flex flex-wrap gap-3">
+          {(isAccountingView || isReportView) && (
+            <>
+              <button type="button" onClick={exportExcel} className="inline-flex h-12 items-center gap-2 border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]">
+                <DashboardIcon name="FileText" size={17} />
+                Exporter en Excel
+              </button>
+              <button type="button" onClick={exportPdf} className="inline-flex h-12 items-center gap-2 border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]">
+                <DashboardIcon name="ReceiptText" size={17} />
+                Exporter en PDF
+              </button>
+            </>
+          )}
           <button type="button" onClick={loadStock} className="inline-flex h-12 items-center gap-2 bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] hover:bg-[#d92d20]">
             <DashboardIcon name="Activity" size={17} />
             Actualiser
           </button>
-        </div>
+        </div>}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((kpi) => (
-          <div key={kpi.label} className="border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex h-11 w-11 items-center justify-center bg-[#fff4ed] text-[#f04438]">
-              <DashboardIcon name={kpi.icon} size={19} />
-            </div>
-            <p className="mt-5 text-sm font-bold text-slate-500">{kpi.label}</p>
-            <p className="mt-1 text-3xl font-black text-[#070528]">{kpi.value}</p>
-          </div>
-        ))}
-      </div>
+      {showOperationalSummary && (
+        <StockSummaryStrip
+          summary={summary}
+          items={items}
+          movements={movements}
+          damages={damages}
+          mode={mode}
+        />
+      )}
 
-      {(isStockHome || isInventoryView || isAccountingView || isSupplyView) && <AnalyticStockPanel rows={analyticSummary} />}
-      {(isStockHome || isInventoryView || isAccountingView) && (
+      {showExecutivePanels && <AnalyticStockPanel rows={analyticSummary} />}
+      {showExecutivePanels && (
         <div className="grid gap-4 xl:grid-cols-3">
           <LossReasonPanel rows={summary?.loss_by_reason || {}} />
           <ExpiringLotsPanel lots={lots} items={items} costCenters={costCenters} />
@@ -954,7 +952,17 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
         {showRightColumn && (
         <div className="space-y-6">
           {showProductionForms && (
-          <div className="grid gap-6 2xl:grid-cols-2">
+          <details className="group rounded-xl border border-slate-200 bg-white shadow-sm">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+              <div>
+                <p className="text-xs font-black uppercase text-[#f04438]">Configuration avancée</p>
+                <h2 className="text-base font-black text-[#070528]">Production, recettes et emballages</h2>
+              </div>
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition group-open:rotate-180">
+                <DashboardIcon name="ChevronDown" size={18} />
+              </span>
+            </summary>
+          <div className="grid gap-6 border-t border-slate-100 p-5 2xl:grid-cols-2">
             <form onSubmit={createRecipe} className="border border-slate-200 bg-white p-6 shadow-sm">
               <SectionTitle title="Ingrédients liés aux plats" icon="UtensilsCrossed" />
               <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -989,6 +997,7 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage })
               <ProductionRows rows={productionSheets} menuItems={menuItems} />
             </form>
           </div>
+          </details>
           )}
 
           {showReports && (
@@ -1332,9 +1341,9 @@ function SectionTitle({ title, subtitle = "Donnée utilisée dans le suivi opér
 
 function SupplyGuide() {
   const steps = [
-    ["1", "Créer le produit", "À faire une seule fois si le produit n’existe pas encore."],
+    ["1", "Choisir le produit", "Le produit doit déjà exister dans la liste stock."],
     ["2", "Entrer la quantité", "L’entrée ajoute la quantité au stock magasin."],
-    ["3", "Contrôler la liste", "Le tableau des produits se met à jour après enregistrement."],
+    ["3", "Valider", "L’historique et les quantités seront mis à jour automatiquement."],
   ];
   return (
     <div className="grid gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 md:grid-cols-3">
@@ -1347,6 +1356,42 @@ function SupplyGuide() {
             <p className="text-sm font-black text-slate-900">{title}</p>
             <p className="mt-1 text-xs font-semibold text-slate-500">{text}</p>
           </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StockSummaryStrip({ summary, items, movements, damages, mode }) {
+  const lowStockCount = summary?.low_stock_count ?? items.filter((item) => getTotalQuantity(item) <= Number(item.alert_threshold)).length;
+  const movementCount = movements.length;
+  const damageLoss = summary?.total_damage_loss ?? damages.reduce((total, row) => total + Number(row.estimated_loss || 0), 0);
+  const cards = [
+    { label: "Produits suivis", value: summary?.product_count ?? items.length, icon: "Package" },
+    { label: "Stock faible", value: lowStockCount, icon: "AlertTriangle", tone: lowStockCount ? "orange" : "green" },
+    { label: mode === "movements" ? "Mouvements" : "Valeur stock", value: mode === "movements" ? movementCount : money(summary?.stock_value), icon: mode === "movements" ? "Activity" : "Wallet" },
+    { label: "Avaries", value: money(damageLoss), icon: "TrendingDown", tone: damageLoss ? "red" : "green" },
+  ];
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {cards.map((card) => (
+        <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">{card.label}</p>
+              <p className="mt-1 text-xl font-black text-[#070528]">{card.value}</p>
+            </div>
+            <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+              card.tone === "red"
+                ? "bg-red-50 text-red-600"
+                : card.tone === "orange"
+                  ? "bg-orange-50 text-orange-600"
+                  : "bg-emerald-50 text-emerald-700"
+            }`}>
+              <DashboardIcon name={card.icon} size={18} />
+            </span>
+          </div>
         </div>
       ))}
     </div>
@@ -1598,6 +1643,7 @@ function Field({ label, required, ...props }) {
       </span>
       <input
         {...props}
+        {...validationFor(props.name)}
         required={required}
         className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
       />

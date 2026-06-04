@@ -17,6 +17,7 @@ from app.modules.permissions.service import get_permission_groups, get_permissio
 from app.modules.users.models import User, UserPermission
 from app.modules.users.schemas import (
     UserCreateIn,
+    UserPasswordResetIn,
     UserPermissionsUpdateIn,
     UserPublic,
     UserStatusUpdateIn,
@@ -276,6 +277,39 @@ def update_user_permissions(
         user.id,
         f"Modification permissions utilisateur {user.username}",
         {"permissions": [permission.value for permission in payload.permissions]},
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.patch("/{user_id}/password", response_model=UserPublic)
+def reset_user_password(
+    user_id: str,
+    payload: UserPasswordResetIn,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Reinitialise le mot de passe d'un membre du personnel non proprietaire."""
+    assert_permission(current_user, Permission.USER_UPDATE)
+
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    assert_managed_user(current_user, user)
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Vous ne pouvez pas reinitialiser votre propre mot de passe ici")
+
+    user.password_hash = hash_password(payload.password)
+    log_action(
+        db,
+        current_user,
+        "user.password_reset",
+        "user",
+        user.id,
+        f"Réinitialisation mot de passe utilisateur {user.username}",
+        {"role": user.role.value},
     )
     db.commit()
     db.refresh(user)

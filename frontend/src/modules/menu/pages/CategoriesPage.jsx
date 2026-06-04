@@ -14,6 +14,7 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
   const [showForm, setShowForm] = useState(showCreateOnMount);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const createOnly = showCreateOnMount;
 
   const visibleCategories = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -77,7 +78,9 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
       setCategories((current) => [created, ...current]);
       setDishesByCategory((current) => ({ ...current, [created.id]: [] }));
       setForm(emptyForm);
-      setShowForm(false);
+      if (!createOnly) {
+        setShowForm(false);
+      }
     } catch (err) {
       setError(err.message || "Création de la catégorie impossible.");
     }
@@ -94,22 +97,22 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
   return (
     <AdminPage
       eyebrow={role === "CUISINE" ? "Cuisine" : "Catégories"}
-      title="Gestion des catégories"
-      subtitle="Organisez vos catégories de plats pour une meilleure gestion de votre menu."
-      action={
+      title={createOnly ? "Créer une catégorie" : "Gestion des catégories"}
+      subtitle={createOnly ? "Renseignez les informations de la catégorie à ajouter au menu." : "Organisez vos catégories de plats pour une meilleure gestion de votre menu."}
+      action={!createOnly && (
         <div className="flex flex-wrap gap-3">
           <PrimaryAction icon="Plus" onClick={() => setShowForm((value) => !value)}>{showForm ? "Fermer" : "Nouvelle catégorie"}</PrimaryAction>
           <SecondaryAction icon="Download" onClick={() => exportCsv(visibleCategories, dishesByCategory)}>Exporter</SecondaryAction>
         </div>
-      }
+      )}
     >
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-600">{error}</div>}
 
-      <AdminKpis items={[
+      {!createOnly && <AdminKpis items={[
         { label: "Nombre de catégories", value: categories.length, icon: "ClipboardList", trend: "à jour" },
         { label: "Catégories actives", value: categories.filter((category) => category.is_active).length, icon: "CheckCircle2" },
         { label: "Plats associés", value: dishesCount, icon: "Utensils" },
-      ]} />
+      ]} />}
 
       {showForm && (
         <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
@@ -141,7 +144,7 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
+      {!createOnly && <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
         <AdminCard>
           <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une catégorie..." />
@@ -170,7 +173,7 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
             </div>
           </AdminCard>
         </div>
-      </div>
+      </div>}
     </AdminPage>
   );
 }

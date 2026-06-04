@@ -54,6 +54,7 @@ function emptyReport() {
 export function CaisseDashboard({ overrides = {} }) {
   const currentUser = overrides.__currentUser;
   const activeView = overrides.__activeView || "dashboard";
+  const adminReviewOnly = overrides.__adminReviewOnly === true;
   const [report, setReport] = useState(emptyReport);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [selectedReceiptId, setSelectedReceiptId] = useState("");
@@ -232,8 +233,8 @@ export function CaisseDashboard({ overrides = {} }) {
   return (
     <section className="space-y-4">
       <DashboardHeader
-        title={viewCopy.title}
-        subtitle={viewCopy.subtitle || `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""} ! Gérez vos encaissements en toute simplicité.`}
+        title={adminReviewOnly ? "Suivi caisse" : viewCopy.title}
+        subtitle={adminReviewOnly ? "Consultez les paiements et validez uniquement les annulations de facture." : viewCopy.subtitle || `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""} ! Gérez vos encaissements en toute simplicité.`}
       />
 
       {showSearch && <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:flex-row md:items-center md:justify-between">
@@ -275,7 +276,7 @@ export function CaisseDashboard({ overrides = {} }) {
           {selectedOrder ? (
             <div>
               <OrderDetail order={selectedOrder} discountPreview={discount} />
-              <div className="mt-5">
+              {!adminReviewOnly && <div className="mt-5">
                 <p className="text-sm font-black text-slate-950">Choisir le mode de paiement</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-3">
                   {paymentMethods.map((method) => (
@@ -294,8 +295,8 @@ export function CaisseDashboard({ overrides = {} }) {
                     </button>
                   ))}
                 </div>
-              </div>
-              {paymentMethod === "Mobile Money" && (
+              </div>}
+              {!adminReviewOnly && paymentMethod === "Mobile Money" && (
                 <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
                   <p className="text-sm font-black text-slate-950">Paiement en ligne Mobile Money</p>
                   <div className="mt-3 grid gap-3 md:grid-cols-3">
@@ -322,7 +323,7 @@ export function CaisseDashboard({ overrides = {} }) {
                   </div>
                 </div>
               )}
-              <label className="mt-4 block">
+              {!adminReviewOnly && <label className="mt-4 block">
                 <span className="text-xs font-black uppercase text-slate-500">Réduction autorisée</span>
                 <input
                   type="number"
@@ -332,8 +333,8 @@ export function CaisseDashboard({ overrides = {} }) {
                   placeholder="0"
                   className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 outline-none focus:border-emerald-600"
                 />
-              </label>
-              <div className="mt-4">
+              </label>}
+              {!adminReviewOnly && <div className="mt-4">
                 <span className="text-xs font-black uppercase text-slate-500">Code promo</span>
                 <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
                   <input
@@ -346,13 +347,13 @@ export function CaisseDashboard({ overrides = {} }) {
                     Appliquer
                   </button>
                 </div>
-              </div>
+              </div>}
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <button disabled={isLoading} onClick={validatePayment} className="h-12 rounded-lg bg-emerald-700 font-black text-white disabled:opacity-60">
+                {!adminReviewOnly && <button disabled={isLoading} onClick={validatePayment} className="h-12 rounded-lg bg-emerald-700 font-black text-white disabled:opacity-60">
                   Valider paiement
-                </button>
+                </button>}
                 <button type="button" onClick={() => printReceipt(selectedOrder)} className="h-12 rounded-lg border border-emerald-200 font-black text-emerald-700">
-                  Imprimer reçu
+                  Consulter / imprimer
                 </button>
               </div>
             </div>
@@ -394,6 +395,7 @@ export function CaisseDashboard({ overrides = {} }) {
             onPrint={printReceipt}
             onCancel={cancelPayment}
             isLoading={isLoading}
+            adminReviewOnly={adminReviewOnly}
           />
         </Panel>
         ) : (
@@ -412,6 +414,7 @@ export function CaisseDashboard({ overrides = {} }) {
             onPrint={printReceipt}
             onCancel={cancelPayment}
             isLoading={isLoading}
+            adminReviewOnly={adminReviewOnly}
           />
         </Panel>
       )}
@@ -504,7 +507,7 @@ function OrdersTable({ orders, selectedOrderId, onSelect }) {
   );
 }
 
-function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCancel, isLoading }) {
+function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCancel, isLoading, adminReviewOnly = false }) {
   if (!receipts.length) return <EmptyState text="Aucun reçu généré aujourd'hui." />;
 
   return (
@@ -523,10 +526,10 @@ function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCance
               <td className="py-3 font-black text-slate-950">{money(order.total_amount)}</td>
               <td className="py-3 text-right">
                 <button type="button" onClick={(event) => { event.stopPropagation(); onPrint(order); }} className="rounded-md border border-emerald-200 px-3 py-1.5 text-xs font-black text-emerald-700">
-                  Imprimer
+                  {adminReviewOnly ? "Consulter" : "Imprimer"}
                 </button>
                 <button type="button" disabled={isLoading} onClick={(event) => { event.stopPropagation(); onCancel(order); }} className="ml-2 rounded-md border border-red-200 px-3 py-1.5 text-xs font-black text-red-600 disabled:opacity-60">
-                  Annuler
+                  {adminReviewOnly ? "Valider annulation" : "Annuler"}
                 </button>
               </td>
             </tr>

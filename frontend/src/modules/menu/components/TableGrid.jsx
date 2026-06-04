@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardIcon } from '@/components/dashboard/icons';
 import { useAutoRefresh } from '@/utils/useAutoRefresh';
+import { validationFor } from '@/utils/validation';
 import { tableApi } from '../services/tableApi';
 
 const emptyTable = { name: '', capacity: 4, room: 'Rez-de-chaussée' };
@@ -114,6 +115,8 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
             </span>
             <input
               required
+              name="name"
+              {...validationFor("name")}
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               placeholder="Ex: T1, Terrasse 2, VIP"
@@ -140,6 +143,7 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
             <input
               required
               min="1"
+              max="100"
               type="number"
               value={form.capacity}
               onChange={(event) => setForm((current) => ({ ...current, capacity: event.target.value }))}

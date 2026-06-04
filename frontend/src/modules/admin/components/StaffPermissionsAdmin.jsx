@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
+import { validationFor } from "@/utils/validation";
 
 const STAFF_ROLES = ["MANAGER", "SERVEUR", "CUISINE", "CAISSE", "STOCK", "COMPTABLE"];
 
@@ -34,6 +35,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
   const [draftPermissions, setDraftPermissions] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(null);
+  const [passwordForm, setPasswordForm] = useState("");
   const [formPermissions, setFormPermissions] = useState([]);
   const [showCreateForm, setShowCreateForm] = useState(showCreateOnMount);
   const [search, setSearch] = useState("");
@@ -85,16 +87,6 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
     });
   }, [branches, roleFilter, search, sort, statusFilter, users]);
 
-  const stats = useMemo(
-    () => [
-      { label: "Utilisateurs", value: users.length, icon: "Users" },
-      { label: "Actifs", value: users.filter((user) => user.is_active).length, icon: "CheckCircle2" },
-      { label: "Rôles", value: STAFF_ROLES.length, icon: "ShieldCheck" },
-      { label: "Permissions", value: permissionGroups.reduce((total, group) => total + group.permissions.length, 0), icon: "SlidersHorizontal" },
-    ],
-    [permissionGroups, users]
-  );
-
   useEffect(() => {
     loadAccessData();
   }, []);
@@ -119,6 +111,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
       role: selectedUser.role ?? "SERVEUR",
       branch_id: selectedUser.branch_id ?? "",
     });
+    setPasswordForm("");
   }, [selectedUser?.id]);
 
   useEffect(() => {
@@ -166,12 +159,20 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
   }
 
   function updateFormField(event) {
-    const { name, value } = event.target;
+    const { name } = event.target;
+    let { value } = event.target;
+    if (name === "username") value = value.trim().replace(/\s+/g, "").toLowerCase();
+    if (name === "email") value = value.trim().toLowerCase();
+    if (name === "phone") value = value.replace(/[^\d+ ()-]/g, "");
     setForm((current) => ({ ...current, [name]: value }));
   }
 
   function updateEditField(event) {
-    const { name, value } = event.target;
+    const { name } = event.target;
+    let { value } = event.target;
+    if (name === "username") value = value.trim().replace(/\s+/g, "").toLowerCase();
+    if (name === "email") value = value.trim().toLowerCase();
+    if (name === "phone") value = value.replace(/[^\d+ ()-]/g, "");
     setEditForm((current) => ({ ...current, [name]: value }));
   }
 
@@ -268,6 +269,25 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
     }
   }
 
+  async function resetSelectedPassword(event) {
+    event.preventDefault();
+    if (!selectedUser) return;
+    setIsLoading(true);
+    try {
+      const updated = await api(`/api/v1/users/${selectedUser.id}/password`, {
+        method: "PATCH",
+        body: JSON.stringify({ password: passwordForm }),
+      });
+      setUsers((current) => current.map((user) => (user.id === updated.id ? updated : user)));
+      setPasswordForm("");
+      onMessage(`Mot de passe de ${updated.first_name} ${updated.last_name} réinitialisé.`);
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   async function deleteUser(user) {
     if (
       !window.confirm(
@@ -300,14 +320,16 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => setShowCreateForm((value) => !value)}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)]"
-          >
-            <DashboardIcon name="UserPlus" size={17} />
-            {showCreateForm ? "Fermer le formulaire" : "Ajouter un utilisateur"}
-          </button>
+          {!showCreateOnMount && (
+            <button
+              type="button"
+              onClick={() => setShowCreateForm((value) => !value)}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)]"
+            >
+              <DashboardIcon name="UserPlus" size={17} />
+              {showCreateForm ? "Fermer le formulaire" : "Ajouter un utilisateur"}
+            </button>
+          )}
           <button
             type="button"
             onClick={loadAccessData}
@@ -319,30 +341,12 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {stats.map((item) => (
-          <div key={item.label} className="border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#fff4ed] text-[var(--dashboard-primary)]">
-                <DashboardIcon name={item.icon} size={19} />
-              </div>
-              <span className="text-xs font-black uppercase text-slate-400">Admin</span>
-            </div>
-            <p className="mt-5 text-sm font-bold text-slate-500">{item.label}</p>
-            <p className="mt-1 text-3xl font-black text-[var(--dashboard-secondary)]">{item.value}</p>
-          </div>
-        ))}
-      </div>
-
       {showCreateForm && (
         <form onSubmit={createUser} className="border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
+          <div className="border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-2xl font-black text-[var(--dashboard-secondary)]">Créer un compte</h2>
               <p className="mt-1 text-sm font-medium text-slate-500">Ajoutez un membre et appliquez un rôle de départ.</p>
-            </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--dashboard-primary)] text-white">
-              <DashboardIcon name="UserPlus" size={19} />
             </div>
           </div>
 
@@ -370,17 +374,6 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
             </Select>
           </div>
 
-          <PermissionMatrix
-            className="mt-6"
-            title="Permissions initiales"
-            groups={permissionGroups}
-            selected={formPermissions}
-            lockedPermissions={new Set(formRoleDefaults)}
-            onToggle={(permission, locked) =>
-              togglePermission(permission, formPermissions, setFormPermissions, locked)
-            }
-          />
-
           <button
             type="submit"
             disabled={isLoading}
@@ -392,6 +385,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
         </form>
       )}
 
+      {!showCreateOnMount && (
       <div className="space-y-6">
           <div className="border border-slate-200 bg-white p-5 shadow-sm">
             <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px]">
@@ -615,31 +609,63 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                     </button>
                   </form>
 
-                  <PermissionMatrix
-                    className="mt-6"
-                    title="Permissions utilisateur"
-                    groups={permissionGroups}
-                    selected={draftPermissions}
-                    lockedPermissions={selectedRoleDefaults}
-                    onToggle={(permission, locked) =>
-                      togglePermission(permission, draftPermissions, setDraftPermissions, locked)
-                    }
-                  />
+                  <form onSubmit={resetSelectedPassword} className="mt-6 border-b border-slate-200 pb-6">
+                    <h3 className="text-sm font-black uppercase text-[var(--dashboard-secondary)]">Réinitialisation du mot de passe</h3>
+                    <p className="mt-2 text-sm font-medium text-slate-500">
+                      Cette action définit un nouveau mot de passe pour ce membre du personnel. Le compte admin propriétaire est géré par le superadmin.
+                    </p>
+                    <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                      <Field
+                        name="new_password"
+                        label="Nouveau mot de passe"
+                        type="password"
+                        value={passwordForm}
+                        onChange={(event) => setPasswordForm(event.target.value)}
+                        minLength={8}
+                        autoComplete="new-password"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-form-type="other"
+                        required
+                      />
+                      <button
+                        type="submit"
+                        disabled={isLoading || selectedUser.id === currentUser.id}
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-xs font-black text-slate-700 transition-all hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <DashboardIcon name="KeyRound" size={15} />
+                        Réinitialiser
+                      </button>
+                    </div>
+                  </form>
 
-                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-5">
-                    <p className="text-xs font-semibold text-slate-500">
+                  <details className="mt-6 rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+                    <summary className="cursor-pointer text-sm font-black text-[var(--dashboard-secondary)]">
+                      Permissions utilisateur
+                    </summary>
+                    <p className="mt-2 text-xs font-semibold text-slate-500">
                       Les permissions marquées “Rôle” sont incluses automatiquement par le rôle.
                     </p>
+                    <PermissionMatrix
+                      className="mt-4"
+                      title="Permissions personnalisées"
+                      groups={permissionGroups}
+                      selected={draftPermissions}
+                      lockedPermissions={selectedRoleDefaults}
+                      onToggle={(permission, locked) =>
+                        togglePermission(permission, draftPermissions, setDraftPermissions, locked)
+                      }
+                    />
                     <button
                       type="button"
                       onClick={saveSelectedPermissions}
                       disabled={isLoading}
-                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-4 text-xs font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <DashboardIcon name="ShieldCheck" size={17} />
+                      <DashboardIcon name="ShieldCheck" size={15} />
                       Enregistrer les permissions
                     </button>
-                  </div>
+                  </details>
                 </>
               ) : (
                 <div className="py-16 text-center">
@@ -652,6 +678,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
             </div>
           </div>
       </div>
+      )}
     </section>
   );
 }
@@ -671,6 +698,7 @@ function Field({ label, required, ...props }) {
       <RequiredLabel required={required}>{label}</RequiredLabel>
       <input
         {...props}
+        {...validationFor(props.name)}
         required={required}
         autoComplete={props.autoComplete ?? (isPassword ? "new-password" : undefined)}
         autoCorrect={isPassword ? "off" : props.autoCorrect}

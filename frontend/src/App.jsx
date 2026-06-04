@@ -279,9 +279,21 @@ export default function App() {
   }
 
   function updateRestaurantField(event) {
+    const { name } = event.target;
+    let { value } = event.target;
+    if (name === "slug") {
+      value = value
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    }
+    if (name === "owner_username") {
+      value = value.trim().replace(/\s+/g, "").toLowerCase();
+    }
     setRestaurantForm((current) => ({
       ...current,
-      [event.target.name]: event.target.value,
+      [name]: value,
     }));
   }
 
@@ -312,60 +324,6 @@ export default function App() {
       if (data.user.restaurant_id) fetchRestaurantTheme();
     } catch {
       setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function requestPasswordReset(login) {
-    setIsLoading(true);
-    setMessage("");
-
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/auth/forgot-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login }),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(data.detail ?? "Demande de réinitialisation impossible.");
-        return null;
-      }
-
-      setMessage(data.message);
-      return data.reset_token ?? null;
-    } catch {
-      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
-      return null;
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function resetPassword(payload) {
-    setIsLoading(true);
-    setMessage("");
-
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/auth/reset-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(data.detail ?? "Réinitialisation impossible.");
-        return false;
-      }
-
-      setMessage(data.message ?? "Mot de passe réinitialisé.");
-      return true;
-    } catch {
-      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
-      return false;
     } finally {
       setIsLoading(false);
     }
@@ -430,8 +388,6 @@ export default function App() {
         value={loginForm}
         onChange={updateLoginField}
         onSubmit={submitLogin}
-        onForgotPassword={requestPasswordReset}
-        onResetPassword={resetPassword}
         isLoading={isLoading}
         message={message}
       />
@@ -507,9 +463,9 @@ export default function App() {
 
   function renderContent() {
     if (session.role !== "SUPERADMIN") {
-      const stockViews = ["stocks", "stock", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
+      const stockViews = ["stocks", "stock", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
 
-      if (["staff", "create-user", "user-detail", "roles"].includes(activeView) && session.role === "ADMIN") {
+      if (["staff", "create-user", "user-detail"].includes(activeView) && session.role === "ADMIN") {
         return (
           <StaffPermissionsAdmin
             apiBaseUrl={apiBaseUrl}
@@ -567,7 +523,7 @@ export default function App() {
       }
 
       if (["orders", "order-detail", "edit-order", "service-followup", "kitchen-followup"].includes(activeView) && ["ADMIN", "MANAGER"].includes(session.role)) {
-        return <OrdersAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+        return <OrdersAdmin apiBaseUrl={apiBaseUrl} currentUser={session} onMessage={setMessage} />;
       }
 
       if (activeView === "products" && session.role === "ADMIN") {
@@ -575,7 +531,7 @@ export default function App() {
       }
 
       if (["cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation", "receipts", "print-receipt", "cancel-payment", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView) && ["ADMIN", "CAISSE"].includes(session.role)) {
-        return <RoleDashboard role="CAISSE" overrides={{ ...overrides, __activeView: activeView }} />;
+        return <RoleDashboard role="CAISSE" overrides={{ ...overrides, __activeView: activeView, __currentUser: session, __adminReviewOnly: session.role === "ADMIN" }} />;
       }
 
       if (["discounts", "promotions"].includes(activeView) && session.role === "ADMIN") {
@@ -620,6 +576,7 @@ export default function App() {
         const stockModeMap = {
           "stock-in": "movements",
           "stock-out": "movements",
+          "create-stock-product": "stock",
           transfer: "movements",
           damages: "inventory",
         };
@@ -629,6 +586,7 @@ export default function App() {
             role={session.role}
             mode={stockModeMap[activeView] || activeView}
             onMessage={setMessage}
+            focusCreate={activeView === "create-stock-product"}
           />
         );
       }
