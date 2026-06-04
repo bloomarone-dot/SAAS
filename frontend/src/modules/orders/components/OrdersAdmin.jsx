@@ -3,7 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+<<<<<<< HEAD
 import { OrangeMoneyPayment } from "./OrangeMoneyPayment";
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
 
 const statuses = ["Toutes", "Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
 const nextStatuses = ["Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
@@ -26,7 +29,10 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
   const [editingOrderId, setEditingOrderId] = useState("");
   const [editForm, setEditForm] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+<<<<<<< HEAD
   const [orangePayOrderId, setOrangePayOrderId] = useState(null);
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
   const reviewOnly = currentUser?.role === "ADMIN";
 
   useEffect(() => {
@@ -230,7 +236,10 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
                 reviewOnly={reviewOnly}
                 onStatus={updateStatus}
                 onDelete={deleteOrder}
+<<<<<<< HEAD
                 onOrangePay={setOrangePayOrderId}
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
               />
             ) : <EmptyState title="Aucune commande" />}
           </AdminCard>
@@ -247,6 +256,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
           </AdminCard>
         </div>
       </div>
+<<<<<<< HEAD
       {/* Modal paiement Orange Money */}
       {orangePayOrderId && (() => {
         const payOrder = orders.find((o) => o.id === orangePayOrderId);
@@ -268,6 +278,8 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
           </div>
         );
       })()}
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
     </AdminPage>
   );
 }
@@ -338,7 +350,11 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, on
   );
 }
 
+<<<<<<< HEAD
 function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay }) {
+=======
+function OrderDetail({ order, reviewOnly, onStatus, onDelete }) {
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
   const visibleItems = order.items.filter((item) => item.sale_channel !== "EMBALLAGE");
   const subtotal = visibleItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
   return (
@@ -365,6 +381,7 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay }) {
         ))}
       </div>
       {order.notes && <div className="rounded-lg bg-orange-50 p-3 text-sm font-semibold text-orange-700">{order.notes}</div>}
+<<<<<<< HEAD
 
       {/* Bouton Orange Money — visible si commande non payée */}
       {!["Payée", "Payee", "Annulée"].includes(order.status) && (
@@ -378,6 +395,8 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay }) {
         </button>
       )}
 
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
       {reviewOnly ? (
         <div className="grid gap-2">
           {order.status !== "Annulée" && order.status !== "Archivée" && (

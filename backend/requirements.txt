@@ -5,4 +5,7 @@ python-dotenv
 PyMySQL
 cryptography
 python-multipart
+<<<<<<< HEAD
 httpx
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf

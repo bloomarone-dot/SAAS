@@ -3,7 +3,11 @@ from datetime import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
+<<<<<<< HEAD
 from app.modules.finance.orange_money import initiate_om_payment
+=======
+
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
 from app.modules.audit.service import log_action
@@ -90,6 +94,7 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
     return get_order_or_404(db, order.id, restaurant.id)
 
 
+<<<<<<< HEAD
 @router.post("/{order_id}/initiate-om", response_model=OrderPublic)
 async def initiate_om_payment_route(
     order_id: str,
@@ -128,6 +133,8 @@ async def initiate_om_payment_route(
     db.refresh(order)
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
 @router.get("", response_model=list[OrderPublic])
 def list_orders(
     status_filter: str | None = Query(default=None, alias="status"),

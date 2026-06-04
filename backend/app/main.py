@@ -29,7 +29,10 @@ from app.modules.users.models import User
 from app.modules.users import router as users
 from app.security import hash_password
 from app.modules.kitchen.router import router as kitchen_router
+<<<<<<< HEAD
 from app.modules.payments import router as payments
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
 
 # Point d'entree FastAPI: assemble le middleware CORS, la creation de tables
 # en developpement et les routeurs versionnes de l'API.
@@ -88,7 +91,10 @@ def create_tables() -> None:
     ensure_stock_columns()
     ensure_finance_columns()
     ensure_user_columns()
+<<<<<<< HEAD
     ensure_payment_transactions_table()
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
     ensure_performance_indexes()
     ensure_french_status_values()
     seed_superadmin()
@@ -191,8 +197,11 @@ def ensure_order_columns() -> None:
         "table_id": "INTEGER NULL",
         "server_id": "VARCHAR(36) NULL",
         "party_size": "INTEGER NOT NULL DEFAULT 1",
+<<<<<<< HEAD
         "payment_status": "VARCHAR(40) NOT NULL DEFAULT 'En attente'",
         "transaction_id": "VARCHAR(100) NULL",
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if missing:
@@ -315,6 +324,7 @@ def ensure_finance_columns() -> None:
             connection.execute(text(f"ALTER TABLE restaurant_expenses ADD COLUMN {name} {definition}"))
 
 
+<<<<<<< HEAD
 def ensure_payment_transactions_table() -> None:
     """Crée la table payment_transactions si elle n'existe pas encore."""
     # SQLAlchemy create_all gère déjà la création, mais on s'assure que
@@ -323,6 +333,8 @@ def ensure_payment_transactions_table() -> None:
     Base.metadata.create_all(bind=engine, tables=[PaymentTransaction.__table__])
 
 
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
 def ensure_user_columns() -> None:
     """Assouplit les champs utilisateur recents sans attendre Alembic."""
     inspector = inspect(engine)
@@ -673,4 +685,7 @@ app.include_router(permissions.router, prefix="/api/v1")
 app.include_router(platform.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(stock.router, prefix="/api/v1")
+<<<<<<< HEAD
 app.include_router(payments.router, prefix="/api/v1")
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf

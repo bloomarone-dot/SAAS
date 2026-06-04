@@ -26,9 +26,12 @@ class CustomerOrder(Base):
     status: Mapped[str] = mapped_column(String(40), default="Nouvelle", nullable=False)
     fulfillment_type: Mapped[str] = mapped_column(String(40), default="Livraison", nullable=False)
     payment_method: Mapped[str] = mapped_column(String(40), default="Paiement à la livraison", nullable=False)
+<<<<<<< HEAD
     # Suivi paiement mobile (Orange Money / MTN)
     payment_status: Mapped[str] = mapped_column(String(40), default="En attente", nullable=False)
     transaction_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
     discount_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     delivery_fee: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     total_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)

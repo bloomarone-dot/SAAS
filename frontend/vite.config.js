@@ -4,10 +4,13 @@ import path from 'node:path'
 
 export default defineConfig({
   plugins: [react()],
+<<<<<<< HEAD
   server: {
     host: "0.0.0.0",
     port: 5173,
   },
+=======
+>>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
   build: {
     rollupOptions: {
       output: {
