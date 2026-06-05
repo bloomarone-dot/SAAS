@@ -1,7 +1,4 @@
-"""
-Compatibilité : ce module délègue au service Orange Money centralisé.
-Utilise app.modules.payments.orange_service directement pour les nouvelles intégrations.
-"""
+
 from app.modules.payments.orange_service import initiate_cashin, OrangePaymentError
 from fastapi import HTTPException
 
