@@ -39,7 +39,37 @@ class PaymentStatusOut(BaseModel):
 
 class OrangeWebhookIn(BaseModel):
     """Payload reçu du webhook Orange Money / Y-Note."""
-    # Y-Note envoie des champs variables selon la version — on accepte tout
+    model_config = {"extra": "allow"}
+
+    status: Optional[str] = None
+    txnid: Optional[str] = None
+    pay_token: Optional[str] = None
+    notifToken: Optional[str] = None
+    message: Optional[str] = None
+
+
+class MtnPayInitIn(BaseModel):
+    """Payload pour initier un paiement MTN Money."""
+    order_id: str = Field(description="ID de la commande à payer")
+    payer_msisdn: str = Field(
+        min_length=8,
+        max_length=20,
+        description="Numéro MTN Money du client (ex: 670000000)",
+    )
+
+
+class MtnPayInitOut(BaseModel):
+    """Réponse après initiation du paiement."""
+    transaction_id: str
+    pay_token: str
+    payment_url: Optional[str] = None
+    ussd_code: Optional[str] = None
+    status: str
+    message: str
+
+
+class MtnWebhookIn(BaseModel):
+    """Payload reçu du webhook MTN Money / Y-Note."""
     model_config = {"extra": "allow"}
 
     status: Optional[str] = None
