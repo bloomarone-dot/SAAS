@@ -1,9 +1,10 @@
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 from app.modules.shared.schemas import OrmModel
+from app.security import validate_password_strength
 
 
 class SubscriptionPublic(OrmModel):
@@ -60,7 +61,11 @@ class SubscriptionUpdateIn(BaseModel):
 
 
 class PlatformUserPasswordResetIn(BaseModel):
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
+
+    @validator("password")
+    def password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class PlatformSettingsPublic(BaseModel):

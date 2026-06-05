@@ -4,20 +4,27 @@ import path from 'node:path'
 
 export default defineConfig({
   plugins: [react()],
-<<<<<<< HEAD
   server: {
     host: "0.0.0.0",
     port: 5173,
   },
-=======
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom'],
-          router: ['react-router-dom'],
-          icons: ['lucide-react'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined
+          }
+          if (id.includes('react-router-dom') || id.includes('react-router')) {
+            return 'router'
+          }
+          if (id.includes('lucide-react')) {
+            return 'icons'
+          }
+          if (id.includes('react') || id.includes('react-dom')) {
+            return 'react'
+          }
+          return undefined
         },
       },
     },

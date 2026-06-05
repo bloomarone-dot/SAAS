@@ -20,12 +20,12 @@ from app.modules.restaurants.schemas import (
 from app.modules.platform.models import RestaurantSubscription
 from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
-from app.security import hash_password
+from app.security import detect_image_extension, hash_password
 
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 LOGO_UPLOAD_DIR = Path("uploads/logos")
-ALLOWED_LOGO_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+ALLOWED_LOGO_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 
 @router.get("", response_model=list[RestaurantPublic])
@@ -246,13 +246,15 @@ async def upload_my_restaurant_logo(
     if not current_user.is_owner:
         raise HTTPException(status_code=403, detail="Seul le proprietaire peut configurer le restaurant")
 
-    extension = ALLOWED_LOGO_TYPES.get(file.content_type or "")
-    if not extension:
+    if (file.content_type or "") not in ALLOWED_LOGO_TYPES:
         raise HTTPException(status_code=400, detail="Format logo invalide. Utilisez PNG, JPG ou WEBP.")
 
     content = await file.read()
     if len(content) > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Logo trop volumineux. Taille maximale: 2 Mo.")
+    extension = detect_image_extension(content)
+    if not extension:
+        raise HTTPException(status_code=400, detail="Fichier logo invalide ou corrompu.")
 
     restaurant = db.get(Restaurant, current_user.restaurant_id)
     if not restaurant:

@@ -13,14 +13,11 @@ from app.modules.menu.services import MenuService
 from app.modules.permissions.models import Permission
 from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
+from app.security import detect_image_extension
 
 router = APIRouter(prefix="/menu", tags=["menu"])
 MENU_UPLOAD_DIR = Path("uploads/menu")
-ALLOWED_MENU_IMAGE_TYPES = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-}
+ALLOWED_MENU_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 
 def assert_any_permission(user: User, permissions: tuple[Permission, ...]) -> None:
@@ -36,13 +33,15 @@ async def upload_menu_image(
     current_user: User = Depends(require_tenant_user),
 ):
     assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_UPDATE, Permission.KITCHEN_UPDATE))
-    extension = ALLOWED_MENU_IMAGE_TYPES.get(file.content_type or "")
-    if not extension:
+    if (file.content_type or "") not in ALLOWED_MENU_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Format image invalide. Utilisez PNG, JPG ou WEBP.")
 
     content = await file.read()
     if len(content) > 3 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image trop volumineuse. Taille maximale: 3 Mo.")
+    extension = detect_image_extension(content)
+    if not extension:
+        raise HTTPException(status_code=400, detail="Fichier image invalide ou corrompu.")
 
     MENU_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     filename = f"{current_user.restaurant_id}-{uuid4().hex}{extension}"

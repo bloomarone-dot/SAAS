@@ -87,7 +87,7 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
     db.add(order)
     db.commit()
     db.refresh(order)
-    return get_order_or_404(db, order.id, current_user.restaurant_id)
+    return get_order_or_404(db, order.id, restaurant.id)
 
 
 @router.post("/{order_id}/initiate-om", response_model=OrderPublic)

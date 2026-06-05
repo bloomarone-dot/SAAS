@@ -11,6 +11,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))
 PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30"))
+MIN_PASSWORD_LENGTH = 10
 
 if ENVIRONMENT in {"production", "prod"} and (
     SECRET_KEY in {"", "change-me-in-production", "change-this-secret-in-production"}
@@ -38,6 +39,41 @@ def verify_password(password: str, password_hash: str) -> bool:
 
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 210_000).hex()
     return hmac.compare_digest(digest, expected)
+
+
+def validate_password_strength(password: str) -> str:
+    """Applique une politique minimale aux mots de passe crees ou reinitialises."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"Le mot de passe doit contenir au moins {MIN_PASSWORD_LENGTH} caracteres")
+    checks = (
+        any(character.islower() for character in password),
+        any(character.isupper() for character in password),
+        any(character.isdigit() for character in password),
+        any(not character.isalnum() for character in password),
+    )
+    if not all(checks):
+        raise ValueError("Le mot de passe doit contenir minuscule, majuscule, chiffre et symbole")
+    return password
+
+
+def detect_image_extension(content: bytes) -> str | None:
+    """Verifie les signatures binaires des formats image autorises."""
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def verify_hmac_sha256_signature(raw_body: bytes, signature: str, secret: str) -> bool:
+    """Compare une signature HMAC SHA-256 en acceptant les prefixes sha256= courants."""
+    if not signature or not secret:
+        return False
+    normalized = signature.removeprefix("sha256=").strip()
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(normalized, expected)
 
 
 def _b64encode(payload: bytes) -> str:

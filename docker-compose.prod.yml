@@ -38,17 +38,17 @@ services:
       SUPERADMIN_FIRST_NAME: ${SUPERADMIN_FIRST_NAME:-Super}
       SUPERADMIN_LAST_NAME: ${SUPERADMIN_LAST_NAME:-Admin}
       SEED_DEMO_RESTAURANT: "false"
-<<<<<<< HEAD
-      # Orange Money Cameroun (Y-Note / Paynote)
+
       ORANGE_API_URL: ${ORANGE_API_URL:-https://api-s1.orange.cm}
       ORANGE_USERNAME: ${ORANGE_USERNAME}
       ORANGE_PASSWORD: ${ORANGE_PASSWORD}
       ORANGE_CHANNEL_MSISDN: ${ORANGE_CHANNEL_MSISDN}
       ORANGE_PIN: ${ORANGE_PIN}
       ORANGE_X_AUTH_TOKEN: ${ORANGE_X_AUTH_TOKEN}
+      ORANGE_WEBHOOK_SECRET: ${ORANGE_WEBHOOK_SECRET}
+      REQUIRE_ORANGE_WEBHOOK_SIGNATURE: ${REQUIRE_ORANGE_WEBHOOK_SIGNATURE:-true}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL}
-=======
->>>>>>> 12ae8a7538e7247857354f2c0c441e94a0eb39cf
+
     volumes:
       - backend_uploads:/app/uploads
     depends_on:

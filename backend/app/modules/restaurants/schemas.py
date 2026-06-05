@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 from app.modules.shared.schemas import OrmModel
 from app.modules.users.schemas import UserPublic
+from app.security import validate_password_strength
 
 NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 .,'’()&/-]{1,190}$"
 PERSON_NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '-]{1,79}$"
@@ -58,11 +59,15 @@ class RestaurantProvisionIn(BaseModel):
     timezone: str = Field(default="Africa/Douala", max_length=50, pattern=TIMEZONE_PATTERN)
     owner_email: Optional[str] = Field(default=None, max_length=191)
     owner_username: str = Field(min_length=3, max_length=50, pattern=USERNAME_PATTERN)
-    owner_password: str = Field(min_length=8, max_length=128)
+    owner_password: str = Field(min_length=10, max_length=128)
     owner_first_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
     owner_last_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
     owner_phone: str = Field(min_length=5, max_length=30, pattern=PHONE_PATTERN)
     owner_alt_phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
+
+    @validator("owner_password")
+    def owner_password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class RestaurantProvisionOut(BaseModel):
