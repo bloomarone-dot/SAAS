@@ -32,6 +32,7 @@ import { StockDashboard } from "@/components/dashboard/roles/StockDashboard";
 import { StockOperations } from "@/modules/stock/components/StockOperations";
 import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { getApiBaseUrl } from "@/config/api";
 
 const initialLogin = { login: "", password: "" };
 const initialRestaurant = {
@@ -45,35 +46,6 @@ const initialRestaurant = {
   owner_phone: "",
   owner_alt_phone: "",
 };
-
-function getApiBaseUrl() {
-  if (import.meta.env.VITE_API_URL) {
-    try {
-      const configured = new URL(import.meta.env.VITE_API_URL);
-      const pageHost = window.location.hostname;
-      if (
-        configured.hostname === "localhost" &&
-        pageHost &&
-        pageHost !== "localhost" &&
-        pageHost !== "127.0.0.1" &&
-        !isDockerBridgeHost(pageHost)
-      ) {
-        configured.hostname = pageHost;
-        return configured.toString().replace(/\/$/, "");
-      }
-    } catch {
-      return import.meta.env.VITE_API_URL;
-    }
-    return import.meta.env.VITE_API_URL;
-  }
-  if (import.meta.env.PROD) return window.location.origin;
-  return `${window.location.protocol}//${window.location.hostname}:8001`;
-}
-
-function isDockerBridgeHost(hostname) {
-  const parts = hostname.split(".").map((part) => Number(part));
-  return parts.length === 4 && parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
-}
 
 const rolePaths = {
   SUPERADMIN: "superadmin",

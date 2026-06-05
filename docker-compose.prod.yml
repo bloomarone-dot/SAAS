@@ -45,15 +45,24 @@ services:
       ORANGE_CHANNEL_MSISDN: ${ORANGE_CHANNEL_MSISDN}
       ORANGE_PIN: ${ORANGE_PIN}
       ORANGE_X_AUTH_TOKEN: ${ORANGE_X_AUTH_TOKEN}
-      ORANGE_WEBHOOK_SECRET: ${ORANGE_WEBHOOK_SECRET}
-      REQUIRE_ORANGE_WEBHOOK_SIGNATURE: ${REQUIRE_ORANGE_WEBHOOK_SIGNATURE:-true}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL}
-
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   frontend:
     build:
@@ -64,7 +73,8 @@ services:
     ports:
       - "${HTTP_PORT:-80}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   mysql_data:
