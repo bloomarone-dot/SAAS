@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 from app.modules.users.schemas import UserPublic
+from app.security import validate_password_strength
 
 
 class LoginIn(BaseModel):
@@ -35,4 +36,8 @@ class ResetPasswordIn(BaseModel):
     """Payload de changement de mot de passe via token temporaire."""
 
     token: str = Field(min_length=20)
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
+
+    @validator("password")
+    def password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)

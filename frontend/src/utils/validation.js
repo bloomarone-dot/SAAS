@@ -7,7 +7,7 @@ const PATTERNS = {
   currency: "[A-Za-z]{3}",
   timezone: "[A-Za-z_]+/[A-Za-z0-9_+\\-/]+",
   url: "https?://.+",
-  password: "(?=.*[A-Za-z])(?=.*\\d).{8,128}",
+  password: "(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{10,128}",
 };
 
 export const validationAttrs = {
@@ -61,9 +61,9 @@ export const validationAttrs = {
   },
   password: {
     pattern: PATTERNS.password,
-    minLength: 8,
+    minLength: 10,
     maxLength: 128,
-    title: "Utilisez au moins 8 caractères avec au moins une lettre et un chiffre.",
+    title: "Utilisez au moins 10 caractères avec minuscule, majuscule, chiffre et symbole.",
   },
   positiveNumber: {
     min: "0",

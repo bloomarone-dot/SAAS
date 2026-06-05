@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 from app.modules.permissions.models import Permission, Role
 from app.modules.shared.schemas import OrmModel
+from app.security import validate_password_strength
 
 PERSON_NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '-]{1,79}$"
 USERNAME_PATTERN = r"^[a-zA-Z0-9._-]{3,50}$"
@@ -35,13 +36,17 @@ class UserCreateIn(BaseModel):
 
     email: Optional[str] = Field(default=None, max_length=191)
     username: str = Field(min_length=3, max_length=50, pattern=USERNAME_PATTERN)
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
     first_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
     last_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
     phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
     role: Role
     branch_id: Optional[str] = None
     permissions: list[Permission] = Field(default_factory=list)
+
+    @validator("password")
+    def password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class UserPermissionsUpdateIn(BaseModel):
@@ -53,7 +58,11 @@ class UserPermissionsUpdateIn(BaseModel):
 class UserPasswordResetIn(BaseModel):
     """Payload de reinitialisation de mot de passe par un administrateur."""
 
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
+
+    @validator("password")
+    def password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)
 
 
 class UserUpdateIn(BaseModel):
