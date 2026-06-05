@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { MtnMoneyPayment } from "./MtnMoneyPayment";
 import { OrangeMoneyPayment } from "./OrangeMoneyPayment";
 
 const statuses = ["Toutes", "Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
@@ -27,6 +28,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
   const [editForm, setEditForm] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [orangePayOrderId, setOrangePayOrderId] = useState(null);
+  const [mtnPayOrderId, setMtnPayOrderId] = useState(null);
   const reviewOnly = currentUser?.role === "ADMIN";
 
   useEffect(() => {
@@ -216,10 +218,12 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
             selectedOrderId={selectedOrder?.id}
             reviewOnly={reviewOnly}
             onSelect={setSelectedOrderId}
-            onEdit={startEdit}
-            onDelete={deleteOrder}
-            onStatus={updateStatus}
-          />
+                  onEdit={startEdit}
+                  onDelete={deleteOrder}
+                  onStatus={updateStatus}
+                  onOrangePay={reviewOnly ? undefined : setOrangePayOrderId}
+                  onMtnPay={reviewOnly ? undefined : setMtnPayOrderId}
+                />
         </AdminCard>
 
         <div className="space-y-5">
@@ -263,6 +267,27 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
                   onMessage(`Paiement Orange Money confirmé pour la commande ${payOrder.order_number}.`);
                 }}
                 onClose={() => setOrangePayOrderId(null)}
+              />
+            </div>
+          </div>
+        );
+      })()}
+      {/* Modal paiement MTN Money */}
+      {!reviewOnly && mtnPayOrderId && (() => {
+        const payOrder = orders.find((o) => o.id === mtnPayOrderId);
+        if (!payOrder) return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-md">
+              <MtnMoneyPayment
+                apiBaseUrl={apiBaseUrl}
+                order={payOrder}
+                onSuccess={() => {
+                  setMtnPayOrderId(null);
+                  loadOrders({ silent: true });
+                  onMessage(`Paiement MTN Mobile Money confirmé pour la commande ${payOrder.order_number}.`);
+                }}
+                onClose={() => setMtnPayOrderId(null)}
               />
             </div>
           </div>
@@ -316,9 +341,6 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, on
                         Valider annulation
                       </button>
                     )}
-                    <button type="button" onClick={() => onDelete(order)} className="ml-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-600 hover:bg-red-50">
-                      Archiver
-                    </button>
                   </>
                 ) : (
                   <>
@@ -338,7 +360,7 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, on
   );
 }
 
-function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay }) {
+function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtnPay }) {
   const visibleItems = order.items.filter((item) => item.sale_channel !== "EMBALLAGE");
   const subtotal = visibleItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
   return (
@@ -375,6 +397,16 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay }) {
         >
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-xs font-black">OM</span>
           Payer par Orange Money · {money(order.total_amount)}
+        </button>
+      )}
+      {onMtnPay && !["Payée", "Payee", "Annulée"].includes(order.status) && (
+        <button
+          type="button"
+          onClick={() => onMtnPay(order.id)}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-3 text-sm font-black text-white hover:bg-yellow-600 transition"
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-xs font-black">M</span>
+          Payer par MTN Mobile Money · {money(order.total_amount)}
         </button>
       )}
 
