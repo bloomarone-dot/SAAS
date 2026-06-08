@@ -7,12 +7,12 @@ from app.modules.shared.schemas import OrmModel
 from app.modules.users.schemas import UserPublic
 from app.security import validate_password_strength
 
-NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 .,'’()&/-]{1,190}$"
-PERSON_NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '-]{1,79}$"
-USERNAME_PATTERN = r"^[a-zA-Z0-9._-]{3,50}$"
-PHONE_PATTERN = r"^\+?[0-9 ()-]{5,30}$"
+NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 \.,'’\(\)\&\/\-]{1,190}$"
+PERSON_NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '\-]{1,79}$"
+USERNAME_PATTERN = r"^[a-zA-Z0-9\._\-]{3,50}$"
+PHONE_PATTERN = r"^\+?[0-9 \(\)\-]{5,30}$"
 CURRENCY_PATTERN = r"^[A-Za-z]{3}$"
-TIMEZONE_PATTERN = r"^[A-Za-z_]+/[A-Za-z0-9_+\-/]+$"
+TIMEZONE_PATTERN = r"^[A-Za-z_]+/[A-Za-z0-9_\+\-\/]+$"
 
 
 class RestaurantPublic(OrmModel):
@@ -51,7 +51,7 @@ class RestaurantProvisionIn(BaseModel):
     """Donnees necessaires pour creer un restaurant et son proprietaire."""
 
     name: str = Field(min_length=2, max_length=191, pattern=NAME_PATTERN)
-    slug: str = Field(min_length=2, max_length=191, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    slug: Optional[str] = Field(default=None, min_length=2, max_length=191, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     logo_url: Optional[str] = Field(default=None, max_length=500)
     primary_color: str = Field(default="#E4572E", pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_color: str = Field(default="#1F2937", pattern=r"^#[0-9A-Fa-f]{6}$")

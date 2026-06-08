@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.modules.shared.schemas import OrmModel
 
-NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 .,'’()&/-]{1,159}$"
+NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 \.,'’\(\)\&\/\-]{1,159}$"
 from app.modules.stock.models import StockCostCenterType, StockInventoryStatus, StockLocation, StockLossReason, StockMovementType, StockProductType
 
 

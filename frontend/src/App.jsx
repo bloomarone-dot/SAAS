@@ -37,7 +37,6 @@ import { getApiBaseUrl } from "@/config/api";
 const initialLogin = { login: "", password: "" };
 const initialRestaurant = {
   name: "",
-  slug: "",
   owner_email: "",
   owner_username: "",
   owner_password: "",
@@ -253,13 +252,6 @@ export default function App() {
   function updateRestaurantField(event) {
     const { name } = event.target;
     let { value } = event.target;
-    if (name === "slug") {
-      value = value
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "");
-    }
     if (name === "owner_username") {
       value = value.trim().replace(/\s+/g, "").toLowerCase();
     }

@@ -3,7 +3,6 @@ import { validationFor } from "@/utils/validation";
 
 const restaurantFields = [
   ["name", "Nom du restaurant", "text", "Le Bon Coin"],
-  ["slug", "Slug tenant", "text", "le-bon-coin"],
 ];
 
 const ownerFields = [

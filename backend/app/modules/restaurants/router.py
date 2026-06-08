@@ -1,5 +1,8 @@
+import re
 from pathlib import Path
 from uuid import uuid4
+
+import unicodedata
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import func, or_
@@ -26,6 +29,16 @@ from app.security import detect_image_extension, hash_password
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 LOGO_UPLOAD_DIR = Path("uploads/logos")
 ALLOWED_LOGO_TYPES = {"image/png", "image/jpeg", "image/webp"}
+
+
+def generate_slug(name: str) -> str:
+    """Generate a URL-friendly slug from a restaurant name."""
+    slug = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    slug = slug.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = re.sub(r"-{2,}", "-", slug)
+    slug = slug.strip("-")
+    return slug or str(uuid4().hex[:8])
 
 
 @router.get("", response_model=list[RestaurantPublic])
@@ -61,9 +74,12 @@ def provision_restaurant(
     email = payload.owner_email.lower().strip() if payload.owner_email else None
     username = payload.owner_username.lower().strip()
 
-    existing_restaurant = db.query(Restaurant).filter(Restaurant.slug == payload.slug).one_or_none()
-    if existing_restaurant:
-        raise HTTPException(status_code=409, detail="Ce slug restaurant est deja utilise")
+    slug = payload.slug or generate_slug(payload.name)
+    original_slug = slug
+    counter = 1
+    while db.query(Restaurant).filter(Restaurant.slug == slug).one_or_none():
+        slug = f"{original_slug}-{counter}"
+        counter += 1
 
     user_filters = [User.username == username]
     if email:
@@ -74,7 +90,7 @@ def provision_restaurant(
 
     restaurant = Restaurant(
         name=payload.name,
-        slug=payload.slug,
+        slug=slug,
         logo_url=payload.logo_url,
         primary_color=payload.primary_color,
         secondary_color=payload.secondary_color,

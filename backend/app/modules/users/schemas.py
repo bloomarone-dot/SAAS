@@ -7,9 +7,9 @@ from app.modules.permissions.models import Permission, Role
 from app.modules.shared.schemas import OrmModel
 from app.security import validate_password_strength
 
-PERSON_NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '-]{1,79}$"
-USERNAME_PATTERN = r"^[a-zA-Z0-9._-]{3,50}$"
-PHONE_PATTERN = r"^\+?[0-9 ()-]{5,30}$"
+PERSON_NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '\-]{1,79}$"
+USERNAME_PATTERN = r"^[a-zA-Z0-9\._\-]{3,50}$"
+PHONE_PATTERN = r"^\+?[0-9 \(\)\-]{5,30}$"
 
 
 class UserPublic(OrmModel):

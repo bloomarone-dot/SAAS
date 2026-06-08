@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 from app.modules.shared.schemas import OrmModel
 
-NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 .,'’()&/-]{1,190}$"
-PHONE_PATTERN = r"^\+?[0-9 ()-]{5,30}$"
+NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 \.,'’\(\)\&\/\-]{1,190}$"
+PHONE_PATTERN = r"^\+?[0-9 \(\)\-]{5,30}$"
 
 
 class BranchPublic(OrmModel):
