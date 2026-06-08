@@ -11,6 +11,7 @@ import {
   SummaryCard,
 } from "../DashboardPrimitives";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { formatApiError } from "@/utils/network";
 
 const locationLabels = {
   MAGASIN: "Magasin",
@@ -73,7 +74,7 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail ?? "Chargement du stock impossible.");
+    if (!response.ok) throw new Error(formatApiError(data.detail, "Chargement du stock impossible."));
     return data;
   }
 

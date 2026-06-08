@@ -1,4 +1,4 @@
-import { friendlyNetworkMessage } from "@/utils/network";
+import { formatApiError, friendlyNetworkMessage } from "@/utils/network";
 import { getApiBaseUrl } from "@/config/api";
 
 async function request(path, options = {}) {
@@ -17,7 +17,7 @@ async function request(path, options = {}) {
       let detail = "Requete menu impossible.";
       try {
         const data = await response.json();
-        detail = data.detail ?? detail;
+        detail = formatApiError(data.detail, detail);
       } catch {
         // Keep the generic message when the backend does not return JSON.
       }
@@ -54,7 +54,7 @@ export const menuApi = {
         body,
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail ?? "Import de l'image impossible.");
+      if (!response.ok) throw new Error(formatApiError(data.detail, "Import de l'image impossible."));
       return data.image_url;
     } catch (error) {
       throw new Error(friendlyNetworkMessage(error, "Import de l'image impossible."));

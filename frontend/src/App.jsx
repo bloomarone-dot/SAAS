@@ -30,7 +30,7 @@ import {
 } from "@/modules/platform/components/SuperadminSections";
 import { StockDashboard } from "@/components/dashboard/roles/StockDashboard";
 import { StockOperations } from "@/modules/stock/components/StockOperations";
-import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
+import { clearOfflineQueue, flushOfflineQueue, formatApiError, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { getApiBaseUrl } from "@/config/api";
 
@@ -45,6 +45,8 @@ const initialRestaurant = {
   owner_phone: "",
   owner_alt_phone: "",
 };
+
+const optionalRestaurantFields = new Set(["owner_email", "owner_alt_phone"]);
 
 const rolePaths = {
   SUPERADMIN: "superadmin",
@@ -213,7 +215,7 @@ export default function App() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        if (!silent) setMessage(data.detail ?? "Impossible de charger les indicateurs du tableau de bord.");
+        if (!silent) setMessage(formatApiError(data.detail, "Impossible de charger les indicateurs du tableau de bord."));
         return;
       }
       setAdminSummary(data);
@@ -275,7 +277,7 @@ export default function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        setMessage(data.detail ?? "Identifiants invalides.");
+        setMessage(formatApiError(data.detail, "Identifiants invalides."));
         return;
       }
 
@@ -300,18 +302,23 @@ export default function App() {
 
     try {
       const token = localStorage.getItem("access_token");
+      const payload = Object.fromEntries(
+        Object.entries(restaurantForm)
+          .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
+          .filter(([key, value]) => !(optionalRestaurantFields.has(key) && !value))
+      );
       const response = await fetch(`${apiBaseUrl}/api/v1/restaurants`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(restaurantForm),
+        body: JSON.stringify(payload),
       });
       const data = await response.json();
 
       if (!response.ok) {
-        setMessage(data.detail ?? "Création du restaurant impossible.");
+        setMessage(formatApiError(data.detail, "Création du restaurant impossible."));
         return;
       }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { formatApiError } from "@/utils/network";
 import { validationFor } from "@/utils/validation";
 
 const emptySettings = {
@@ -49,7 +50,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
       },
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail ?? "Opération impossible.");
+    if (!response.ok) throw new Error(formatApiError(data.detail, "Opération impossible."));
     return data;
   }
 
@@ -103,27 +104,27 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
     setIsLoading(true);
     try {
       const payload = {
-        name: form.name,
-        legal_name: form.legal_name || null,
-        description: form.description || null,
-        logo_url: form.logo_url || null,
-        address: form.address || null,
-        city: form.city || null,
-        country: form.country || null,
-        postal_box: form.postal_box || null,
-        phone: form.phone || null,
-        whatsapp_phone: form.whatsapp_phone || null,
-        email: form.email || null,
-        opening_hours: form.opening_hours || null,
+        name: form.name.trim(),
+        legal_name: optionalText(form.legal_name),
+        description: optionalText(form.description),
+        logo_url: optionalText(form.logo_url),
+        address: optionalText(form.address),
+        city: optionalText(form.city),
+        country: optionalText(form.country),
+        postal_box: optionalText(form.postal_box),
+        phone: optionalText(form.phone),
+        whatsapp_phone: optionalText(form.whatsapp_phone),
+        email: optionalText(form.email),
+        opening_hours: optionalText(form.opening_hours),
         is_open: form.is_open,
-        payment_methods: form.payment_methods || null,
+        payment_methods: optionalText(form.payment_methods),
         delivery_fee: Number(form.delivery_fee || 0),
-        website_url: form.website_url || null,
-        tax_id: form.tax_id || null,
+        website_url: optionalText(form.website_url),
+        tax_id: optionalText(form.tax_id),
         primary_color: form.primary_color,
         secondary_color: form.secondary_color,
-        currency: form.currency.toUpperCase(),
-        timezone: form.timezone,
+        currency: form.currency.trim().toUpperCase(),
+        timezone: form.timezone.trim(),
       };
       const updated = await api("/api/v1/restaurants/me/settings", {
         method: "PATCH",
@@ -159,7 +160,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         body,
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail ?? "Import du logo impossible.");
+      if (!response.ok) throw new Error(formatApiError(data.detail, "Import du logo impossible."));
       setRestaurant(data);
       setForm((current) => ({ ...current, logo_url: data.logo_url ?? "" }));
       onMessage("Logo du restaurant importé.");
@@ -341,6 +342,11 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
       </form>
     </section>
   );
+}
+
+function optionalText(value) {
+  const trimmed = typeof value === "string" ? value.trim() : value;
+  return trimmed || null;
 }
 
 function SettingsGroup({ title, children }) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, PrimaryAction, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
+import { formatApiError } from "@/utils/network";
 
 const emptyPromo = {
   code: "",
@@ -40,7 +41,7 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
       },
     });
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(data?.detail ?? "Action code promo impossible.");
+    if (!response.ok) throw new Error(formatApiError(data?.detail, "Action code promo impossible."));
     return data;
   }
 
@@ -66,6 +67,7 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
     const payload = {
       ...form,
       code: form.code.trim().toUpperCase(),
+      label: form.label.trim(),
       discount_value: Number(form.discount_value || 0),
       min_order_amount: Number(form.min_order_amount || 0),
       max_discount_amount: form.max_discount_amount ? Number(form.max_discount_amount) : null,

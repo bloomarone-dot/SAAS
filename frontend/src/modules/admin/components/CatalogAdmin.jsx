@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
+import { formatApiError } from "@/utils/network";
 import { validationFor } from "@/utils/validation";
 
 const emptyCategory = { name: "", description: "" };
@@ -17,6 +18,11 @@ const emptyItem = {
 
 function formatPrice(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+}
+
+function optionalText(value) {
+  const trimmed = typeof value === "string" ? value.trim() : value;
+  return trimmed || null;
 }
 
 export function CatalogAdmin({ apiBaseUrl, onMessage }) {
@@ -72,7 +78,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
       },
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail ?? "Opération impossible.");
+    if (!response.ok) throw new Error(formatApiError(data.detail, "Opération impossible."));
     return data;
   }
 
@@ -109,7 +115,11 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
     try {
       const created = await api("/api/v1/catalog/categories", {
         method: "POST",
-        body: JSON.stringify({ ...categoryForm, description: categoryForm.description || null }),
+        body: JSON.stringify({
+          ...categoryForm,
+          name: categoryForm.name.trim(),
+          description: optionalText(categoryForm.description),
+        }),
       });
       setCategories((current) => [created, ...current]);
       setItemForm((current) => ({ ...current, category_id: current.category_id || created.id }));
@@ -130,10 +140,11 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
         method: "POST",
         body: JSON.stringify({
           ...itemForm,
+          name: itemForm.name.trim(),
           price: Number(itemForm.price),
           cost_per_dish: Number(itemForm.cost_per_dish || 0),
-          image_url: itemForm.image_url || null,
-          description: itemForm.description || null,
+          image_url: optionalText(itemForm.image_url),
+          description: optionalText(itemForm.description),
         }),
       });
       setItems((current) => [created, ...current]);

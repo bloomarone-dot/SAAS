@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
-import { enqueueOfflineAction, friendlyNetworkMessage, isNetworkError } from "@/utils/network";
+import { enqueueOfflineAction, formatApiError, friendlyNetworkMessage, isNetworkError } from "@/utils/network";
 import { validationFor } from "@/utils/validation";
 
 const emptyItem = {
@@ -205,7 +205,7 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage, f
         },
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail ?? "Opération impossible.");
+      if (!response.ok) throw new Error(formatApiError(data.detail, "Opération impossible."));
       return data;
     } catch (error) {
       throw new Error(friendlyNetworkMessage(error, "Opération impossible."));

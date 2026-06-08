@@ -1,4 +1,4 @@
-import { friendlyNetworkMessage } from "@/utils/network";
+import { formatApiError, friendlyNetworkMessage } from "@/utils/network";
 import { getApiBaseUrl } from "@/config/api";
 
 async function request(path, options = {}) {
@@ -13,7 +13,7 @@ async function request(path, options = {}) {
       },
     });
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(data?.detail ?? "Action commande impossible.");
+    if (!response.ok) throw new Error(formatApiError(data?.detail, "Action commande impossible."));
     return data;
   } catch (error) {
     throw new Error(friendlyNetworkMessage(error, "Action commande impossible."));

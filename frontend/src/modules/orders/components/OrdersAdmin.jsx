@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { formatApiError } from "@/utils/network";
 import { MtnMoneyPayment } from "./MtnMoneyPayment";
 import { OrangeMoneyPayment } from "./OrangeMoneyPayment";
 
@@ -48,7 +49,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
       },
     });
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(data?.detail ?? "Action commande impossible.");
+    if (!response.ok) throw new Error(formatApiError(data?.detail, "Action commande impossible."));
     return data;
   }
 

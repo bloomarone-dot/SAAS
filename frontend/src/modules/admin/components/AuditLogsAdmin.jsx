@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { formatApiError } from "@/utils/network";
 
 const actionLabels = {
   "order.update": "Commande modifiée",
@@ -55,7 +56,7 @@ export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json().catch(() => []);
-      if (!response.ok) throw new Error(data.detail ?? "Chargement des journaux impossible.");
+      if (!response.ok) throw new Error(formatApiError(data.detail, "Chargement des journaux impossible."));
       setLogs(data);
     } catch (error) {
       onMessage(error.message);

@@ -5,6 +5,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle, Loader2, Phone, RefreshCw, XCircle } from "lucide-react";
+import { formatApiError } from "@/utils/network";
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLLS = 24;
@@ -42,7 +43,7 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
       },
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.detail ?? "Erreur API");
+    if (!response.ok) throw new Error(formatApiError(data?.detail, "Erreur API"));
     return data;
   }
 

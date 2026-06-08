@@ -8,6 +8,22 @@ export function friendlyNetworkMessage(error, fallback = "Connexion indisponible
   return message || fallback;
 }
 
+export function formatApiError(detail, fallback = "Opération impossible.") {
+  if (!detail) return fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        const field = Array.isArray(item?.loc) ? item.loc.filter((part) => part !== "body").join(".") : "";
+        const message = item?.msg || fallback;
+        return field ? `${field}: ${message}` : message;
+      })
+      .filter(Boolean)
+      .join(" | ") || fallback;
+  }
+  return detail.message || fallback;
+}
+
 export function isNetworkError(error) {
   const message = String(error?.message || error || "");
   return !navigator.onLine || message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("Connexion indisponible");
@@ -17,7 +33,7 @@ export async function fetchJson(url, options = {}, fallback = "Opération imposs
   try {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(data?.detail ?? fallback);
+    if (!response.ok) throw new Error(formatApiError(data?.detail, fallback));
     return data;
   } catch (error) {
     throw new Error(friendlyNetworkMessage(error, fallback));

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { validationFor } from "@/utils/validation";
+import { formatApiError } from "@/utils/network";
 
 const STAFF_ROLES = ["MANAGER", "SERVEUR", "CUISINE", "CAISSE", "STOCK", "COMPTABLE"];
 
@@ -132,7 +133,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(data.detail ?? "Opération impossible.");
+      throw new Error(formatApiError(data.detail, "Opération impossible."));
     }
     return data;
   }
@@ -193,6 +194,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
       const payload = {
         ...form,
         email: form.email.trim() || null,
+        phone: form.phone.trim() || null,
         branch_id: form.branch_id || null,
         permissions: formPermissions,
       };
@@ -239,6 +241,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
         body: JSON.stringify({
           ...editForm,
           email: editForm.email.trim() || null,
+          phone: editForm.phone.trim() || null,
           branch_id: editForm.branch_id || null,
           permissions: draftPermissions,
         }),

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { validationFor } from "@/utils/validation";
+import { formatApiError } from "@/utils/network";
 
 const initialBranch = {
   name: "",
@@ -63,7 +64,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(data.detail ?? "Opération impossible.");
+      throw new Error(formatApiError(data.detail, "Opération impossible."));
     }
     return data;
   }
@@ -91,8 +92,8 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
       const created = await api("/api/v1/branches", {
         method: "POST",
         body: JSON.stringify({
-          ...form,
-          phone: form.phone || null,
+          ...Object.fromEntries(Object.entries(form).map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])),
+          phone: form.phone.trim() || null,
         }),
       });
       setBranches((current) => [created, ...current]);

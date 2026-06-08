@@ -1,4 +1,4 @@
-import { friendlyNetworkMessage } from "@/utils/network";
+import { formatApiError, friendlyNetworkMessage } from "@/utils/network";
 import { getApiBaseUrl } from "@/config/api";
 
 async function request(path, options = {}) {
@@ -15,7 +15,7 @@ async function request(path, options = {}) {
 
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.detail ?? "Requete table impossible.");
+      throw new Error(formatApiError(data.detail, "Requete table impossible."));
     }
 
     if (response.status === 204) return null;

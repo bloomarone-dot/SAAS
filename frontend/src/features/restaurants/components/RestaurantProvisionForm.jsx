@@ -12,7 +12,7 @@ const ownerFields = [
   ["owner_alt_phone", "Téléphone secondaire", "tel", "+237 6XX XXX XXX"],
   ["owner_email", "Email", "email", "owner@restaurant.cm"],
   ["owner_username", "Identifiant", "text", "owner"],
-  ["owner_password", "Mot de passe", "password", "Minimum 8 caractères"],
+  ["owner_password", "Mot de passe", "password", "10 caractères avec majuscule, chiffre et symbole"],
 ];
 
 const optionalFields = new Set(["owner_email", "owner_alt_phone"]);

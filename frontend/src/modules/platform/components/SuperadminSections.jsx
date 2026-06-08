@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
+import { formatApiError } from "@/utils/network";
 
 export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
   const [query, setQuery] = useState("");
@@ -683,8 +684,12 @@ export function SuperadminSubscriptions({ apiBaseUrl, restaurants, onMessage }) 
         method: "PATCH",
         body: JSON.stringify({
           ...form,
+          plan: form.plan.trim(),
           amount: Number(form.amount || 0),
+          currency: form.currency.trim().toUpperCase(),
+          status: form.status.trim(),
           renewal_date: form.renewal_date || null,
+          notes: optionalText(form.notes),
         }),
       });
       setRows((current) => current.map((row) => (row.restaurant_id === updated.restaurant_id ? updated : row)));
@@ -1261,6 +1266,11 @@ function uniquePlanOptions(rows) {
   return [["all", "Tous les plans"], ...plans.map((item) => [item, item])];
 }
 
+function optionalText(value) {
+  const trimmed = typeof value === "string" ? value.trim() : value;
+  return trimmed || null;
+}
+
 async function platformApi(apiBaseUrl, path, options = {}) {
   const token = localStorage.getItem("access_token");
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -1273,7 +1283,7 @@ async function platformApi(apiBaseUrl, path, options = {}) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.detail ?? "Action plateforme impossible.");
+    throw new Error(formatApiError(data?.detail, "Action plateforme impossible."));
   }
   return data;
 }

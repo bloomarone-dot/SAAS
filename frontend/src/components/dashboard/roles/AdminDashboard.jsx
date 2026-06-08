@@ -8,6 +8,7 @@ import {
 } from "../DashboardPrimitives";
 import { useMemo, useState } from "react";
 import { SecondaryAction } from "@/modules/admin/components/AdminUi";
+import { formatApiError } from "@/utils/network";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
@@ -46,7 +47,7 @@ export function AdminDashboard({ overrides = {} }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail ?? "Rapport impossible.");
+      if (!response.ok) throw new Error(formatApiError(data.detail, "Rapport impossible."));
       setPeriodSummary(data);
     } finally {
       setIsPeriodLoading(false);
