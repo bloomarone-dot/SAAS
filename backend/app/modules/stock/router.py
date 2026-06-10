@@ -62,8 +62,28 @@ DEFAULT_COST_CENTERS = {
 }
 
 
-def get_item_or_404(db: Session, item_id: str, restaurant_id: str | None) -> StockItem:
-    item = db.get(StockItem, item_id)
+def get_item_or_404(
+    db: Session,
+    item_id: str,
+    restaurant_id: str | None,
+    *,
+    for_update: bool = False,
+) -> StockItem:
+    """Charge un produit stock scope tenant.
+
+    `for_update=True` pose un verrou de ligne (SELECT ... FOR UPDATE) pour les
+    chemins de consommation concurrents, evitant la survente (TOCTOU) lorsque
+    plusieurs commandes touchent simultanement le meme article.
+    """
+    if for_update:
+        item = (
+            db.query(StockItem)
+            .filter(StockItem.id == item_id)
+            .with_for_update()
+            .one_or_none()
+        )
+    else:
+        item = db.get(StockItem, item_id)
     if not item or item.restaurant_id != restaurant_id:
         raise HTTPException(status_code=404, detail="Produit stock introuvable")
     return item

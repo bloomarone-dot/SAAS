@@ -33,6 +33,10 @@ class PaymentStatusOut(BaseModel):
     currency: str
     payer_msisdn: Optional[str] = None
     failure_reason: Optional[str] = None
+    aggregator_fee: Optional[float] = None
+    bloomar_commission: Optional[float] = None
+    restaurant_net: Optional[float] = None
+    webhook_received_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

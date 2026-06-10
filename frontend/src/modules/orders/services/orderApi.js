@@ -1,24 +1,7 @@
-import { formatApiError, friendlyNetworkMessage } from "@/utils/network";
-import { getApiBaseUrl } from "@/config/api";
+import { apiFetch } from "@/config/http";
 
-async function request(path, options = {}) {
-  const token = localStorage.getItem("access_token");
-  try {
-    const response = await fetch(`${getApiBaseUrl()}${path}`, {
-      ...options,
-      headers: {
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(formatApiError(data?.detail, "Action commande impossible."));
-    return data;
-  } catch (error) {
-    throw new Error(friendlyNetworkMessage(error, "Action commande impossible."));
-  }
-}
+const request = (path, options = {}) =>
+  apiFetch(path, { ...options, fallback: "Action commande impossible." });
 
 export const orderApi = {
   list: (params = {}) => {
@@ -57,12 +40,6 @@ export const orderApi = {
 
   validatePayment: (orderId, payload) =>
     request(`/api/v1/orders/${orderId}/payment`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  validateMobileMoneyPayment: (orderId, payload) =>
-    request(`/api/v1/orders/${orderId}/mobile-money-payment`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),

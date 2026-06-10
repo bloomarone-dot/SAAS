@@ -35,13 +35,6 @@ class CashierPaymentIn(BaseModel):
     discount_amount: Optional[float] = Field(default=None, ge=0)
 
 
-class MobileMoneyPaymentIn(BaseModel):
-    operator: str = Field(pattern="^(MTN|ORANGE)$")
-    phone: str = Field(min_length=5, max_length=40)
-    transaction_reference: str = Field(min_length=4, max_length=120)
-    discount_amount: Optional[float] = Field(default=None, ge=0)
-
-
 class PromoApplyIn(BaseModel):
     code: str = Field(min_length=2, max_length=40)
 
@@ -91,6 +84,7 @@ class OrderPublic(OrmModel):
     payment_method: str
     payment_status: str = "En attente"
     transaction_id: Optional[str] = None
+    payment_locked: bool = False
     discount_amount: float
     delivery_fee: float
     total_amount: float

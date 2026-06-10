@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import suppress
 import os
 
 from fastapi import FastAPI
@@ -30,10 +32,20 @@ from app.modules.users import router as users
 from app.security import hash_password
 from app.modules.kitchen.router import router as kitchen_router
 from app.modules.payments import router as payments
+from app.modules.payments.service import reconciliation_loop
 
 # Point d'entree FastAPI: assemble le middleware CORS, la creation de tables
 # en developpement et les routeurs versionnes de l'API.
-app = FastAPI(title="Restaurant SaaS API")
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() in {"production", "prod"}
+
+# En production, la documentation interactive et le schema OpenAPI sont coupes
+# pour ne pas exposer la cartographie complete de l'API.
+app = FastAPI(
+    title="Restaurant SaaS API",
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
+)
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
@@ -76,6 +88,21 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Ajoute les en-tetes de securite de base sur chaque reponse."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-XSS-Protection", "0")
+    if IS_PRODUCTION:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
+    return response
+
+
 @app.on_event("startup")
 def create_tables() -> None:
     """Cree les tables au demarrage tant qu'Alembic n'est pas installe."""
@@ -93,6 +120,20 @@ def create_tables() -> None:
     ensure_french_status_values()
     seed_superadmin()
     seed_demo_restaurant()
+
+
+@app.on_event("startup")
+async def start_payment_reconciliation() -> None:
+    app.state.payment_reconciliation_task = asyncio.create_task(reconciliation_loop())
+
+
+@app.on_event("shutdown")
+async def stop_payment_reconciliation() -> None:
+    task = getattr(app.state, "payment_reconciliation_task", None)
+    if task:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 def ensure_menu_category_columns() -> None:
@@ -193,6 +234,8 @@ def ensure_order_columns() -> None:
         "party_size": "INTEGER NOT NULL DEFAULT 1",
         "payment_status": "VARCHAR(40) NOT NULL DEFAULT 'En attente'",
         "transaction_id": "VARCHAR(100) NULL",
+        "payment_locked": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "payment_previous_status": "VARCHAR(40) NULL",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if missing:
@@ -316,9 +359,40 @@ def ensure_finance_columns() -> None:
 
 
 def ensure_payment_transactions_table() -> None:
-    """Cree la table payment_transactions si elle n'existe pas encore."""
+    """Cree et complete la table des transactions Mobile Money."""
     from app.modules.payments.models import PaymentTransaction  # noqa: F401
     Base.metadata.create_all(bind=engine, tables=[PaymentTransaction.__table__])
+    inspector = inspect(engine)
+    existing = {column["name"] for column in inspector.get_columns("payment_transactions")}
+    columns = {
+        "active_order_key": "VARCHAR(36) NULL",
+        "aggregator_fee": "FLOAT NULL",
+        "bloomar_commission": "FLOAT NULL",
+        "restaurant_net": "FLOAT NULL",
+        "raw_webhook": "TEXT NULL",
+        "webhook_received_at": "DATETIME NULL",
+        "completed_at": "DATETIME NULL",
+        "last_reconciled_at": "DATETIME NULL",
+        "reconciliation_status": "VARCHAR(30) NULL",
+    }
+    missing = [(name, definition) for name, definition in columns.items() if name not in existing]
+    with engine.begin() as connection:
+        for name, definition in missing:
+            connection.execute(text(f"ALTER TABLE payment_transactions ADD COLUMN {name} {definition}"))
+
+    indexes = {index["name"] for index in inspect(engine).get_indexes("payment_transactions")}
+    constraints = {
+        constraint.get("name")
+        for constraint in inspect(engine).get_unique_constraints("payment_transactions")
+    }
+    if "uq_payment_active_order" not in indexes | constraints:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX uq_payment_active_order "
+                    "ON payment_transactions (active_order_key)"
+                )
+            )
 
 
 def ensure_user_columns() -> None:
@@ -326,6 +400,14 @@ def ensure_user_columns() -> None:
     inspector = inspect(engine)
     if "users" not in inspector.get_table_names():
         return
+
+    existing = {column["name"] for column in inspector.get_columns("users")}
+    if "token_version" not in existing:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
+            )
+
     if engine.dialect.name != "mysql":
         return
 

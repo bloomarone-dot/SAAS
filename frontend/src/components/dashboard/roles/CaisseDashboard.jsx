@@ -3,6 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardHeader, KpiGrid, Panel } from "../DashboardPrimitives";
 import { DashboardIcon } from "../icons";
 import { orderApi } from "@/modules/orders/services/orderApi";
+import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
+import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
+import { getApiBaseUrl } from "@/config/api";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
@@ -60,8 +63,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const [selectedReceiptId, setSelectedReceiptId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Espèces");
   const [mobileOperator, setMobileOperator] = useState("MTN");
-  const [mobilePhone, setMobilePhone] = useState("");
-  const [mobileReference, setMobileReference] = useState("");
+  const [mobilePaymentOrder, setMobilePaymentOrder] = useState(null);
   const [discount, setDiscount] = useState("");
   const [promoCode, setPromoCode] = useState("");
   const [search, setSearch] = useState("");
@@ -70,6 +72,18 @@ export function CaisseDashboard({ overrides = {} }) {
 
   useEffect(() => {
     loadCashierReport();
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) return undefined;
+    const wsBase = getApiBaseUrl().replace(/^http/, "ws");
+    const socket = new WebSocket(`${wsBase}/api/v1/payments/ws?token=${encodeURIComponent(token)}`);
+    socket.onmessage = (event) => {
+      const payload = JSON.parse(event.data || "{}");
+      if (payload.event?.startsWith("payment_")) loadCashierReport({ silent: true });
+    };
+    return () => socket.close();
   }, []);
 
   useEffect(() => {
@@ -115,7 +129,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const selectedOrder = pendingOrders.find((order) => order.id === selectedOrderId) || pendingOrders[0] || null;
   const selectedReceipt = receipts.find((order) => order.id === selectedReceiptId) || receipts[0] || null;
   const mobileMoneyTotal = Object.entries(report.by_payment_method ?? {})
-    .filter(([method]) => method.toLowerCase().includes("mobile"))
+    .filter(([method]) => /mobile|orange|mtn/i.test(method))
     .reduce((total, [, amount]) => total + Number(amount || 0), 0);
   const viewCopy = getCashierViewCopy(activeView);
   const showSearch = ["dashboard", "cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation"].includes(activeView);
@@ -139,30 +153,25 @@ export function CaisseDashboard({ overrides = {} }) {
     const discountAmount = Number(discount || selectedOrder.discount_amount || 0);
     const payload = { payment_method: paymentMethod, discount_amount: discountAmount };
     const isMobileMoney = paymentMethod === "Mobile Money";
-    if (isMobileMoney && (!mobilePhone.trim() || !mobileReference.trim())) {
-      setMessage("Renseignez le numéro Mobile Money et la référence de transaction.");
-      setIsLoading(false);
-      return;
-    }
     try {
-      const paid = isMobileMoney
-        ? await orderApi.validateMobileMoneyPayment(selectedOrder.id, {
-            operator: mobileOperator,
-            phone: mobilePhone.trim(),
-            transaction_reference: mobileReference.trim(),
-            discount_amount: discountAmount,
-          })
-        : await orderApi.validatePayment(selectedOrder.id, payload);
+      if (isMobileMoney) {
+        const prepared = await orderApi.update(selectedOrder.id, {
+          payment_method: mobileOperator === "ORANGE" ? "Orange Money" : "MTN Mobile Money",
+          discount_amount: discountAmount,
+        });
+        setMobilePaymentOrder(prepared);
+        setIsLoading(false);
+        return;
+      }
+      const paid = await orderApi.validatePayment(selectedOrder.id, payload);
       setDiscount("");
-      setMobilePhone("");
-      setMobileReference("");
       setSelectedOrderId("");
       setSelectedReceiptId(paid.id);
       setMessage(`Paiement validé pour ${paid.order_number}.`);
       await loadCashierReport();
       printReceipt(paid);
     } catch (error) {
-      if (isNetworkError(error)) {
+      if (!isMobileMoney && isNetworkError(error)) {
         enqueueOfflineAction({
           label: `Paiement ${selectedOrder.order_number}`,
           requests: [{
@@ -299,7 +308,7 @@ export function CaisseDashboard({ overrides = {} }) {
               {!adminReviewOnly && paymentMethod === "Mobile Money" && (
                 <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
                   <p className="text-sm font-black text-slate-950">Paiement en ligne Mobile Money</p>
-                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <div className="mt-3">
                     <select
                       value={mobileOperator}
                       onChange={(event) => setMobileOperator(event.target.value)}
@@ -308,18 +317,9 @@ export function CaisseDashboard({ overrides = {} }) {
                       <option value="MTN">MTN Mobile Money</option>
                       <option value="ORANGE">Orange Money</option>
                     </select>
-                    <input
-                      value={mobilePhone}
-                      onChange={(event) => setMobilePhone(event.target.value)}
-                      placeholder="Numéro client"
-                      className="h-11 rounded-lg border border-emerald-200 bg-white px-3 text-sm font-black text-slate-700 outline-none"
-                    />
-                    <input
-                      value={mobileReference}
-                      onChange={(event) => setMobileReference(event.target.value)}
-                      placeholder="Référence transaction"
-                      className="h-11 rounded-lg border border-emerald-200 bg-white px-3 text-sm font-black text-slate-700 outline-none"
-                    />
+                    <p className="mt-2 text-xs font-semibold text-emerald-800">
+                      Le numéro client sera saisi à l'étape suivante. Seul le webhook signé peut valider le paiement.
+                    </p>
                   </div>
                 </div>
               )}
@@ -349,8 +349,8 @@ export function CaisseDashboard({ overrides = {} }) {
                 </div>
               </div>}
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {!adminReviewOnly && <button disabled={isLoading} onClick={validatePayment} className="h-12 rounded-lg bg-emerald-700 font-black text-white disabled:opacity-60">
-                  Valider paiement
+                {!adminReviewOnly && <button disabled={isLoading || selectedOrder.payment_locked} onClick={validatePayment} className="h-12 rounded-lg bg-emerald-700 font-black text-white disabled:opacity-60">
+                  {selectedOrder.payment_locked ? "Paiement Mobile Money en attente" : paymentMethod === "Mobile Money" ? "Envoyer le Push USSD" : "Valider paiement"}
                 </button>}
                 <button type="button" onClick={() => printReceipt(selectedOrder)} className="h-12 rounded-lg border border-emerald-200 font-black text-emerald-700">
                   Consulter / imprimer
@@ -418,6 +418,34 @@ export function CaisseDashboard({ overrides = {} }) {
           />
         </Panel>
       )}
+
+      {mobilePaymentOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-lg">
+            {mobileOperator === "ORANGE" ? (
+              <OrangeMoneyPayment
+                apiBaseUrl={getApiBaseUrl()}
+                order={mobilePaymentOrder}
+                onSuccess={async () => {
+                  setMessage(`Paiement confirmé pour ${mobilePaymentOrder.order_number}.`);
+                  await loadCashierReport();
+                }}
+                onClose={() => setMobilePaymentOrder(null)}
+              />
+            ) : (
+              <MtnMoneyPayment
+                apiBaseUrl={getApiBaseUrl()}
+                order={mobilePaymentOrder}
+                onSuccess={async () => {
+                  setMessage(`Paiement confirmé pour ${mobilePaymentOrder.order_number}.`);
+                  await loadCashierReport();
+                }}
+                onClose={() => setMobilePaymentOrder(null)}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -432,7 +460,7 @@ function getCashierViewCopy(view) {
     discounts: ["Remise autorisée", "Appliquez une remise validée ou un code promotionnel avant paiement."],
     "payment-method": ["Mode paiement", "Choisissez le canal d'encaissement adapté à la commande."],
     cash: ["Paiement espèces", "Encaissez rapidement une commande en espèces."],
-    mobile: ["Paiement Mobile Money", "Renseignez l'opérateur, le numéro et la référence de transaction."],
+    mobile: ["Paiement Mobile Money", "Choisissez l'opérateur puis déclenchez le Push USSD sécurisé."],
     card: ["Paiement carte", "Encaissez une commande par carte bancaire ou terminal."],
     "payment-validation": ["Validation paiement", "Validez le paiement et générez le reçu client."],
     receipts: ["Derniers reçus", "Retrouvez les tickets générés pendant le service."],

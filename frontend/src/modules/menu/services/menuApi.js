@@ -1,35 +1,7 @@
-import { formatApiError, friendlyNetworkMessage } from "@/utils/network";
-import { getApiBaseUrl } from "@/config/api";
+import { apiFetch } from "@/config/http";
 
-async function request(path, options = {}) {
-  const token = localStorage.getItem("access_token");
-  try {
-    const response = await fetch(`${getApiBaseUrl()}${path}`, {
-      ...options,
-      headers: {
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options.headers ?? {}),
-      },
-    });
-
-    if (!response.ok) {
-      let detail = "Requete menu impossible.";
-      try {
-        const data = await response.json();
-        detail = formatApiError(data.detail, detail);
-      } catch {
-        // Keep the generic message when the backend does not return JSON.
-      }
-      throw new Error(detail);
-    }
-
-    if (response.status === 204) return null;
-    return response.json();
-  } catch (error) {
-    throw new Error(friendlyNetworkMessage(error, "Requete menu impossible."));
-  }
-}
+const request = (path, options = {}) =>
+  apiFetch(path, { ...options, fallback: "Requete menu impossible." });
 
 export const menuApi = {
   getCategories: (restaurantId) =>
@@ -42,23 +14,14 @@ export const menuApi = {
     }),
 
   uploadImage: async (file) => {
-    const token = localStorage.getItem("access_token");
     const body = new FormData();
     body.append("file", file);
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/api/v1/menu/images`, {
-        method: "POST",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(formatApiError(data.detail, "Import de l'image impossible."));
-      return data.image_url;
-    } catch (error) {
-      throw new Error(friendlyNetworkMessage(error, "Import de l'image impossible."));
-    }
+    const data = await apiFetch("/api/v1/menu/images", {
+      method: "POST",
+      body,
+      fallback: "Import de l'image impossible.",
+    });
+    return data?.image_url;
   },
 
   deleteCategory: (categoryId) =>

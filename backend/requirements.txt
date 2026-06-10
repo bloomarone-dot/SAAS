@@ -6,3 +6,5 @@ PyMySQL
 cryptography
 python-multipart
 httpx
+alembic
+redis

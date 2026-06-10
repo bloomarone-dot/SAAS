@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
-import POSPage from './modules/menu/pages/POSPage';
-import KitchenPage from './modules/menu/pages/KitchenPage';
+// Pages lourdes chargees a la demande (code splitting) pour alleger le bundle initial.
+const POSPage = lazy(() => import('./modules/menu/pages/POSPage'));
+const KitchenPage = lazy(() => import('./modules/menu/pages/KitchenPage'));
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
 import { LoginPanel } from "@/features/auth/components/LoginPanel";
-import { SuperadminRestaurants } from "@/features/restaurants/components/SuperadminRestaurants";
+const SuperadminRestaurants = lazy(() =>
+  import("@/features/restaurants/components/SuperadminRestaurants").then((m) => ({
+    default: m.SuperadminRestaurants,
+  })),
+);
 import LandingPage from "@/LandingPage";
 import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
 import { AuditLogsAdmin } from "@/modules/admin/components/AuditLogsAdmin";
@@ -18,21 +23,27 @@ import CategoriesPage from "@/modules/menu/pages/CategoriesPage";
 import DishesPage from "@/modules/menu/pages/DishesPage";
 import { ServerClients, ServerFreeTables, ServerHistory, ServerInvoices, ServerOpenTables, ServerOrderWorkspace } from "@/modules/menu/components/ServerClientSections";
 import { OrdersAdmin } from "@/modules/orders/components/OrdersAdmin";
-import {
-  SuperadminActivation,
-  SuperadminGlobalStats,
-  SuperadminOwners,
-  SuperadminPayments,
-  SuperadminPlatformActivity,
-  SuperadminSettings,
-  SuperadminSubscriptions,
-  SuperadminRestaurantDetail,
-} from "@/modules/platform/components/SuperadminSections";
 import { StockDashboard } from "@/components/dashboard/roles/StockDashboard";
-import { StockOperations } from "@/modules/stock/components/StockOperations";
+
+// Sections superadmin et operations stock: chunks volumineux charges a la demande.
+const loadSuperadminSections = () => import("@/modules/platform/components/SuperadminSections");
+const lazyNamed = (loader, name) => lazy(() => loader().then((m) => ({ default: m[name] })));
+const SuperadminActivation = lazyNamed(loadSuperadminSections, "SuperadminActivation");
+const SuperadminGlobalStats = lazyNamed(loadSuperadminSections, "SuperadminGlobalStats");
+const SuperadminOwners = lazyNamed(loadSuperadminSections, "SuperadminOwners");
+const SuperadminPayments = lazyNamed(loadSuperadminSections, "SuperadminPayments");
+const SuperadminPlatformActivity = lazyNamed(loadSuperadminSections, "SuperadminPlatformActivity");
+const SuperadminSettings = lazyNamed(loadSuperadminSections, "SuperadminSettings");
+const SuperadminSubscriptions = lazyNamed(loadSuperadminSections, "SuperadminSubscriptions");
+const SuperadminRestaurantDetail = lazyNamed(loadSuperadminSections, "SuperadminRestaurantDetail");
+const StockOperations = lazyNamed(
+  () => import("@/modules/stock/components/StockOperations"),
+  "StockOperations",
+);
 import { clearOfflineQueue, flushOfflineQueue, formatApiError, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { getApiBaseUrl } from "@/config/api";
+import { SESSION_EXPIRED_EVENT } from "@/config/http";
 
 const initialLogin = { login: "", password: "" };
 const initialRestaurant = {
@@ -190,6 +201,15 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [session]);
 
+  useEffect(() => {
+    // Declenche par apiFetch sur un 401 (jeton expire ou revoque cote backend).
+    function handleSessionExpired() {
+      logout({ expired: true });
+    }
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+  }, []);
+
   async function fetchRestaurants({ silent = false } = {}) {
     const token = localStorage.getItem("access_token");
     if (!token) return;
@@ -335,18 +355,23 @@ export default function App() {
     }
   }
 
-  function logout() {
+  function logout({ expired = false } = {}) {
     localStorage.removeItem("access_token");
     setSession(null);
-    setMessage("");
     setLoginForm(initialLogin);
     setRestaurants([]);
     setRestaurantTheme(null);
     setAdminSummary(null);
     setActiveView("dashboard");
     setShowRestaurantForm(false);
-    setShowLogin(false);
-    window.history.pushState({}, "", "/");
+    if (expired) {
+      setShowLogin(true);
+      setMessage("Votre session a expiré, veuillez vous reconnecter.");
+    } else {
+      setMessage("");
+      setShowLogin(false);
+      window.history.pushState({}, "", "/");
+    }
   }
 
   if (!session && !showLogin) {
@@ -422,7 +447,15 @@ export default function App() {
         queueCount={offlineQueueCount}
         onMessage={setMessage}
       />
-      {renderContent()}
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center py-16 text-sm font-semibold text-slate-400">
+            Chargement…
+          </div>
+        }
+      >
+        {renderContent()}
+      </Suspense>
 
       {message && (
         <p className="mt-8 max-w-3xl rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">

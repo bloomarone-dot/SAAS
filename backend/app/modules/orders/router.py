@@ -3,7 +3,6 @@ from datetime import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
-from app.modules.finance.orange_money import initiate_om_payment
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
 from app.modules.audit.service import log_action
@@ -13,7 +12,7 @@ from app.modules.finance.models import PromotionCode
 from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
-from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, MobileMoneyPaymentIn, OrderPublic, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
+from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderPublic, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
 from app.modules.permissions.models import Permission, Role
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockMovement, StockMovementType, StockRecipeIngredient
@@ -24,9 +23,10 @@ from app.modules.users.models import User
 
 
 router = APIRouter(prefix="/orders", tags=["orders"])
-ALLOWED_STATUSES = {"Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"}
+ALLOWED_STATUSES = {"Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée", "PENDING_PAYMENT"}
 PAID_STATUSES = {"Payée", "Payee"}
 PAYABLE_STATUSES = {"Prête", "Livrée"}
+CASHIER_PENDING_STATUSES = PAYABLE_STATUSES | {"PENDING_PAYMENT"}
 
 
 @router.post("/public/{slug}", response_model=OrderPublic, status_code=status.HTTP_201_CREATED)
@@ -90,40 +90,6 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
     return get_order_or_404(db, order.id, restaurant.id)
 
 
-@router.post("/{order_id}/initiate-om", response_model=OrderPublic)
-async def initiate_om_payment_route(
-    order_id: str,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db)
-):
-    order = get_order_or_404(db, order_id, current_user.restaurant_id)
-
-    if order.status in PAID_STATUSES:
-        raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
-    if order.total_amount <= 0:
-        raise HTTPException(status_code=400, detail="Montant invalide")
-
-    payment_result = await initiate_om_payment(
-        amount=float(order.total_amount),
-        phone_number=order.customer_phone,
-        order_number=order.order_number
-    )
-
-    order.transaction_id = payment_result.get("transaction_id")
-    order.payment_status = "En attente"
-    order.payment_method = "Mobile Money"
-
-    log_action(
-        db, current_user, "payment.om_initiate", "order", order.id,
-        f"Paiement OM initie pour {order.order_number}",
-        {"transaction_id": order.transaction_id}
-    )
-
-    db.commit()
-    db.refresh(order)
-    return get_order_or_404(db, order.id, current_user.restaurant_id)
-
-
 @router.get("", response_model=list[OrderPublic])
 def list_orders(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -162,7 +128,7 @@ def cashier_report(
         .filter(CustomerOrder.restaurant_id == current_user.restaurant_id)
     )
     pending_orders = (
-        base_query.filter(CustomerOrder.status.in_(PAYABLE_STATUSES))
+        base_query.filter(CustomerOrder.status.in_(CASHIER_PENDING_STATUSES))
         .order_by(CustomerOrder.created_at.asc())
         .all()
     )
@@ -213,6 +179,8 @@ def validate_cashier_payment(
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
     if order.status in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
+    if order.payment_locked:
+        raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
     if order.status not in PAYABLE_STATUSES:
         raise HTTPException(status_code=400, detail="La caisse ne peut encaisser que les commandes prêtes ou servies")
     previous_status = order.status
@@ -222,6 +190,7 @@ def validate_cashier_payment(
     recalculate_order_total(order)
     deduct_order_packaging_stock(db, order, current_user.id)
     order.status = "Payée"
+    order.payment_status = "SUCCESS"
     sync_table_status(db, order)
     log_action(
         db,
@@ -242,61 +211,6 @@ def validate_cashier_payment(
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
 
-@router.post("/{order_id}/mobile-money-payment", response_model=OrderPublic)
-def validate_mobile_money_payment(
-    order_id: str,
-    payload: MobileMoneyPaymentIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_can_collect_cashier(current_user)
-    order = get_order_or_404(db, order_id, current_user.restaurant_id)
-    if order.status in PAID_STATUSES:
-        raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
-    if order.status not in PAYABLE_STATUSES:
-        raise HTTPException(status_code=400, detail="La caisse ne peut encaisser que les commandes prêtes ou servies")
-
-    previous_status = order.status
-    order.payment_method = f"Mobile Money {payload.operator}"
-    if payload.discount_amount is not None:
-        order.discount_amount = payload.discount_amount
-    order.notes = "\n".join(
-        part for part in [
-            order.notes,
-            f"Paiement {payload.operator}: {payload.transaction_reference} ({payload.phone})",
-        ] if part
-    )
-    recalculate_order_total(order)
-    deduct_order_packaging_stock(db, order, current_user.id)
-    order.status = "Payée"
-    sync_table_status(db, order)
-    notify(
-        db,
-        restaurant_id=current_user.restaurant_id,
-        role=Role.ADMIN.value,
-        title="Paiement Mobile Money validé",
-        message=f"{order.order_number} payé via {payload.operator}. Référence: {payload.transaction_reference}",
-        category="payment",
-        link="/admin/cashier",
-    )
-    log_action(
-        db,
-        current_user,
-        "payment.mobile_money_validate",
-        "order",
-        order.id,
-        f"Paiement Mobile Money {payload.operator} commande {order.order_number}",
-        {
-            "previous_status": previous_status,
-            "operator": payload.operator,
-            "reference": payload.transaction_reference,
-        },
-    )
-    db.commit()
-    db.refresh(order)
-    return get_order_or_404(db, order.id, current_user.restaurant_id)
-
-
 @router.post("/{order_id}/promo", response_model=OrderPublic)
 def apply_promotion_to_order(
     order_id: str,
@@ -308,6 +222,8 @@ def apply_promotion_to_order(
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
     if order.status in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Une facture payée ne peut plus recevoir de code promo")
+    if order.payment_locked:
+        raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
     subtotal = sum(float(item.line_total or 0) for item in order.items) + float(order.delivery_fee or 0)
     promo = (
         db.query(PromotionCode)
@@ -645,6 +561,8 @@ def assert_promo_usable(promo: PromotionCode, order_amount: float) -> None:
 
 
 def assert_status_transition_allowed(user: User, order: CustomerOrder, new_status: str) -> None:
+    if order.payment_locked:
+        raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
     if order.status in PAID_STATUSES and user.role != Role.ADMIN:
         raise HTTPException(status_code=403, detail="Facture payee verrouillee. Seul l'administrateur peut la corriger.")
 
@@ -664,6 +582,8 @@ def assert_status_transition_allowed(user: User, order: CustomerOrder, new_statu
 
 
 def assert_order_edit_allowed(user: User, order: CustomerOrder, payload: OrderUpdateIn) -> None:
+    if order.payment_locked:
+        raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
     if order.status in PAID_STATUSES and user.role != Role.ADMIN:
         raise HTTPException(status_code=403, detail="Facture payee verrouillee. Modification interdite.")
 
@@ -828,7 +748,7 @@ def calculate_packaging_requirements(db: Session, order: CustomerOrder) -> dict[
 def deduct_order_packaging_stock(db: Session, order: CustomerOrder, user_id: str | None) -> None:
     packaging_lines = [item for item in order.items if item.sale_channel == "EMBALLAGE" and item.stock_item_id]
     for line in packaging_lines:
-        packaging = get_item_or_404(db, line.stock_item_id, order.restaurant_id)
+        packaging = get_item_or_404(db, line.stock_item_id, order.restaurant_id, for_update=True)
         consume_fifo(
             db,
             packaging,
@@ -843,7 +763,7 @@ def deduct_order_packaging_stock(db: Session, order: CustomerOrder, user_id: str
     for packaging_id, quantity in calculate_packaging_requirements(db, order).items():
         if quantity <= 0:
             continue
-        packaging = get_item_or_404(db, packaging_id, order.restaurant_id)
+        packaging = get_item_or_404(db, packaging_id, order.restaurant_id, for_update=True)
         consume_fifo(
             db,
             packaging,
@@ -881,7 +801,9 @@ def adjust_recipe_stock(
         .all()
     )
     for link in links:
-        item = get_item_or_404(db, link.stock_item_id, restaurant_id)
+        # Verrou pessimiste: la lecture de quantite et la consommation FIFO doivent
+        # etre atomiques face a des commandes concurrentes sur le meme article.
+        item = get_item_or_404(db, link.stock_item_id, restaurant_id, for_update=True)
         quantity_delta = link.quantity_per_dish * abs(dish_quantity_delta)
         location_quantity = get_location_quantity(item, link.location)
         if dish_quantity_delta > 0 and location_quantity < quantity_delta:

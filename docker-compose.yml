@@ -44,7 +44,7 @@ services:
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
     ports:
-      - "${FRONTEND_PORT:-5178}:5173"
+      - "${FRONTEND_PORT:-5177}:5173"
     depends_on:
       - backend
 

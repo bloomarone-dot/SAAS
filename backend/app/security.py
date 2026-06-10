@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -13,11 +14,25 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"
 PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30"))
 MIN_PASSWORD_LENGTH = 10
 
-if ENVIRONMENT in {"production", "prod"} and (
-    SECRET_KEY in {"", "change-me-in-production", "change-this-secret-in-production"}
-    or len(SECRET_KEY) < 32
-):
-    raise RuntimeError("SECRET_KEY must be set to a strong value in production")
+# Tout secret contenant un de ces motifs est un placeholder de template: on le
+# refuse en production meme s'il respecte la longueur minimale. La detection par
+# motif est plus robuste qu'une liste noire exacte (qui se contourne en ajoutant
+# un caractere a la valeur d'exemple).
+_PLACEHOLDER_SECRET = re.compile(
+    r"change|example|placeholder|secret_32_chars|your[-_]?secret|xxxx|todo",
+    re.IGNORECASE,
+)
+
+
+def _secret_is_weak(secret: str) -> bool:
+    return not secret or len(secret) < 32 or bool(_PLACEHOLDER_SECRET.search(secret))
+
+
+if ENVIRONMENT in {"production", "prod"} and _secret_is_weak(SECRET_KEY):
+    raise RuntimeError(
+        "SECRET_KEY de production invalide: utilisez une valeur aleatoire d'au moins "
+        "32 caracteres (python -c \"import secrets; print(secrets.token_urlsafe(48))\")"
+    )
 
 
 def hash_password(password: str) -> str:
@@ -85,11 +100,12 @@ def _b64decode(payload: str) -> bytes:
     return base64.urlsafe_b64decode(payload + padding)
 
 
-def create_access_token(subject: str) -> str:
-    """Cree un JWT HS256 minimal contenant l'id utilisateur et l'expiration."""
+def create_access_token(subject: str, token_version: int = 0) -> str:
+    """Cree un JWT HS256 minimal contenant l'id utilisateur, la version de jeton
+    (pour la revocation) et l'expiration."""
     header = {"alg": "HS256", "typ": "JWT"}
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": subject, "exp": int(expires_at.timestamp())}
+    payload = {"sub": subject, "ver": int(token_version), "exp": int(expires_at.timestamp())}
 
     signing_input = ".".join(
         [

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
 import { MtnMoneyPayment } from "./MtnMoneyPayment";
 import { OrangeMoneyPayment } from "./OrangeMoneyPayment";
 
@@ -38,19 +38,10 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
 
   useAutoRefresh(() => loadOrders({ silent: true }), 12000, [apiBaseUrl]);
 
-  async function api(path, options = {}) {
-    const token = localStorage.getItem("access_token");
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...(options.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(formatApiError(data?.detail, "Action commande impossible."));
-    return data;
+  // Delegue au client centralise: token, base URL et gestion automatique du 401
+  // (deconnexion propre quand le jeton est expire/revoque cote backend).
+  function api(path, options = {}) {
+    return apiFetch(path, { ...options, fallback: "Action commande impossible." });
   }
 
   async function loadOrders({ silent = false } = {}) {
@@ -390,7 +381,7 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
       {order.notes && <div className="rounded-lg bg-orange-50 p-3 text-sm font-semibold text-orange-700">{order.notes}</div>}
 
       {/* Bouton Orange Money — visible si commande non payée */}
-      {onOrangePay && !["Payée", "Payee", "Annulée"].includes(order.status) && (
+      {onOrangePay && ["Prête", "Livrée"].includes(order.status) && !order.payment_locked && (
         <button
           type="button"
           onClick={() => onOrangePay(order.id)}
@@ -400,7 +391,7 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
           Payer par Orange Money · {money(order.total_amount)}
         </button>
       )}
-      {onMtnPay && !["Payée", "Payee", "Annulée"].includes(order.status) && (
+      {onMtnPay && ["Prête", "Livrée"].includes(order.status) && !order.payment_locked && (
         <button
           type="button"
           onClick={() => onMtnPay(order.id)}
@@ -447,6 +438,7 @@ function StatusBadge({ status }) {
     Prête: "green",
     Livrée: "slate",
     Payée: "green",
+    PENDING_PAYMENT: "orange",
     Annulée: "red",
   };
   return <StatusPill tone={tones[status] ?? "slate"}>{status}</StatusPill>;

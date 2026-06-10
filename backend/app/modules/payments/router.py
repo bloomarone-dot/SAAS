@@ -1,205 +1,60 @@
-"""
-Router paiements — Orange Money Cameroun.
-
-Endpoints :
-  POST   /payments/orange/initiate       Initie un paiement (caisse ou commande)
-  GET    /payments/orange/status/{tx_id} Statut d'une transaction
-  POST   /payments/orange/webhook        Notification asynchrone Orange/Y-Note
-  GET    /payments/transactions          Historique des transactions du restaurant
-"""
-
+import ipaddress
+import json
 import logging
 import os
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.dependencies import assert_permission, require_tenant_user
+from app.tenancy import tenant_get_or_404
 from app.modules.orders.models import CustomerOrder
 from app.modules.payments.models import PaymentTransaction
 from app.modules.payments.mtn_service import (
     MtnPaymentError,
-    check_transaction_status as check_mtn_status,
+    get_mtn_config,
     initiate_cashin as initiate_mtn_cashin,
     is_mtn_configured,
     parse_mtn_status,
 )
 from app.modules.payments.orange_service import (
     OrangePaymentError,
-    check_transaction_status as check_orange_status,
+    get_orange_config,
     initiate_cashin as initiate_orange_cashin,
     is_orange_configured,
     parse_orange_status,
-    safe_json,
 )
+from app.modules.payments.realtime import payment_connections
 from app.modules.payments.schemas import (
     MtnPayInitIn,
     MtnPayInitOut,
-    MtnWebhookIn,
     OrangePayInitIn,
     OrangePayInitOut,
-    OrangeWebhookIn,
     PaymentStatusOut,
+)
+from app.modules.payments.service import (
+    apply_webhook,
+    create_pending_transaction,
+    find_transaction,
+    mark_push_failure,
+    record_push_response,
 )
 from app.modules.permissions.models import Permission
 from app.modules.users.models import User
+from app.security import decode_access_token, verify_hmac_sha256_signature
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
-def _build_notify_url(request: Request, provider: str = "orange") -> str:
-    """Construit l'URL webhook selon le provider (orange ou mtn)."""
-    base = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
-    if not base:
-        base = str(request.base_url).rstrip("/")
+def _build_notify_url(request: Request, provider: str) -> str:
+    base = os.getenv("APP_PUBLIC_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
     return f"{base}/api/v1/payments/{provider}/webhook"
 
 
-# ─── Initier un paiement ─────────────────────────────────────────────────────
-
-@router.post("/orange/initiate", response_model=OrangePayInitOut, status_code=201)
-async def initiate_orange_payment(
-    payload: OrangePayInitIn,
-    request: Request,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Initie un appel de fonds Orange Money USSD push vers le numéro du client.
-    Le client reçoit une notification USSD et valide avec son PIN.
-    """
-    assert_permission(current_user, Permission.CASHIER_UPDATE)
-
-    if not is_orange_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Paiement Orange Money non configuré sur ce serveur. Contactez l'administrateur.",
-        )
-
-    # Récupérer la commande
-    order = db.get(CustomerOrder, payload.order_id)
-    if not order or order.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Commande introuvable")
-
-    if order.status in {"Payée", "Payee"}:
-        raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
-
-    amount = int(order.total_amount)
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Montant invalide")
-
-    notify_url = _build_notify_url(request)
-
-    # Créer la transaction en base (PENDING)
-    tx = PaymentTransaction(
-        restaurant_id=current_user.restaurant_id,
-        order_id=order.id,
-        provider="ORANGE_CM",
-        amount=amount,
-        currency="XAF",
-        payer_msisdn=payload.payer_msisdn,
-        status="PENDING",
-    )
-    db.add(tx)
-    db.commit()
-    db.refresh(tx)
-
-    try:
-        result = await initiate_orange_cashin(
-            amount=amount,
-            payer_msisdn=payload.payer_msisdn,
-            order_ref=tx.id,  # on utilise l'ID transaction comme référence
-            description=f"Commande {order.order_number}",
-            notify_url=notify_url,
-        )
-    except OrangePaymentError as exc:
-        tx.status = "FAILED"
-        tx.failure_reason = str(exc)
-        tx.raw_response = exc.raw[:2000]
-        db.commit()
-        logger.error("Orange Money init failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Erreur Orange Money : {exc}")
-    except Exception as exc:
-        tx.status = "FAILED"
-        tx.failure_reason = str(exc)
-        db.commit()
-        logger.error("Orange Money unexpected error: %s", exc)
-        raise HTTPException(status_code=502, detail="Erreur inattendue lors de l'initiation du paiement")
-
-    # Mettre à jour la transaction avec les infos retournées
-    tx.pay_token = result.get("pay_token") or result.get("payToken")
-    tx.notif_token = result.get("notif_token") or result.get("notifToken")
-    tx.provider_tx_id = result.get("txnid") or result.get("transaction_id")
-    tx.raw_response = safe_json(result)
-    orange_status = parse_orange_status(result)
-    tx.status = orange_status
-    db.commit()
-
-    # Mettre à jour la commande si paiement immédiatement confirmé
-    if orange_status == "SUCCESS":
-        order.payment_method = "Orange Money"
-        order.status = "Payée"
-        db.commit()
-
-    ussd_code = f"*150*{payload.payer_msisdn}#"
-    message_map = {
-        "SUCCESS": "Paiement confirmé avec succès",
-        "PENDING": "Demande envoyée. Le client doit valider le prompt USSD sur son téléphone.",
-        "FAILED": result.get("message", "Échec du paiement"),
-        "CANCELLED": "Paiement annulé",
-        "EXPIRED": "Délai de paiement expiré",
-    }
-
-    return OrangePayInitOut(
-        transaction_id=tx.id,
-        pay_token=tx.pay_token or "",
-        payment_url=result.get("payment_url"),
-        ussd_code=ussd_code,
-        status=tx.status,
-        message=message_map.get(tx.status, "En attente de confirmation"),
-    )
-
-
-# ─── Vérifier le statut ───────────────────────────────────────────────────────
-
-@router.get("/orange/status/{transaction_id}", response_model=PaymentStatusOut)
-async def get_orange_payment_status(
-    transaction_id: str,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Interroge le statut actuel d'une transaction.
-    Rafraîchit depuis l'API Orange si la transaction est encore PENDING.
-    """
-    assert_permission(current_user, Permission.CASHIER_READ)
-
-    tx = db.get(PaymentTransaction, transaction_id)
-    if not tx or tx.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Transaction introuvable")
-
-    # Si PENDING et pay_token disponible → interroger Orange
-    if tx.status == "PENDING" and tx.pay_token:
-        try:
-            result = await check_transaction_status(tx.pay_token)
-            new_status = parse_orange_status(result)
-            if new_status != "PENDING":
-                tx.status = new_status
-                tx.raw_response = safe_json(result)
-                # Mettre à jour la commande si payée
-                if new_status == "SUCCESS" and tx.order_id:
-                    order = db.get(CustomerOrder, tx.order_id)
-                    if order:
-                        order.payment_method = "Orange Money"
-                        order.status = "Payée"
-                db.commit()
-        except Exception as exc:
-            logger.warning("Impossible de vérifier le statut Orange: %s", exc)
-
+def _status_out(tx: PaymentTransaction) -> PaymentStatusOut:
     return PaymentStatusOut(
         transaction_id=tx.id,
         provider_tx_id=tx.provider_tx_id,
@@ -208,63 +63,271 @@ async def get_orange_payment_status(
         currency=tx.currency,
         payer_msisdn=tx.payer_msisdn,
         failure_reason=tx.failure_reason,
+        aggregator_fee=tx.aggregator_fee,
+        bloomar_commission=tx.bloomar_commission,
+        restaurant_net=tx.restaurant_net,
+        webhook_received_at=tx.webhook_received_at,
         created_at=tx.created_at,
         updated_at=tx.updated_at,
     )
 
 
-# ─── Webhook Orange/Y-Note ───────────────────────────────────────────────────
+async def _broadcast(tx: PaymentTransaction, event_name: str) -> None:
+    await payment_connections.broadcast(
+        tx.restaurant_id,
+        {
+            "event": event_name,
+            "transaction_id": tx.id,
+            "order_id": tx.order_id,
+            "provider": tx.provider,
+            "status": tx.status,
+            "amount": tx.amount,
+        },
+    )
 
-@router.post("/orange/webhook", status_code=200)
-async def orange_webhook(
+
+def _load_payable_order(db: Session, order_id: str, restaurant_id: str) -> CustomerOrder:
+    order = (
+        db.query(CustomerOrder)
+        .filter(CustomerOrder.id == order_id, CustomerOrder.restaurant_id == restaurant_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Commande introuvable")
+    if order.status in {"Payée", "Payee"}:
+        raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
+    if float(order.total_amount or 0) <= 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    return order
+
+
+async def _initiate(
+    *,
+    provider: str,
+    payload,
     request: Request,
-    background_tasks: BackgroundTasks,
+    current_user: User,
+    db: Session,
+) -> tuple[PaymentTransaction, dict]:
+    order = _load_payable_order(db, payload.order_id, current_user.restaurant_id)
+    try:
+        tx = create_pending_transaction(
+            db,
+            order,
+            provider,
+            payload.payer_msisdn,
+            current_user.id,
+            current_user.role.value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    await _broadcast(tx, "payment_method_selected")
+    try:
+        if provider == "ORANGE_CM":
+            result = await initiate_orange_cashin(
+                amount=int(tx.amount),
+                payer_msisdn=payload.payer_msisdn,
+                order_ref=tx.id,
+                description=f"Commande {order.order_number}",
+                notify_url=_build_notify_url(request, "orange"),
+            )
+            parsed_status = parse_orange_status(result)
+        else:
+            result = await initiate_mtn_cashin(
+                amount=int(tx.amount),
+                payer_msisdn=payload.payer_msisdn,
+                order_ref=tx.id,
+                description=f"Commande {order.order_number}",
+                notify_url=_build_notify_url(request, "mtn"),
+            )
+            parsed_status = parse_mtn_status(result)
+    except (OrangePaymentError, MtnPaymentError) as exc:
+        mark_push_failure(db, tx, str(exc), getattr(exc, "raw", ""))
+        await _broadcast(tx, "payment_failed")
+        raise HTTPException(status_code=502, detail=f"Erreur Mobile Money : {exc}") from exc
+    except Exception as exc:
+        mark_push_failure(db, tx, str(exc))
+        await _broadcast(tx, "payment_failed")
+        logger.exception("Erreur inattendue pendant l'initiation Mobile Money")
+        raise HTTPException(
+            status_code=502,
+            detail="Erreur inattendue lors de l'initiation du paiement",
+        ) from exc
+
+    record_push_response(db, tx, result, parsed_status)
+    db.refresh(tx)
+    if tx.status == "PENDING":
+        await _broadcast(tx, "payment_pending")
+    else:
+        await _broadcast(tx, "payment_failed")
+    return tx, result
+
+
+@router.post("/orange/initiate", response_model=OrangePayInitOut, status_code=201)
+async def initiate_orange_payment(
+    payload: OrangePayInitIn,
+    request: Request,
+    current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Endpoint de notification asynchrone appelé par Orange/Y-Note.
-    Orange envoie le résultat final de la transaction ici.
-    """
+    assert_permission(current_user, Permission.CASHIER_UPDATE)
+    if not is_orange_configured():
+        raise HTTPException(status_code=503, detail="Paiement Orange Money non configuré")
+    tx, result = await _initiate(
+        provider="ORANGE_CM",
+        payload=payload,
+        request=request,
+        current_user=current_user,
+        db=db,
+    )
+    return OrangePayInitOut(
+        transaction_id=tx.id,
+        pay_token=tx.pay_token or "",
+        payment_url=result.get("payment_url"),
+        status=tx.status,
+        message=(
+            "Demande envoyée. La facture est verrouillée jusqu'au webhook de confirmation."
+            if tx.status == "PENDING"
+            else tx.failure_reason or "Échec du paiement"
+        ),
+    )
+
+
+@router.post("/mtn/initiate", response_model=MtnPayInitOut, status_code=201)
+async def initiate_mtn_payment(
+    payload: MtnPayInitIn,
+    request: Request,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_permission(current_user, Permission.CASHIER_UPDATE)
+    if not is_mtn_configured():
+        raise HTTPException(status_code=503, detail="Paiement MTN Mobile Money non configuré")
+    tx, result = await _initiate(
+        provider="MTN_CM",
+        payload=payload,
+        request=request,
+        current_user=current_user,
+        db=db,
+    )
+    return MtnPayInitOut(
+        transaction_id=tx.id,
+        pay_token=tx.pay_token or "",
+        payment_url=result.get("payment_url"),
+        status=tx.status,
+        message=(
+            "Demande envoyée. La facture est verrouillée jusqu'au webhook de confirmation."
+            if tx.status == "PENDING"
+            else tx.failure_reason or "Échec du paiement"
+        ),
+    )
+
+
+@router.get("/{provider}/status/{transaction_id}", response_model=PaymentStatusOut)
+def get_payment_status(
+    provider: str,
+    transaction_id: str,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_permission(current_user, Permission.CASHIER_READ)
+    expected_provider = {"orange": "ORANGE_CM", "mtn": "MTN_CM"}.get(provider.lower())
+    if not expected_provider:
+        raise HTTPException(status_code=404, detail="Opérateur inconnu")
+    # Chargement scope tenant: jamais de db.get() nu sur une entite metier.
+    tx = tenant_get_or_404(
+        db,
+        PaymentTransaction,
+        transaction_id,
+        current_user.restaurant_id,
+        detail="Transaction introuvable",
+    )
+    if tx.provider != expected_provider:
+        raise HTTPException(status_code=404, detail="Transaction introuvable")
+    # Lecture base uniquement: cette route ne peut jamais valider un paiement.
+    return _status_out(tx)
+
+
+def _allowed_source(request: Request, provider: str) -> bool:
+    raw_allowlist = os.getenv(f"{provider}_WEBHOOK_ALLOWED_IPS", "").strip()
+    if not raw_allowlist:
+        return True
+    source = request.client.host if request.client else ""
     try:
-        body = await request.json()
-    except Exception:
-        body = {}
+        address = ipaddress.ip_address(source)
+        return any(
+            address in ipaddress.ip_network(item.strip(), strict=False)
+            for item in raw_allowlist.split(",")
+            if item.strip()
+        )
+    except ValueError:
+        return False
 
-    logger.info("Orange webhook received: %s", str(body)[:500])
 
-    # Identifier la transaction par pay_token ou txnid
-    pay_token = body.get("pay_token") or body.get("payToken")
-    txnid = body.get("txnid") or body.get("transaction_id")
+async def _process_webhook(
+    request: Request,
+    db: Session,
+    provider: str,
+    secret: str,
+    parse_status,
+) -> dict:
+    if not secret:
+        raise HTTPException(status_code=503, detail="Secret webhook non configuré")
+    if not _allowed_source(request, provider):
+        raise HTTPException(status_code=403, detail="Provenance webhook non autorisée")
+    raw_body = await request.body()
+    signature = (
+        request.headers.get("x-webhook-signature")
+        or request.headers.get("x-signature")
+        or request.headers.get("x-hub-signature-256")
+        or ""
+    )
+    if not verify_hmac_sha256_signature(raw_body, signature, secret):
+        raise HTTPException(status_code=401, detail="Signature webhook invalide")
+    try:
+        body = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Payload webhook invalide") from exc
 
-    tx = None
-    if pay_token:
-        tx = db.query(PaymentTransaction).filter(PaymentTransaction.pay_token == pay_token).first()
-    if not tx and txnid:
-        tx = db.query(PaymentTransaction).filter(PaymentTransaction.provider_tx_id == txnid).first()
-
+    provider_code = f"{provider}_CM"
+    tx = find_transaction(db, provider_code, body)
     if not tx:
-        # Transaction inconnue — on logue et on retourne 200 pour éviter les retransmissions
-        logger.warning("Orange webhook: transaction inconnue pay_token=%s txnid=%s", pay_token, txnid)
-        return {"received": True}
+        logger.warning("%s webhook: transaction inconnue", provider)
+        return {"received": True, "matched": False}
 
-    new_status = parse_orange_status(body)
-    tx.status = new_status
-    tx.provider_tx_id = txnid or tx.provider_tx_id
-    tx.raw_response = safe_json(body)
-    tx.updated_at = datetime.utcnow()
-
-    if new_status == "SUCCESS" and tx.order_id:
-        order = db.get(CustomerOrder, tx.order_id)
-        if order and order.status not in {"Payée", "Payee"}:
-            order.payment_method = "Orange Money"
-            order.status = "Payée"
-            logger.info("Commande %s marquée Payée via webhook Orange", order.order_number)
-
-    db.commit()
-    return {"received": True}
+    changed = apply_webhook(db, tx, body, parse_status(body))
+    db.refresh(tx)
+    if changed:
+        event = "payment_success" if tx.status == "SUCCESS" else (
+            "payment_failed" if tx.status in {"FAILED", "CANCELLED", "EXPIRED"} else "payment_pending"
+        )
+        await _broadcast(tx, event)
+    return {"received": True, "matched": True}
 
 
-# ─── Historique des transactions ─────────────────────────────────────────────
+@router.post("/orange/webhook")
+async def orange_webhook(request: Request, db: Session = Depends(get_db)):
+    return await _process_webhook(
+        request,
+        db,
+        "ORANGE",
+        get_orange_config()["webhook_secret"],
+        parse_orange_status,
+    )
+
+
+@router.post("/mtn/webhook")
+async def mtn_webhook(request: Request, db: Session = Depends(get_db)):
+    return await _process_webhook(
+        request,
+        db,
+        "MTN",
+        get_mtn_config()["webhook_secret"],
+        parse_mtn_status,
+    )
+
 
 @router.get("/transactions", response_model=list[PaymentStatusOut])
 def list_transactions(
@@ -274,12 +337,9 @@ def list_transactions(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    """Liste les transactions de paiement du restaurant (30 derniers jours par défaut)."""
     assert_permission(current_user, Permission.ACCOUNTING_READ)
-
     end = end_date or datetime.utcnow()
-    start = start_date or (end - timedelta(days=30))
-
+    start = start_date or end - timedelta(days=30)
     query = db.query(PaymentTransaction).filter(
         PaymentTransaction.restaurant_id == current_user.restaurant_id,
         PaymentTransaction.created_at >= start,
@@ -287,217 +347,30 @@ def list_transactions(
     )
     if status:
         query = query.filter(PaymentTransaction.status == status.upper())
-
-    transactions = query.order_by(PaymentTransaction.created_at.desc()).limit(200).all()
-
-    return [
-        PaymentStatusOut(
-            transaction_id=tx.id,
-            provider_tx_id=tx.provider_tx_id,
-            status=tx.status,
-            amount=tx.amount,
-            currency=tx.currency,
-            payer_msisdn=tx.payer_msisdn,
-            failure_reason=tx.failure_reason,
-            created_at=tx.created_at,
-            updated_at=tx.updated_at,
-        )
-        for tx in transactions
-    ]
+    return [_status_out(tx) for tx in query.order_by(PaymentTransaction.created_at.desc()).limit(200)]
 
 
-# ─── Initier un paiement MTN ─────────────────────────────────────────────────
-
-@router.post("/mtn/initiate", response_model=MtnPayInitOut, status_code=201)
-async def initiate_mtn_payment(
-    payload: MtnPayInitIn,
-    request: Request,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Initie un appel de fonds MTN Mobile Money USSD push vers le numéro du client.
-    Le client reçoit une notification USSD et valide avec son PIN.
-    """
-    assert_permission(current_user, Permission.CASHIER_UPDATE)
-
-    if not is_mtn_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Paiement MTN Money non configuré sur ce serveur. Contactez l'administrateur.",
-        )
-
-    order = db.get(CustomerOrder, payload.order_id)
-    if not order or order.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Commande introuvable")
-
-    if order.status in {"Payée", "Payee"}:
-        raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
-
-    amount = int(order.total_amount)
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Montant invalide")
-
-    notify_url = _build_notify_url(request)
-
-    tx = PaymentTransaction(
-        restaurant_id=current_user.restaurant_id,
-        order_id=order.id,
-        provider="MTN_CM",
-        amount=amount,
-        currency="XAF",
-        payer_msisdn=payload.payer_msisdn,
-        status="PENDING",
-    )
-    db.add(tx)
-    db.commit()
-    db.refresh(tx)
-
+@router.websocket("/ws")
+async def payment_websocket(websocket: WebSocket, token: str = Query(default="")):
+    payload = decode_access_token(token)
+    user_id = payload.get("sub") if payload else None
+    db = SessionLocal()
     try:
-        result = await initiate_mtn_cashin(
-            amount=amount,
-            payer_msisdn=payload.payer_msisdn,
-            order_ref=tx.id,
-            description=f"Commande {order.order_number}",
-            notify_url=notify_url,
+        user = db.get(User, user_id) if user_id else None
+        token_revoked = user is not None and int(payload.get("ver", 0)) != int(
+            getattr(user, "token_version", 0) or 0
         )
-    except MtnPaymentError as exc:
-        tx.status = "FAILED"
-        tx.failure_reason = str(exc)
-        tx.raw_response = exc.raw[:2000]
-        db.commit()
-        logger.error("MTN Money init failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Erreur MTN Money : {exc}")
-    except Exception as exc:
-        tx.status = "FAILED"
-        tx.failure_reason = str(exc)
-        db.commit()
-        logger.error("MTN Money unexpected error: %s", exc)
-        raise HTTPException(status_code=502, detail="Erreur inattendue lors de l'initiation du paiement")
+        if not user or not user.is_active or not user.restaurant_id or token_revoked:
+            await websocket.close(code=4401)
+            return
+        restaurant_id = user.restaurant_id
+    finally:
+        db.close()
 
-    tx.pay_token = result.get("pay_token") or result.get("payToken")
-    tx.notif_token = result.get("notif_token") or result.get("notifToken")
-    tx.provider_tx_id = result.get("txnid") or result.get("transaction_id")
-    tx.raw_response = safe_json(result)
-    mtn_status = parse_mtn_status(result)
-    tx.status = mtn_status
-    db.commit()
-
-    if mtn_status == "SUCCESS":
-        order.payment_method = "MTN Money"
-        order.status = "Payée"
-        db.commit()
-
-    ussd_code = f"*150*{payload.payer_msisdn}#"
-    message_map = {
-        "SUCCESS": "Paiement confirmé avec succès",
-        "PENDING": "Demande envoyée. Le client doit valider le prompt USSD sur son téléphone.",
-        "FAILED": result.get("message", "Échec du paiement"),
-        "CANCELLED": "Paiement annulé",
-        "EXPIRED": "Délai de paiement expiré",
-    }
-
-    return MtnPayInitOut(
-        transaction_id=tx.id,
-        pay_token=tx.pay_token or "",
-        payment_url=result.get("payment_url"),
-        ussd_code=ussd_code,
-        status=tx.status,
-        message=message_map.get(tx.status, "En attente de confirmation"),
-    )
-
-
-# ─── Vérifier le statut MTN ──────────────────────────────────────────────────
-
-@router.get("/mtn/status/{transaction_id}", response_model=PaymentStatusOut)
-async def get_mtn_payment_status(
-    transaction_id: str,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Interroge le statut actuel d'une transaction MTN.
-    Rafraîchit depuis l'API MTN si la transaction est encore PENDING.
-    """
-    assert_permission(current_user, Permission.CASHIER_READ)
-
-    tx = db.get(PaymentTransaction, transaction_id)
-    if not tx or tx.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Transaction introuvable")
-
-    if tx.status == "PENDING" and tx.pay_token:
-        try:
-            result = await check_mtn_status(tx.pay_token)
-            new_status = parse_mtn_status(result)
-            if new_status != "PENDING":
-                tx.status = new_status
-                tx.raw_response = safe_json(result)
-                if new_status == "SUCCESS" and tx.order_id:
-                    order = db.get(CustomerOrder, tx.order_id)
-                    if order:
-                        order.payment_method = "MTN Money"
-                        order.status = "Payée"
-                db.commit()
-        except Exception as exc:
-            logger.warning("Impossible de vérifier le statut MTN: %s", exc)
-
-    return PaymentStatusOut(
-        transaction_id=tx.id,
-        provider_tx_id=tx.provider_tx_id,
-        status=tx.status,
-        amount=tx.amount,
-        currency=tx.currency,
-        payer_msisdn=tx.payer_msisdn,
-        failure_reason=tx.failure_reason,
-        created_at=tx.created_at,
-        updated_at=tx.updated_at,
-    )
-
-
-# ─── Webhook MTN/Y-Note ───────────────────────────────────────────────────────
-
-@router.post("/mtn/webhook", status_code=200)
-async def mtn_webhook(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-):
-    """
-    Endpoint de notification asynchrone appelé par MTN/Y-Note.
-    MTN envoie le résultat final de la transaction ici.
-    """
+    await payment_connections.connect(restaurant_id, websocket)
     try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    logger.info("MTN webhook received: %s", str(body)[:500])
-
-    pay_token = body.get("pay_token") or body.get("payToken")
-    txnid = body.get("txnid") or body.get("transaction_id")
-
-    tx = None
-    if pay_token:
-        tx = db.query(PaymentTransaction).filter(PaymentTransaction.pay_token == pay_token, PaymentTransaction.provider == "MTN_CM").first()
-    if not tx and txnid:
-        tx = db.query(PaymentTransaction).filter(PaymentTransaction.provider_tx_id == txnid, PaymentTransaction.provider == "MTN_CM").first()
-
-    if not tx:
-        logger.warning("MTN webhook: transaction inconnue pay_token=%s txnid=%s", pay_token, txnid)
-        return {"received": True}
-
-    new_status = parse_mtn_status(body)
-    tx.status = new_status
-    tx.provider_tx_id = txnid or tx.provider_tx_id
-    tx.raw_response = safe_json(body)
-    tx.updated_at = datetime.utcnow()
-
-    if new_status == "SUCCESS" and tx.order_id:
-        order = db.get(CustomerOrder, tx.order_id)
-        if order and order.status not in {"Payée", "Payee"}:
-            order.payment_method = "MTN Money"
-            order.status = "Payée"
-            logger.info("Commande %s marquée Payée via webhook MTN", order.order_number)
-
-    db.commit()
-    return {"received": True}
+        await websocket.send_json({"event": "payment_stream_ready"})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await payment_connections.disconnect(restaurant_id, websocket)

@@ -26,6 +26,11 @@ def get_current_user(
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Utilisateur invalide")
 
+    # Revocation: un jeton emis avant un reset de mot de passe ou une deconnexion
+    # globale porte une version anterieure et n'est plus accepte.
+    if int(payload.get("ver", 0)) != int(getattr(user, "token_version", 0) or 0):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expirée")
+
     return user
 
 

@@ -1,7 +1,7 @@
 /**
  * MtnMoneyPayment
  * Composant de paiement MTN Mobile Money pour la caisse.
- * Initie un appel de fonds USSD push et poll le statut toutes les 5 secondes.
+ * Initie un appel de fonds USSD push et relit l'état persisté toutes les 5 secondes.
  */
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle, Loader2, Phone, RefreshCw, XCircle } from "lucide-react";
@@ -120,8 +120,7 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
 
       if (count >= MAX_POLLS) {
         clearInterval(pollRef.current);
-        setStep("failed");
-        setError("Délai d'attente dépassé. Vérifiez auprès du client.");
+        setError("Confirmation toujours en attente. Utilisez Rafraîchir pour reprendre la vérification.");
       }
     }, POLL_INTERVAL_MS);
   }
@@ -253,16 +252,8 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
               <RefreshCw size={14} />
               Rafraîchir
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                clearInterval(pollRef.current);
-                setStep("failed");
-                setError("Paiement annulé manuellement.");
-              }}
-              className="flex-1 rounded-xl border border-red-100 py-2.5 text-sm font-bold text-red-500 hover:bg-red-50 transition"
-            >
-              Annuler
+            <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 transition">
+              Fermer
             </button>
           </div>
         </div>

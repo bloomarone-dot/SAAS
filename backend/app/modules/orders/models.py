@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -28,6 +28,8 @@ class CustomerOrder(Base):
     payment_method: Mapped[str] = mapped_column(String(40), default="Paiement à la livraison", nullable=False)
     payment_status: Mapped[str] = mapped_column(String(40), default="En attente", nullable=False)
     transaction_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payment_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    payment_previous_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     discount_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     delivery_fee: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     total_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
