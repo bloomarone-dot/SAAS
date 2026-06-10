@@ -32,6 +32,7 @@ const SuperadminActivation = lazyNamed(loadSuperadminSections, "SuperadminActiva
 const SuperadminGlobalStats = lazyNamed(loadSuperadminSections, "SuperadminGlobalStats");
 const SuperadminOwners = lazyNamed(loadSuperadminSections, "SuperadminOwners");
 const SuperadminPayments = lazyNamed(loadSuperadminSections, "SuperadminPayments");
+const SuperadminPlatform = lazyNamed(loadSuperadminSections, "SuperadminPlatform");
 const SuperadminPlatformActivity = lazyNamed(loadSuperadminSections, "SuperadminPlatformActivity");
 const SuperadminSettings = lazyNamed(loadSuperadminSections, "SuperadminSettings");
 const SuperadminSubscriptions = lazyNamed(loadSuperadminSections, "SuperadminSubscriptions");
@@ -677,7 +678,14 @@ export default function App() {
     }
 
     if (activeView === "platform") {
-      return <SuperadminSettings apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+      return (
+        <SuperadminPlatform
+          apiBaseUrl={apiBaseUrl}
+          restaurants={restaurants}
+          onMessage={setMessage}
+          onRefreshRestaurants={fetchRestaurants}
+        />
+      );
     }
 
     if (activeView === "stats") {

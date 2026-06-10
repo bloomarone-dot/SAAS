@@ -328,7 +328,7 @@ export function optionalText(value) {
   return trimmed || null;
 }
 
-async function platformApi(apiBaseUrl, path, options = {}) {
+export async function platformApi(apiBaseUrl, path, options = {}) {
   const token = localStorage.getItem("access_token");
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...options,
@@ -465,7 +465,7 @@ export function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-const subscriptionExportColumns = [
+export const subscriptionExportColumns = [
   { label: "Restaurant", value: (row) => row.restaurant_name },
   { label: "Tenant", value: (row) => row.restaurant_slug },
   { label: "Plan", value: (row) => row.plan },
@@ -475,13 +475,13 @@ const subscriptionExportColumns = [
   { label: "Renouvellement", value: (row) => row.renewal_date },
 ];
 
-const platformExportColumns = [
+export const platformExportColumns = [
   { label: "Service", value: (row) => row.label },
   { label: "Etat", value: (row) => row.value },
   { label: "Statut", value: (row) => row.status },
 ];
 
-const paymentExportColumns = [
+export const paymentExportColumns = [
   { label: "Reference", value: (row) => row.reference },
   { label: "Restaurant", value: (row) => row.restaurant_name },
   { label: "Tenant", value: (row) => row.restaurant_slug },
@@ -492,7 +492,7 @@ const paymentExportColumns = [
   { label: "Methode", value: (row) => row.method },
 ];
 
-const ownerExportColumns = [
+export const ownerExportColumns = [
   { label: "Restaurant", value: (row) => row.restaurant },
   { label: "Tenant", value: (row) => row.tenant },
   { label: "Email", value: (row) => row.email },

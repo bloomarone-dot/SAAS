@@ -143,6 +143,7 @@ export const APP_MENUS = {
       key: "restaurants",
       label: "Restaurants",
       icon: "Store",
+      defaultView: "restaurants",
       children: [
         { key: "restaurants", label: "Liste restaurants", icon: "Store" },
         {
@@ -159,6 +160,7 @@ export const APP_MENUS = {
       key: "subscriptions",
       label: "Abonnements",
       icon: "ReceiptText",
+      defaultView: "subscriptions",
       children: [
         { key: "subscriptions", label: "Forfaits", icon: "ReceiptText" },
         { key: "payments", label: "Paiements SaaS", icon: "Wallet" },
@@ -168,7 +170,9 @@ export const APP_MENUS = {
       key: "platform",
       label: "Plateforme",
       icon: "BarChart3",
+      defaultView: "platform",
       children: [
+        { key: "platform", label: "Supervision plateforme", icon: "Activity" },
         { key: "stats", label: "Statistiques globales", icon: "BarChart3" },
         { key: "activity", label: "Journal plateforme", icon: "History" },
       ],

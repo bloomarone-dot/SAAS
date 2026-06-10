@@ -101,13 +101,14 @@ export function DashboardLayout({
           <button
             type="button"
             onClick={() => {
-              navigateTo(item.key);
               if (hasChildren && !isCollapsedMenu) {
                 setOpenMenuKeys((current) => ({
                   ...current,
                   [item.key]: !isExpanded,
                 }));
+                return;
               }
+              navigateTo(item.defaultView ?? item.key);
             }}
             title={isCollapsedMenu ? item.label : undefined}
             className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition-all ${

@@ -42,7 +42,8 @@ services:
     container_name: restaurant_saas_frontend
     restart: unless-stopped
     environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
+      VITE_API_URL: ${VITE_API_URL:-/}
+      VITE_API_PROXY_TARGET: http://backend:8000
     ports:
       - "${FRONTEND_PORT:-5177}:5173"
     depends_on:
