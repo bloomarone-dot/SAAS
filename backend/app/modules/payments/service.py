@@ -80,6 +80,7 @@ def create_pending_transaction(
     order.payment_status = "PENDING"
     order.payment_locked = True
     order.payment_method = "Orange Money" if provider == "ORANGE_CM" else "MTN Mobile Money"
+    order.cashier_id = user_id
     db.add(tx)
     try:
         db.flush()

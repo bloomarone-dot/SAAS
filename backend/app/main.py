@@ -206,6 +206,7 @@ def ensure_restaurant_settings_columns() -> None:
         "payment_methods": "VARCHAR(255) NULL",
         "delivery_fee": "FLOAT NOT NULL DEFAULT 0",
         "website_url": "VARCHAR(500) NULL",
+        "nui": "VARCHAR(100) NULL",
         "tax_id": "VARCHAR(100) NULL",
         "legal_name": "VARCHAR(191) NULL",
     }
@@ -231,6 +232,7 @@ def ensure_order_columns() -> None:
         "cancelled_at": "DATETIME NULL",
         "table_id": "INTEGER NULL",
         "server_id": "VARCHAR(36) NULL",
+        "cashier_id": "VARCHAR(36) NULL",
         "party_size": "INTEGER NOT NULL DEFAULT 1",
         "payment_status": "VARCHAR(40) NOT NULL DEFAULT 'En attente'",
         "transaction_id": "VARCHAR(100) NULL",

@@ -17,6 +17,7 @@ class CustomerOrder(Base):
     branch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("branches.id"), index=True, nullable=True)
     table_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("restaurant_tables.id"), index=True, nullable=True)
     server_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
+    cashier_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
     party_size: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     order_number: Mapped[str] = mapped_column(String(40), unique=True, index=True, nullable=False)
     customer_name: Mapped[str] = mapped_column(String(160), nullable=False)

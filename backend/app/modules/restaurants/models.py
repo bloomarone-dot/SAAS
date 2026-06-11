@@ -29,6 +29,7 @@ class Restaurant(Base):
     payment_methods: Mapped[str | None] = mapped_column(String(255), nullable=True)
     delivery_fee: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     website_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    nui: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tax_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     legal_name: Mapped[str | None] = mapped_column(String(191), nullable=True)
     primary_color: Mapped[str] = mapped_column(String(20), default="#E4572E", nullable=False)

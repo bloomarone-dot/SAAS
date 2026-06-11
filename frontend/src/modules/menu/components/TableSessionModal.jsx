@@ -66,16 +66,18 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl">
-        <div className="flex items-center justify-between bg-[#070528] p-4 text-white">
+    <section className="overflow-hidden rounded border-t-4 border-t-[var(--dashboard-primary)] bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 p-4">
           <div>
-            <h3 className="text-lg font-black">Table {table.name || table.number}</h3>
-            <p className="text-xs font-semibold text-white/70">
+            <p className="text-xs font-bold uppercase text-[var(--dashboard-primary)]">Ouverture de commande</p>
+            <h3 className="mt-1 text-lg font-bold text-slate-800">Table {table.name || table.number}</h3>
+            <p className="text-xs font-semibold text-slate-500">
               {table.room || 'Rez-de-chaussée'} · {occupiedSeats}/{table.capacity} place(s) occupée(s) · {freeSeats} libre(s)
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-2xl font-black text-white/70 hover:text-white">&times;</button>
+          <button type="button" onClick={onClose} className="h-9 rounded border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600 hover:text-slate-900">
+            Fermer
+          </button>
         </div>
 
         <div className="space-y-5 p-6">
@@ -131,7 +133,7 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
                   max={Math.max(1, freeSeats)}
                   value={partySize}
                   onChange={(event) => setPartySize(event.target.value)}
-                  className="h-11 w-28 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-800 outline-none focus:border-[#f04438]"
+                  className="h-11 w-28 rounded border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-[var(--dashboard-primary)]"
                 />
                 <p className={`text-sm font-bold ${canCreateOrder ? 'text-emerald-700' : 'text-red-600'}`}>
                   {canCreateOrder
@@ -147,21 +149,20 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
               type="button"
               onClick={createSeparateOrder}
               disabled={!canCreateOrder || loading || freeSeats <= 0}
-              className="h-11 rounded-lg bg-[#f04438] px-4 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-11 rounded bg-[var(--dashboard-primary)] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               {otherServerOrders.length > 0 ? 'Oui' : 'Ouvrir une commande'}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="h-11 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-700"
+              className="h-11 rounded border border-slate-200 px-4 text-sm font-bold text-slate-700"
             >
               Annuler
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </section>
   );
 }
 

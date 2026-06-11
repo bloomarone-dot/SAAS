@@ -189,6 +189,7 @@ def validate_cashier_payment(
         order.discount_amount = payload.discount_amount
     recalculate_order_total(order)
     deduct_order_packaging_stock(db, order, current_user.id)
+    order.cashier_id = current_user.id
     order.status = "Payée"
     order.payment_status = "SUCCESS"
     sync_table_status(db, order)
@@ -617,21 +618,28 @@ def get_order_or_404(db: Session, order_id: str, restaurant_id: str) -> Customer
 
 
 def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
-    server_ids = {order.server_id for order in orders if order.server_id}
+    user_ids = {
+        user_id
+        for order in orders
+        for user_id in (order.server_id, order.cashier_id)
+        if user_id
+    }
     table_ids = {order.table_id for order in orders if order.table_id}
     users = {
         user.id: user
-        for user in db.query(User).filter(User.id.in_(server_ids)).all()
-    } if server_ids else {}
+        for user in db.query(User).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
     tables = {
         table.id: table
         for table in db.query(TableModel).filter(TableModel.id.in_(table_ids)).all()
     } if table_ids else {}
     for order in orders:
         server = users.get(order.server_id)
+        cashier = users.get(order.cashier_id)
         table = tables.get(order.table_id)
         order.order_source = "Présentiel" if order.table_id or order.fulfillment_type == "Sur place" else "En ligne"
         order.server_name = f"{server.first_name} {server.last_name}" if server else None
+        order.cashier_name = f"{cashier.first_name} {cashier.last_name}" if cashier else None
         order.table_name = table.number if table else None
         order.table_room = table.room if table else None
 

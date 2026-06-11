@@ -21,20 +21,21 @@ export function DashboardLayout({
   const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
   const roleMeta = getRoleMeta(role);
   const isSuperadmin = role === "SUPERADMIN";
-  const primary =
-    isSuperadmin ? "#a855f7" : (theme?.primary ?? "#078d50");
+  const primary = isSuperadmin ? "#a855f7" : "#FF6347";
   const secondary =
     isSuperadmin ? "#020617" : (theme?.secondary ?? "#003f2f");
   const accent = isSuperadmin ? "#06b6d4" : primary;
-  const sidebarBackground = isSuperadmin ? "#020617" : "#ffffff";
-  const sidebarText = isSuperadmin ? "#ffffff" : secondary;
-  const sidebarMutedText = isSuperadmin ? "rgba(255,255,255,0.6)" : "#64748b";
-  const sidebarBorder = isSuperadmin ? "rgba(255,255,255,0.15)" : "rgba(148,163,184,0.28)";
+  const sidebarBackground = isSuperadmin ? "#1e293b" : "#ffffff";
+  const sidebarText = isSuperadmin ? "#ffffff" : "#334155";
+  const sidebarMutedText = isSuperadmin ? "rgba(255,255,255,0.62)" : "#94a3b8";
+  const sidebarBorder = isSuperadmin ? "rgba(255,255,255,0.12)" : "#e2e8f0";
   const displayName =
     isSuperadmin ? "Bl∞marone" : (theme?.name ?? "Le Bon Coin");
   const sidebarLogo = isSuperadmin ? "/logoB.png" : "/logo.jpeg";
   const sidebarLogoAlt =
     isSuperadmin ? "Logo plateforme" : "Logo restaurant";
+  const activeMenu = findActiveMenu(menus, activeView);
+  const pageTitle = activeMenu?.label ?? "Tableau de bord";
 
   useEffect(() => {
     loadNotifications();
@@ -117,17 +118,21 @@ export function DashboardLayout({
               isActive
                 ? ""
                 : isSuperadmin
-                  ? "text-white/85 hover:bg-white/10 hover:text-white"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                  ? "text-white/75 hover:bg-white/10 hover:text-white"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
             }`}
             style={
               isActive
                 ? isSuperadmin
-                  ? { backgroundColor: primary, color: "white" }
+                  ? {
+                      backgroundColor: "rgba(15,23,42,0.35)",
+                      color: "white",
+                      boxShadow: `inset 4px 0 0 ${primary}`,
+                    }
                   : {
-                      backgroundColor: `color-mix(in srgb, ${primary} 12%, white)`,
-                      color: secondary,
-                      boxShadow: `inset 3px 0 0 ${primary}`,
+                      backgroundColor: "rgba(255,99,71,0.1)",
+                      color: "#FF6347",
+                      boxShadow: "inset 4px 0 0 #FF6347",
                     }
                 : undefined
             }
@@ -161,19 +166,19 @@ export function DashboardLayout({
                       isChildActive
                         ? ""
                         : isSuperadmin
-                          ? "text-white/65 hover:bg-white/10 hover:text-white"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                          ? "text-white/60 hover:bg-white/10 hover:text-white"
+                          : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                     }`}
                     style={
                       isChildActive
                         ? isSuperadmin
                           ? {
-                              backgroundColor: "rgba(255,255,255,0.14)",
+                              backgroundColor: "rgba(255,255,255,0.12)",
                               color: "white",
                             }
                           : {
-                              backgroundColor: `color-mix(in srgb, ${primary} 9%, white)`,
-                              color: secondary,
+                              backgroundColor: "rgba(255,99,71,0.08)",
+                              color: "#FF6347",
                             }
                         : undefined
                     }
@@ -192,7 +197,7 @@ export function DashboardLayout({
 
   return (
     <div
-      className={`flex min-h-screen bg-white text-[#101828] app-theme ${role === "SUPERADMIN" ? "superadmin-theme" : "tenant-theme"}`}
+      className={`flex h-screen max-h-screen overflow-hidden bg-[#ecf0f5] text-slate-700 app-theme ${role === "SUPERADMIN" ? "superadmin-theme" : "tenant-theme"}`}
       style={{
         "--dashboard-primary": primary,
         "--dashboard-secondary": secondary,
@@ -200,22 +205,23 @@ export function DashboardLayout({
       }}
     >
       <aside
-        className={`hidden shrink-0 border-r py-8 transition-all duration-200 lg:flex lg:flex-col ${isCollapsed ? "w-[86px] px-4" : "w-[252px] px-5"}`}
+        className={`hidden shrink-0 border-r transition-all duration-200 lg:flex lg:flex-col ${isCollapsed ? "w-[60px]" : "w-60"}`}
         style={{
           background: isSuperadmin
-            ? `linear-gradient(180deg, ${sidebarBackground}, color-mix(in srgb, ${sidebarBackground} 82%, black))`
-            : `linear-gradient(180deg, #ffffff, color-mix(in srgb, ${primary} 4%, white))`,
+            ? `linear-gradient(180deg, ${sidebarBackground}, color-mix(in srgb, ${sidebarBackground} 78%, black))`
+            : sidebarBackground,
           borderColor: sidebarBorder,
           color: sidebarText,
         }}
       >
         <div
-          className={`mb-9 flex items-center gap-3 ${isCollapsed ? "justify-center" : ""}`}
+          className={`flex h-14 items-center gap-3 border-b px-3 ${isCollapsed ? "justify-center" : ""}`}
+          style={{ borderColor: sidebarBorder }}
         >
           <img
             src={sidebarLogo}
             alt={sidebarLogoAlt}
-            className={`h-12 w-12 rounded-full object-cover ${
+            className={`h-9 w-9 shrink-0 rounded object-cover ${
               isSuperadmin
                 ? "border-2 border-white/30 bg-white"
                 : "border border-slate-200 bg-white shadow-sm"
@@ -223,26 +229,41 @@ export function DashboardLayout({
           />
           <div className={isCollapsed ? "hidden" : ""}>
             <h1
-              className="text-lg font-black leading-tight"
+              className="text-base font-bold leading-tight"
               style={{ color: sidebarText }}
             >
               {displayName}
             </h1>
-            <p className="text-xs font-semibold" style={{ color: primary }}>
+            <p className="text-[11px] font-semibold" style={{ color: sidebarMutedText }}>
               {isSuperadmin ? "Plateforme SaaS" : "Gestion de restaurant"}
             </p>
           </div>
         </div>
 
-        <div className="space-y-2">{renderMenu(isCollapsed)}</div>
+        {!isCollapsed && (
+          <div className="border-b px-3 py-3" style={{ borderColor: sidebarBorder }}>
+            <p className="text-sm font-semibold" style={{ color: sidebarText }}>{roleMeta.userRole}</p>
+            <p className="mt-1 flex items-center gap-2 text-xs text-emerald-500">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              En ligne
+            </p>
+          </div>
+        )}
+
+        {!isCollapsed && (
+          <p className="px-4 pb-2 pt-4 text-[11px] font-bold uppercase tracking-wider" style={{ color: sidebarMutedText }}>
+            Navigation
+          </p>
+        )}
+        <div className={`flex-1 space-y-1 overflow-y-auto py-1 ${isCollapsed ? "px-1" : "px-2"}`}>
+          {renderMenu(isCollapsed)}
+        </div>
 
         <div
-          className={`mt-auto rounded-lg border px-4 py-4 ${isCollapsed ? "hidden" : ""}`}
+          className={`mx-3 mb-3 mt-auto border-t px-1 pt-3 ${isCollapsed ? "hidden" : ""}`}
           style={{
             borderColor: sidebarBorder,
-            backgroundColor: isSuperadmin
-              ? "rgba(255,255,255,0.1)"
-              : `color-mix(in srgb, ${primary} 6%, white)`,
+            backgroundColor: "transparent",
           }}
         >
           <div className="flex items-center gap-2">
@@ -259,9 +280,7 @@ export function DashboardLayout({
           </p>
         </div>
 
-        <div
-          className={`mt-6 flex items-center gap-3 ${isCollapsed ? "justify-center" : ""}`}
-        >
+        <div className={`border-t px-3 py-3 ${isCollapsed ? "flex justify-center" : "flex items-center gap-3"}`} style={{ borderColor: sidebarBorder }}>
           <div
             className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-black text-white"
             style={{
@@ -304,8 +323,8 @@ export function DashboardLayout({
             className="relative flex h-full w-[min(86vw,320px)] flex-col overflow-y-auto border-r px-5 py-6 shadow-2xl"
             style={{
               background: isSuperadmin
-                ? `linear-gradient(180deg, ${sidebarBackground}, color-mix(in srgb, ${sidebarBackground} 82%, black))`
-                : `linear-gradient(180deg, #ffffff, color-mix(in srgb, ${primary} 4%, white))`,
+                ? `linear-gradient(180deg, ${sidebarBackground}, color-mix(in srgb, ${sidebarBackground} 78%, black))`
+                : sidebarBackground,
               borderColor: sidebarBorder,
               color: sidebarText,
             }}
@@ -330,7 +349,7 @@ export function DashboardLayout({
                   </h1>
                   <p
                     className="text-xs font-semibold"
-                    style={{ color: primary }}
+                    style={{ color: sidebarMutedText }}
                   >
                     {isSuperadmin ? "Plateforme SaaS" : "Gestion de restaurant"}
                   </p>
@@ -339,7 +358,7 @@ export function DashboardLayout({
               <button
                 type="button"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                className={`flex h-10 w-10 items-center justify-center rounded ${
                   isSuperadmin
                     ? "text-white/80 hover:bg-white/10"
                     : "text-slate-500 hover:bg-slate-100"
@@ -355,66 +374,48 @@ export function DashboardLayout({
         </div>
       )}
 
-      <main className="min-w-0 flex-1">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header
-          className="relative flex h-[76px] items-center justify-between border-b bg-white/95 px-4 backdrop-blur md:px-7"
+          className="relative flex h-14 shrink-0 items-center justify-between px-3 text-white shadow-sm md:px-4"
           style={{
-            borderColor: isSuperadmin
-              ? "rgba(226,232,240,0.8)"
-              : `color-mix(in srgb, ${primary} 16%, #e2e8f0)`,
+            backgroundColor: primary,
           }}
         >
           <div className="flex items-center gap-3 lg:hidden">
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-700 transition-colors"
-              style={{
-                backgroundColor: isSuperadmin
-                  ? undefined
-                  : `color-mix(in srgb, ${primary} 7%, white)`,
-                color: isSuperadmin ? undefined : secondary,
-              }}
+              className="flex h-10 w-10 items-center justify-center text-white transition-colors hover:bg-black/10"
               title="Ouvrir le menu"
             >
               <DashboardIcon name="Menu" size={21} />
             </button>
-            <h1 className="text-lg font-black text-slate-950">{displayName}</h1>
+            <h1 className="text-base font-bold text-white">{displayName}</h1>
           </div>
 
           <button
             type="button"
             onClick={() => setIsCollapsed((value) => !value)}
-            className="hidden text-slate-600 transition-colors lg:block"
-            onMouseEnter={(event) => {
-              event.currentTarget.style.color = primary;
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.color = "";
-            }}
+            className="hidden h-14 px-3 text-white/90 transition-colors hover:bg-black/10 lg:block"
             title={isCollapsed ? "Déplier le menu" : "Réduire le menu"}
           >
             <DashboardIcon name="Menu" size={20} />
           </button>
 
           <div
-            className="absolute left-1/2 hidden -translate-x-1/2 text-center text-base font-black uppercase xl:block"
-            style={{ color: primary }}
+            className="absolute left-1/2 hidden -translate-x-1/2 text-center text-sm font-bold uppercase tracking-wide text-white xl:block"
           >
             {roleMeta.heading}
           </div>
 
           <div className="flex items-center gap-3">
             <button
-              className="hidden h-10 items-center gap-2 rounded-lg border bg-white px-4 text-xs font-black shadow-sm md:flex"
+              className="hidden h-9 items-center gap-2 rounded border border-white/20 bg-black/10 px-3 text-xs font-bold text-white md:flex"
               style={{
-                borderColor: isSuperadmin
-                  ? "#e2e8f0"
-                  : `color-mix(in srgb, ${primary} 18%, #e2e8f0)`,
-                color: secondary,
+                color: "white",
               }}
             >
-              <span style={{ color: primary }}>
+              <span className="text-white">
                 <DashboardIcon name="Store" size={15} />
               </span>
               {role === "SUPERADMIN"
@@ -424,13 +425,13 @@ export function DashboardLayout({
             <button
               type="button"
               onClick={() => setIsNotificationsOpen((value) => !value)}
-              className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-600"
+              className="relative flex h-10 w-10 items-center justify-center text-white/90 hover:bg-black/10"
             >
               <DashboardIcon name="Bell" size={19} />
               {notifications.some((item) => !item.is_read) && (
                 <span
                   className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-black text-white"
-                  style={{ backgroundColor: primary }}
+                  style={{ backgroundColor: accent }}
                 >
                   {notifications.filter((item) => !item.is_read).length}
                 </span>
@@ -492,19 +493,38 @@ export function DashboardLayout({
           </div>
         </header>
 
-        <div
-          className="min-h-[calc(100vh-76px)] overflow-x-hidden p-4 md:p-6"
-          style={{
-            backgroundColor: isSuperadmin
-              ? "#f8fafc"
-              : `color-mix(in srgb, ${primary} 5%, #f8fafc)`,
-          }}
-        >
-          {children}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-1 pt-4">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800">{pageTitle}</h1>
+              <p className="text-sm text-slate-500">
+                {roleMeta.userRole} · {activeView === "dashboard" ? "vue d'ensemble" : pageTitle.toLowerCase()}
+              </p>
+            </div>
+            <span className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500">
+              {new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())}
+            </span>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {children}
+          </div>
+          <footer className="flex flex-wrap justify-between gap-2 border-t border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
+            <span><strong>{displayName}</strong> · Restaurant SaaS</span>
+            <span>Interface de gestion · 2026</span>
+          </footer>
         </div>
       </main>
     </div>
   );
+}
+
+function findActiveMenu(menus, activeView) {
+  for (const item of menus) {
+    if (item.key === activeView) return item;
+    const child = item.children?.find((entry) => entry.key === activeView);
+    if (child) return child;
+  }
+  return null;
 }
 
 function getRoleMeta(role) {

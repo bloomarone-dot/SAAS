@@ -6,6 +6,7 @@ import { orderApi } from "@/modules/orders/services/orderApi";
 import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
 import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
 import { getApiBaseUrl } from "@/config/api";
+import { apiFetch } from "@/config/http";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
@@ -59,6 +60,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const activeView = overrides.__activeView || "dashboard";
   const adminReviewOnly = overrides.__adminReviewOnly === true;
   const [report, setReport] = useState(emptyReport);
+  const [restaurant, setRestaurant] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [selectedReceiptId, setSelectedReceiptId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Espèces");
@@ -72,6 +74,7 @@ export function CaisseDashboard({ overrides = {} }) {
 
   useEffect(() => {
     loadCashierReport();
+    loadRestaurant();
   }, []);
 
   useEffect(() => {
@@ -111,6 +114,16 @@ export function CaisseDashboard({ overrides = {} }) {
       if (!silent) setMessage(error.message || "Impossible de charger la caisse.");
     } finally {
       if (!silent) setIsLoading(false);
+    }
+  }
+
+  async function loadRestaurant() {
+    try {
+      setRestaurant(await apiFetch("/api/v1/restaurants/me", {
+        fallback: "Impossible de charger les informations du restaurant.",
+      }));
+    } catch {
+      setRestaurant(null);
     }
   }
 
@@ -232,7 +245,7 @@ export function CaisseDashboard({ overrides = {} }) {
   function printReceipt(order) {
     if (!order) return;
     orderApi.logReceiptPrint(order.id).catch(() => {});
-    openPrintWindow(receiptHtml(order), `Reçu ${order.order_number}`);
+    openPrintWindow(receiptHtml(order, restaurant, currentUser), `Reçu ${order.order_number}`);
   }
 
   function printCashReport() {
@@ -636,49 +649,102 @@ function EmptyState({ text }) {
   );
 }
 
-function receiptHtml(order) {
-  const rows = order.items.filter((item) => item.sale_channel !== "EMBALLAGE").map((item) => `
+function receiptHtml(order, restaurant, currentUser) {
+  const currency = restaurant?.currency || "XAF";
+  const receiptMoney = (value) => {
+    const amount = Number(value || 0).toLocaleString("fr-FR");
+    return currency === "XAF" ? `${amount} FCFA` : `${amount} ${currency}`;
+  };
+  const restaurantName = restaurant?.legal_name || restaurant?.name || "Restaurant";
+  const cashierName = order.cashier_name
+    || [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ")
+    || currentUser?.username
+    || "Non renseigné";
+  const items = order.items ?? [];
+  const subtotal = items.reduce((total, item) => total + Number(item.line_total || 0), 0);
+  const rows = items.map((item) => `
     <tr>
-      <td>${escapeHtml(item.name)}</td>
-      <td style="text-align:center;">${item.quantity}</td>
-      <td style="text-align:right;">${money(item.unit_price)}</td>
-      <td style="text-align:right;">${money(item.line_total)}</td>
+      <td class="item">${escapeHtml(item.name)}</td>
+      <td class="qty">${item.quantity}</td>
+      <td class="amount">${receiptMoney(item.line_total)}</td>
+    </tr>
+    <tr class="unit-row">
+      <td colspan="3">${item.quantity} x ${receiptMoney(item.unit_price)}</td>
     </tr>
   `).join("");
+  const restaurantLines = [
+    restaurant?.address,
+    [restaurant?.city, restaurant?.country].filter(Boolean).join(", "),
+    restaurant?.postal_box ? `B.P. ${restaurant.postal_box}` : "",
+    restaurant?.phone ? `Tél. ${restaurant.phone}` : "",
+    restaurant?.email,
+  ].filter(Boolean);
   return `<!doctype html>
     <html lang="fr">
       <head>
         <meta charset="utf-8" />
         <title>Reçu ${escapeHtml(order.order_number)}</title>
         <style>
-          body { margin: 0; padding: 18px; color: #111827; font-family: Arial, sans-serif; }
-          .receipt { width: 320px; margin: 0 auto; }
-          h1 { margin: 0; font-size: 18px; text-align: center; }
-          .muted { color: #6b7280; font-size: 12px; text-align: center; }
-          table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
-          th, td { border-bottom: 1px dashed #d1d5db; padding: 7px 0; }
-          th { text-align: left; font-size: 11px; color: #374151; }
-          .line { margin-top: 10px; border-top: 1px dashed #9ca3af; padding-top: 10px; }
-          .total { display: flex; justify-content: space-between; margin-top: 14px; font-size: 16px; font-weight: 800; }
-          @media print { body { padding: 0; } }
+          @page { size: 80mm auto; margin: 2mm; }
+          * { box-sizing: border-box; }
+          body { width: 76mm; margin: 0; padding: 0; color: #000; font-family: "Courier New", monospace; font-size: 10.5px; line-height: 1.25; }
+          .receipt { width: 100%; }
+          h1 { margin: 0 0 2px; font-size: 16px; line-height: 1.1; text-align: center; text-transform: uppercase; }
+          p { margin: 2px 0; }
+          .center { text-align: center; }
+          .muted { font-size: 9.5px; }
+          .separator { margin: 7px 0; border-top: 1px dashed #000; }
+          .meta { display: grid; grid-template-columns: 23mm 1fr; gap: 2px 1mm; }
+          .meta strong { white-space: nowrap; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th { padding: 3px 0; border-bottom: 1px dashed #000; text-align: left; font-size: 9.5px; }
+          td { padding: 4px 0 0; vertical-align: top; }
+          .item { width: auto; padding-right: 2mm; overflow-wrap: anywhere; }
+          .qty { width: 8mm; text-align: center; }
+          .amount { width: 23mm; text-align: right; white-space: nowrap; }
+          .unit-row td { padding: 0 0 3px; border-bottom: 1px dotted #777; color: #333; font-size: 9px; }
+          .summary { margin-top: 6px; }
+          .summary-row { display: flex; justify-content: space-between; gap: 4mm; margin: 2px 0; }
+          .total { margin-top: 5px; padding-top: 5px; border-top: 2px solid #000; font-size: 14px; font-weight: 700; }
+          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 7px; text-align: center; }
+          @media screen { body { margin: 12px auto; } }
+          @media print { html, body { width: 76mm; } }
         </style>
       </head>
       <body>
         <div class="receipt">
-          <h1>Le Bon Coin</h1>
-          <p class="muted">Reçu de paiement</p>
-          <p class="muted">${formatDateTime(order.updated_at || new Date().toISOString())}</p>
-          <div class="line">
-            <p><strong>Commande:</strong> ${escapeHtml(order.order_number)}</p>
-            <p><strong>Client:</strong> ${escapeHtml(orderCustomerLabel(order))}</p>
-            <p><strong>Paiement:</strong> ${escapeHtml(order.payment_method || "Non renseigné")}</p>
+          <h1>${escapeHtml(restaurantName)}</h1>
+          ${restaurantLines.map((line) => `<p class="center muted">${escapeHtml(line)}</p>`).join("")}
+          ${restaurant?.nui ? `<p class="center"><strong>NUI : ${escapeHtml(restaurant.nui)}</strong></p>` : ""}
+          ${restaurant?.tax_id ? `<p class="center muted">RC/ID fiscal : ${escapeHtml(restaurant.tax_id)}</p>` : ""}
+          <div class="separator"></div>
+          <p class="center"><strong>REÇU DE PAIEMENT</strong></p>
+          <p class="center muted">${formatDateTime(order.updated_at || new Date().toISOString())}</p>
+          <div class="separator"></div>
+          <div class="meta">
+            <strong>Commande</strong><span>${escapeHtml(order.order_number)}</span>
+            <strong>Client/Table</strong><span>${escapeHtml(orderCustomerLabel(order))}</span>
+            <strong>Serveur</strong><span>${escapeHtml(order.server_name || "Non assigné")}</span>
+            <strong>Caissier</strong><span>${escapeHtml(cashierName)}</span>
+            <strong>Paiement</strong><span>${escapeHtml(order.payment_method || "Non renseigné")}</span>
+            ${order.transaction_id ? `<strong>Transaction</strong><span>${escapeHtml(order.transaction_id)}</span>` : ""}
           </div>
+          <div class="separator"></div>
           <table>
-            <thead><tr><th>Article</th><th>Qté</th><th>PU</th><th>Total</th></tr></thead>
+            <thead><tr><th>Article</th><th class="qty">Qté</th><th class="amount">Montant</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
-          <div class="total"><span>Total</span><span>${money(order.total_amount)}</span></div>
-          <p class="muted line">Merci pour votre visite.</p>
+          <div class="summary">
+            <div class="summary-row"><span>Sous-total</span><span>${receiptMoney(subtotal)}</span></div>
+            ${Number(order.discount_amount || 0) > 0 ? `<div class="summary-row"><span>Remise</span><span>-${receiptMoney(order.discount_amount)}</span></div>` : ""}
+            ${Number(order.delivery_fee || 0) > 0 ? `<div class="summary-row"><span>Livraison</span><span>${receiptMoney(order.delivery_fee)}</span></div>` : ""}
+            <div class="summary-row total"><span>TOTAL</span><span>${receiptMoney(order.total_amount)}</span></div>
+          </div>
+          <div class="footer">
+            <p><strong>Merci pour votre visite.</strong></p>
+            ${restaurant?.opening_hours ? `<p class="muted">${escapeHtml(restaurant.opening_hours)}</p>` : ""}
+            ${restaurant?.website_url ? `<p class="muted">${escapeHtml(restaurant.website_url)}</p>` : ""}
+          </div>
         </div>
         <script>window.print(); window.onafterprint = () => window.close();</script>
       </body>

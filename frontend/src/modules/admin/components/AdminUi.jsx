@@ -3,13 +3,13 @@ import { validationFor } from "@/utils/validation";
 
 export function AdminPage({ eyebrow, title, subtitle, action, children }) {
   return (
-    <section className="space-y-6">
+    <section className="space-y-4">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
           {eyebrow && (
             <p className="text-sm font-black text-[var(--dashboard-primary)]">{eyebrow}</p>
           )}
-          <h1 className="mt-2 text-3xl font-black tracking-normal text-[var(--dashboard-secondary)] md:text-4xl">{title}</h1>
+          <h1 className="mt-1 text-2xl font-bold tracking-normal text-slate-800">{title}</h1>
           {subtitle && <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">{subtitle}</p>}
         </div>
         {action}
@@ -21,10 +21,10 @@ export function AdminPage({ eyebrow, title, subtitle, action, children }) {
 
 export function AdminCard({ title, action, children, className = "" }) {
   return (
-    <div className={`rounded-xl border border-slate-200 bg-white shadow-sm ${className}`}>
+    <div className={`overflow-hidden rounded border-t-4 border-t-[var(--dashboard-primary)] bg-white shadow-sm ${className}`}>
       {(title || action) && (
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          {title && <h2 className="text-base font-black text-[var(--dashboard-secondary)]">{title}</h2>}
+          {title && <h2 className="text-base font-semibold text-slate-700">{title}</h2>}
           {action}
         </div>
       )}
@@ -37,7 +37,7 @@ export function AdminKpis({ items }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => (
-        <div key={item.label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div key={item.label} className="rounded bg-white p-4 shadow-sm">
           <div className="flex items-center gap-4">
             <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full ${item.tone === "warn" ? "bg-orange-50 text-orange-500" : "bg-emerald-50 text-[var(--dashboard-primary)]"}`}>
               <DashboardIcon name={item.icon} size={24} />

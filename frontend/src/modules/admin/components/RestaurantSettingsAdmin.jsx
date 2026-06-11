@@ -21,6 +21,7 @@ const emptySettings = {
   payment_methods: "",
   delivery_fee: "",
   website_url: "",
+  nui: "",
   tax_id: "",
   primary_color: "#E4572E",
   secondary_color: "#1F2937",
@@ -76,6 +77,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         payment_methods: data.payment_methods ?? "",
         delivery_fee: String(data.delivery_fee ?? 0),
         website_url: data.website_url ?? "",
+        nui: data.nui ?? "",
         tax_id: data.tax_id ?? "",
         primary_color: data.primary_color ?? "#E4572E",
         secondary_color: data.secondary_color ?? "#1F2937",
@@ -120,6 +122,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         payment_methods: optionalText(form.payment_methods),
         delivery_fee: Number(form.delivery_fee || 0),
         website_url: optionalText(form.website_url),
+        nui: optionalText(form.nui),
         tax_id: optionalText(form.tax_id),
         primary_color: form.primary_color,
         secondary_color: form.secondary_color,
@@ -217,7 +220,8 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
               <div className="grid gap-4 md:grid-cols-2">
                 <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={!canUpdate || isLoading} />
                 <Field name="legal_name" label="Raison sociale" value={form.legal_name} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="tax_id" label="Identifiant fiscal / registre" value={form.tax_id} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="nui" label="NUI (Numéro d’identifiant unique)" value={form.nui} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="tax_id" label="Registre de commerce / autre identifiant" value={form.tax_id} onChange={updateField} disabled={!canUpdate || isLoading} />
                 <Field name="currency" label="Devise" value={form.currency} onChange={updateField} maxLength={3} required disabled={!canUpdate || isLoading} />
               </div>
               <label className="mt-4 block">

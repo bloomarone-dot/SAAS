@@ -7,7 +7,7 @@ export function DashboardHeader({ title, subtitle, right }) {
   const displayedDate = right ?? today;
 
   return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div className="hidden">
       <div>
         <h1 className="text-2xl font-black text-slate-950">{title}</h1>
         <p className="mt-1 text-sm font-medium text-slate-500">{subtitle}</p>
@@ -54,42 +54,43 @@ export function KpiGrid({ kpis }) {
 
 function MetricCard({ label, value, trend, icon, tone }) {
   const colors = {
-    pink: "bg-slate-50 text-[var(--dashboard-primary)]",
-    blue: "bg-blue-50 text-blue-600",
-    green: "bg-emerald-50 text-emerald-600",
-    purple: "bg-violet-50 text-violet-600",
-    orange: "bg-orange-50 text-orange-500",
+    pink: "bg-[var(--dashboard-primary)]",
+    blue: "bg-cyan-500",
+    green: "bg-emerald-600",
+    purple: "bg-violet-600",
+    orange: "bg-amber-500",
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center gap-4">
-        <div className={`flex h-12 w-12 items-center justify-center rounded-full ${colors[tone]}`}>
-          <DashboardIcon name={icon} size={22} />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-xs font-bold text-slate-500">{label}</p>
-          <p className="mt-2 text-xl font-black text-slate-950">{value}</p>
-          <p className="mt-1 text-xs font-black text-emerald-500">{trend}</p>
-        </div>
+    <div className={`relative min-h-28 overflow-hidden rounded text-white shadow-sm ${colors[tone] ?? colors.pink}`}>
+      <div className="relative z-10 p-4">
+        <p className="text-3xl font-bold leading-none">{value}</p>
+        <p className="mt-2 text-sm font-semibold">{label}</p>
+        <p className="mt-1 text-xs text-white/75">{trend}</p>
       </div>
+      <div className="absolute -right-2 top-2 text-black/15">
+        <DashboardIcon name={icon} size={72} />
+      </div>
+      <div className="absolute inset-x-0 bottom-0 h-1 bg-black/10" />
     </div>
   );
 }
 
 export function Panel({ title, action, link, children }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-base font-black text-slate-950">{title}</h2>
-        {action && (
-          <button className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700">
-            {action}
-          </button>
-        )}
-        {link && <button className="text-xs font-black text-[var(--dashboard-primary)]">{link}</button>}
+    <div className="overflow-hidden rounded border-t-4 border-t-[var(--dashboard-primary)] bg-white shadow-sm">
+      <div className="flex min-h-11 items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5">
+        <h2 className="text-base font-semibold text-slate-700">{title}</h2>
+        <div className="flex items-center gap-2">
+          {action && (
+            <span className="rounded border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500">
+              {action}
+            </span>
+          )}
+          {link && <button className="text-xs font-bold text-[var(--dashboard-primary)]">{link}</button>}
+        </div>
       </div>
-      {children}
+      <div className="p-4">{children}</div>
     </div>
   );
 }

@@ -35,6 +35,7 @@ class RestaurantPublic(OrmModel):
     payment_methods: Optional[str] = None
     delivery_fee: float
     website_url: Optional[str] = None
+    nui: Optional[str] = None
     tax_id: Optional[str] = None
     legal_name: Optional[str] = None
     primary_color: str
@@ -109,6 +110,7 @@ class RestaurantSettingsIn(BaseModel):
     payment_methods: Optional[str] = Field(default=None, max_length=255)
     delivery_fee: Optional[float] = Field(default=None, ge=0)
     website_url: Optional[str] = Field(default=None, max_length=500)
+    nui: Optional[str] = Field(default=None, max_length=100)
     tax_id: Optional[str] = Field(default=None, max_length=100)
     legal_name: Optional[str] = Field(default=None, max_length=191, pattern=NAME_PATTERN)
     primary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")

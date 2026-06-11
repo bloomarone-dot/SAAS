@@ -69,6 +69,7 @@ class OrderPublic(OrmModel):
     branch_id: Optional[str] = None
     table_id: Optional[int] = None
     server_id: Optional[str] = None
+    cashier_id: Optional[str] = None
     party_size: int = 1
     order_number: str
     customer_name: str
@@ -79,6 +80,7 @@ class OrderPublic(OrmModel):
     fulfillment_type: str
     order_source: Optional[str] = None
     server_name: Optional[str] = None
+    cashier_name: Optional[str] = None
     table_name: Optional[str] = None
     table_room: Optional[str] = None
     payment_method: str
