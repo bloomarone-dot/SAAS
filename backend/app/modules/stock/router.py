@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
 from app.modules.audit.service import log_action
+from app.modules.notifications.service import notify
 from app.modules.permissions.models import Permission
 from app.modules.catalog.models import MenuItem
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
@@ -681,6 +682,32 @@ def list_movements(current_user: User = Depends(require_tenant_user), db: Sessio
     )
 
 
+def _item_total_quantity(item) -> float:
+    return float(item.quantity or 0) + float(item.kitchen_quantity or 0) + float(item.drink_quantity or 0)
+
+
+def notify_if_low_stock(db: Session, item, previous_total: float) -> None:
+    """Alerte STOCK + ADMIN quand un produit franchit son seuil d'alerte (à la baisse)."""
+    threshold = float(item.alert_threshold or 0)
+    if threshold <= 0:
+        return
+    new_total = _item_total_quantity(item)
+    # Seulement au franchissement (au-dessus -> au niveau/sous le seuil) pour éviter le spam.
+    if not (new_total <= threshold < previous_total):
+        return
+    message = f"{item.name} est sous le seuil d'alerte ({new_total:g} {item.unit or ''} restant, seuil {threshold:g})."
+    for target_role in ("STOCK", "ADMIN"):
+        notify(
+            db,
+            title="Stock bas",
+            message=message,
+            restaurant_id=item.restaurant_id,
+            role=target_role,
+            category="stock",
+            link="low-stock",
+        )
+
+
 @router.post("/movements", response_model=StockMovementPublic, status_code=201)
 def create_movement(
     payload: StockMovementIn,
@@ -689,6 +716,7 @@ def create_movement(
 ):
     assert_permission(current_user, Permission.STOCK_UPDATE)
     item = get_item_or_404(db, payload.item_id, current_user.restaurant_id)
+    previous_total = _item_total_quantity(item)
     source_location, destination_location = normalize_movement_locations(
         item,
         payload.movement_type,
@@ -762,6 +790,7 @@ def create_movement(
         f"Mouvement stock {payload.movement_type.value} sur {item.name}",
         {"item_id": item.id, "quantity": payload.quantity, "valuation_delta": valuation_delta},
     )
+    notify_if_low_stock(db, item, previous_total)
     db.commit()
     db.refresh(movement)
     return movement
@@ -1028,6 +1057,21 @@ def update_inventory_line(
     line.variance_value = abs(line.variance) * float(item.cmup_current or item.purchase_price or 0)
     tolerance_quantity = abs(float(line.theoretical_stock or 0)) * (float(inventory.tolerance_rate or 0) / 100)
     line.exceeds_threshold = abs(line.variance) > tolerance_quantity
+    log_action(
+        db,
+        current_user,
+        "stock.inventory_line_update",
+        "stock_inventory_line",
+        line.id,
+        f"Comptage inventaire {item.name}: théorique {line.theoretical_stock} / réel {line.real_stock}",
+        {
+            "item_id": item.id,
+            "theoretical_stock": line.theoretical_stock,
+            "real_stock": line.real_stock,
+            "variance": line.variance,
+            "variance_value": line.variance_value,
+        },
+    )
     db.commit()
     db.refresh(line)
     return line

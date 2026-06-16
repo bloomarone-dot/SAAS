@@ -25,6 +25,11 @@ class CustomerOrder(Base):
     customer_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(40), default="Nouvelle", nullable=False)
+    # Cycle de service: ouverte = le client peut encore ajouter des plats ;
+    # fermée = le client a demandé la note, plus aucun ajout possible.
+    is_closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     fulfillment_type: Mapped[str] = mapped_column(String(40), default="Livraison", nullable=False)
     payment_method: Mapped[str] = mapped_column(String(40), default="Paiement à la livraison", nullable=False)
     payment_status: Mapped[str] = mapped_column(String(40), default="En attente", nullable=False)

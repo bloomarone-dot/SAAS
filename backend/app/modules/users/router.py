@@ -302,6 +302,8 @@ def reset_user_password(
         raise HTTPException(status_code=400, detail="Vous ne pouvez pas reinitialiser votre propre mot de passe ici")
 
     user.password_hash = hash_password(payload.password)
+    # Invalide les sessions actives de l'utilisateur dont le mot de passe est reinitialise.
+    user.token_version = (getattr(user, "token_version", 0) or 0) + 1
     log_action(
         db,
         current_user,

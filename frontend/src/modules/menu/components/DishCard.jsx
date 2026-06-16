@@ -82,7 +82,7 @@ export default function DishCard({ dish, onDishUpdated, onDishDeleted, canDelete
           <button
             onClick={handleDelete}
             disabled={loading}
-            className="inline-flex h-9 w-9 items-center justify-center border border-red-100 text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+            className="lte-btn lte-btn-danger lte-btn-sm"
             title="Retirer du menu"
           >
             <DashboardIcon name="Trash2" size={16} />

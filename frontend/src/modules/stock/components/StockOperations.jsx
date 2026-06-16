@@ -784,17 +784,17 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage, f
         {!isCreateStockProduct && <div className="flex flex-wrap gap-3">
           {(isAccountingView || isReportView) && (
             <>
-              <button type="button" onClick={exportExcel} className="inline-flex h-12 items-center gap-2 border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]">
+              <button type="button" onClick={exportExcel} className="lte-btn lte-btn-default">
                 <DashboardIcon name="FileText" size={17} />
                 Exporter en Excel
               </button>
-              <button type="button" onClick={exportPdf} className="inline-flex h-12 items-center gap-2 border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]">
+              <button type="button" onClick={exportPdf} className="lte-btn lte-btn-default">
                 <DashboardIcon name="ReceiptText" size={17} />
                 Exporter en PDF
               </button>
             </>
           )}
-          <button type="button" onClick={loadStock} className="inline-flex h-12 items-center gap-2 bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] hover:bg-[#d92d20]">
+          <button type="button" onClick={loadStock} className="lte-btn lte-btn-primary">
             <DashboardIcon name="Activity" size={17} />
             Actualiser
           </button>
@@ -1060,7 +1060,7 @@ export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage, f
                     className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
                   />
                 </div>
-                <select value={stockFilter} onChange={(event) => setStockFilter(event.target.value)} className="h-12 border border-slate-200 bg-white px-4 text-sm font-black outline-none">
+                <select value={stockFilter} onChange={(event) => setStockFilter(event.target.value)} className="form-control">
                   <option value="ALL">Tous les produits</option>
                   <option value="LOW">Stock faible</option>
                   <option value="OK">Stock normal</option>

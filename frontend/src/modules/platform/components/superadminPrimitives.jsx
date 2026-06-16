@@ -103,7 +103,7 @@ export function DataTable({ columns, sort, onSort, emptyTitle, emptyText, childr
   return (
     <div className="overflow-hidden border border-[#eadfd7] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="lte-table min-w-[860px]">
           <thead className="bg-[#fffaf5] text-xs font-black uppercase text-[#9a3412]">
             <tr>
               {columns.map((column) => {
@@ -218,7 +218,7 @@ export function SubscriptionEditor({ row, form, onChange, onSubmit, isSaving }) 
       <button
         type="submit"
         disabled={isSaving}
-        className="mt-5 h-11 w-full bg-[#f04438] px-5 text-sm font-black text-white hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-70"
+        className="mt-5 w-full lte-btn lte-btn-primary"
       >
         {isSaving ? "Sauvegarde..." : "Sauvegarder l'abonnement"}
       </button>

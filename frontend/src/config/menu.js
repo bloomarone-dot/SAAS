@@ -192,6 +192,15 @@ export const APP_MENUS = {
       ],
     },
     {
+      key: "branches",
+      label: "Branches",
+      icon: "MapPin",
+      children: [
+        { key: "branches", label: "Gestion branches", icon: "MapPin" },
+        { key: "create-branch", label: "Création branche", icon: "Plus" },
+      ],
+    },
+    {
       key: "menu-categories",
       label: "Catalogue",
       icon: "UtensilsCrossed",
@@ -235,15 +244,6 @@ export const APP_MENUS = {
         { key: "purchases", label: "Achats stock", icon: "ShoppingCart" },
         { key: "accounting", label: "Comptabilité stock", icon: "FileText" },
         { key: "reports", label: "Rapports stock", icon: "BarChart3" },
-      ],
-    },
-    {
-      key: "branches",
-      label: "Branches",
-      icon: "MapPin",
-      children: [
-        { key: "branches", label: "Gestion branches", icon: "MapPin" },
-        { key: "create-branch", label: "Création branche", icon: "Plus" },
       ],
     },
     {
@@ -332,6 +332,11 @@ export const APP_MENUS = {
           key: "request-bill",
           label: "Demander addition",
           icon: "ReceiptText",
+        },
+        {
+          key: "request-payment",
+          label: "Demander paiement",
+          icon: "Wallet",
         },
       ],
     },

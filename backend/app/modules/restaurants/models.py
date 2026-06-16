@@ -32,6 +32,9 @@ class Restaurant(Base):
     nui: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tax_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     legal_name: Mapped[str | None] = mapped_column(String(191), nullable=True)
+    # Commission Bloomar One prélevée sur le brut des paiements Mobile Money (en %).
+    # Réglée par le SUPERADMIN, par tenant. 0 par défaut.
+    bloomar_commission_rate: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     primary_color: Mapped[str] = mapped_column(String(20), default="#E4572E", nullable=False)
     secondary_color: Mapped[str] = mapped_column(String(20), default="#1F2937", nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="XAF", nullable=False)

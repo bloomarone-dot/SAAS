@@ -35,6 +35,11 @@ class CashierPaymentIn(BaseModel):
     discount_amount: Optional[float] = Field(default=None, ge=0)
 
 
+class OrderReopenIn(BaseModel):
+    """Réouverture d'une commande fermée : motif obligatoire (anti-fraude)."""
+    reason: str = Field(min_length=5, max_length=255, description="Motif justifiant la réouverture")
+
+
 class PromoApplyIn(BaseModel):
     code: str = Field(min_length=2, max_length=40)
 
@@ -87,6 +92,8 @@ class OrderPublic(OrmModel):
     payment_status: str = "En attente"
     transaction_id: Optional[str] = None
     payment_locked: bool = False
+    is_closed: bool = False
+    closed_at: Optional[datetime] = None
     discount_amount: float
     delivery_fee: float
     total_amount: float

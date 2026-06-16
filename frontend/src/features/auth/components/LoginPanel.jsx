@@ -13,7 +13,7 @@ const noPasswordManagerAttrs = {
   "data-form-type": "other",
 };
 
-export function LoginPanel({ value, onChange, onSubmit, isLoading, message }) {
+export function LoginPanel({ value, onChange, onSubmit, isLoading, message, onForgotPassword }) {
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -137,6 +137,16 @@ export function LoginPanel({ value, onChange, onSubmit, isLoading, message }) {
             >
               {isLoading ? "Connexion..." : "Se connecter"}
             </button>
+
+            {onForgotPassword && (
+              <button
+                type="button"
+                onClick={onForgotPassword}
+                className="block w-full text-center text-xs font-bold text-slate-500 transition hover:text-[#078d50]"
+              >
+                Mot de passe oublié ?
+              </button>
+            )}
           </form>
 
           {message && (

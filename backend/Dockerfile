@@ -9,6 +9,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+# Alembic : embarque la config et les migrations pour pouvoir lancer
+# `alembic upgrade head` / `revision --autogenerate` dans le conteneur.
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 RUN adduser --disabled-password --gecos "" appuser \
     && mkdir -p /app/uploads \
     && chown -R appuser:appuser /app

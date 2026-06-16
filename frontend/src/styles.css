@@ -19,6 +19,104 @@
   }
 }
 
+@layer components {
+  /* ===== AdminLTE : Box / Card ===== */
+  .lte-card {
+    @apply mb-4 overflow-hidden rounded border-t-[3px] bg-white shadow-sm;
+    border-top-color: var(--dashboard-primary);
+  }
+  .lte-card-header {
+    @apply flex min-h-[44px] items-center gap-3 border-b border-slate-100 px-4 py-2.5;
+  }
+  .lte-card-title {
+    @apply flex items-center gap-2 text-base font-semibold text-slate-700;
+  }
+  .lte-card-tools {
+    @apply ml-auto flex items-center gap-1 text-slate-400;
+  }
+  .lte-tool-btn {
+    @apply grid h-6 w-6 place-items-center rounded transition hover:bg-slate-100 hover:text-slate-600;
+  }
+  .lte-card-body {
+    @apply p-4;
+  }
+  .lte-card-footer {
+    @apply flex flex-wrap items-center gap-3 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-sm text-slate-600;
+  }
+
+  /* ===== AdminLTE : Tables ===== */
+  .lte-table {
+    @apply w-full text-left text-sm;
+  }
+  .lte-table thead th {
+    @apply whitespace-nowrap border-b-2 border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .lte-table tbody {
+    @apply text-slate-600;
+  }
+  .lte-table tbody td {
+    @apply border-b border-slate-100 px-3 py-2.5 align-middle;
+  }
+  /* rayage par défaut (AdminLTE) ; le survol doit primer => défini avant la règle hover */
+  .lte-table tbody tr:nth-child(even) {
+    @apply bg-slate-50/60;
+  }
+  .lte-table tbody tr {
+    @apply transition;
+  }
+  .lte-table tbody tr:hover {
+    @apply bg-[color-mix(in_srgb,var(--dashboard-primary)_8%,white)];
+  }
+  .lte-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* ===== AdminLTE : Formulaires ===== */
+  .lte-form-group {
+    @apply mb-4 block;
+  }
+  .lte-label {
+    @apply mb-1.5 block text-sm font-semibold text-slate-700;
+  }
+  .lte-label .req {
+    @apply text-red-500;
+  }
+  .form-control {
+    @apply block h-10 w-full rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400;
+  }
+  .form-control:focus {
+    border-color: var(--dashboard-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--dashboard-primary) 18%, transparent);
+  }
+  textarea.form-control {
+    @apply h-auto py-2;
+  }
+  select.form-control {
+    @apply pr-8;
+  }
+  .lte-help {
+    @apply mt-1 text-xs text-slate-400;
+  }
+
+  /* ===== AdminLTE : Boutons ===== */
+  .lte-btn {
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .lte-btn-primary {
+    @apply text-white shadow-sm hover:brightness-95;
+    background-color: var(--dashboard-primary);
+  }
+  .lte-btn-default {
+    @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+  }
+  .lte-btn-danger {
+    @apply border border-red-200 bg-white text-red-600 hover:bg-red-50;
+  }
+  .lte-btn-sm {
+    @apply h-8 px-3 text-xs;
+  }
+}
+
 @layer utilities {
   .app-theme .text-\[\#f04438\],
   .app-theme .text-\[\#9a3412\] {

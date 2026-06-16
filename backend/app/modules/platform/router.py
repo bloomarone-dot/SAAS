@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.modules.audit.models import AuditLog
+from app.modules.audit.service import log_action
 from app.modules.permissions.models import Role
 from app.modules.platform.models import PlatformSetting, RestaurantSubscription
 from app.modules.platform.schemas import (
@@ -109,6 +110,19 @@ def update_subscription(
     subscription.status = payload.status.strip()
     subscription.renewal_date = payload.renewal_date
     subscription.notes = payload.notes
+
+    # Renouvellement: une date d'échéance future réactive l'accès du tenant.
+    if payload.renewal_date and payload.renewal_date >= date.today() and not restaurant.is_active:
+        restaurant.is_active = True
+        log_action(
+            db,
+            current_user,
+            "subscription.reactivate",
+            "restaurant",
+            restaurant.id,
+            f"Réactivation via renouvellement (échéance {payload.renewal_date})",
+            {"renewal_date": str(payload.renewal_date)},
+        )
 
     db.commit()
     db.refresh(subscription)

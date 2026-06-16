@@ -1,17 +1,20 @@
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.email import is_email_configured, send_password_reset_email
 from app.ratelimit import enforce_rate_limit
 from app.modules.audit.service import log_action
-from app.modules.auth.schemas import ForgotPasswordIn, ForgotPasswordOut, LoginIn, ResetPasswordIn, TokenOut
+from app.modules.auth.schemas import ChangePasswordIn, ForgotPasswordIn, ForgotPasswordOut, LoginIn, ResetPasswordIn, TokenOut
+from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
 from app.modules.users.schemas import UserPublic
 from app.security import (
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
     create_access_token,
     create_password_reset_token,
     decode_password_reset_token,
@@ -64,26 +67,56 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Compte desactive")
 
+    if user.restaurant_id:
+        restaurant = db.get(Restaurant, user.restaurant_id)
+        if not restaurant or not restaurant.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Restaurant suspendu. Contactez l'administration de la plateforme.",
+            )
+
     log_action(db, user, "auth.login", "user", user.id, f"Connexion utilisateur {user.username}")
     db.commit()
     token = create_access_token(user.id, getattr(user, "token_version", 0) or 0)
     return TokenOut(access_token=token, user=user)
 
 
+def _build_reset_link(token: str) -> str:
+    base = os.getenv("APP_PUBLIC_URL", "").rstrip("/") or "http://localhost:5177"
+    return f"{base}/reset-password?token={token}"
+
+
 @router.post("/forgot-password", response_model=ForgotPasswordOut)
-def forgot_password(payload: ForgotPasswordIn, request: Request, db: Session = Depends(get_db)):
-    """Genere un token temporaire de reinitialisation si le compte existe."""
+def forgot_password(
+    payload: ForgotPasswordIn,
+    request: Request,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Envoie un lien de reinitialisation par email si le compte existe."""
     enforce_rate_limit(request, scope="forgot", limit=5, window_seconds=900)
     user = find_user_by_login(db, payload.login)
-    generic_message = "Si le compte existe, un code de réinitialisation a été généré."
+    # Message generique systematique: pas d'enumeration de comptes.
+    generic_message = "Si le compte existe, un lien de réinitialisation a été envoyé par email."
     if not user or not user.is_active:
         return ForgotPasswordOut(message=generic_message)
 
     reset_token = create_password_reset_token(user.id)
-    if ENVIRONMENT in {"production", "prod"} or not RETURN_DEV_RESET_TOKEN:
-        return ForgotPasswordOut(message=generic_message)
+    if user.email:
+        # Envoi en tache de fond: ne bloque pas la reponse et n'expose pas le resultat.
+        background.add_task(
+            send_password_reset_email,
+            user.email,
+            _build_reset_link(reset_token),
+            PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
+        )
+    log_action(db, user, "auth.password_reset_requested", "user", user.id, f"Demande de reinitialisation {user.username}")
+    db.commit()
 
-    return ForgotPasswordOut(message=generic_message, reset_token=reset_token)
+    # En dev (SMTP non configure), on peut renvoyer le token pour faciliter les tests.
+    if not (ENVIRONMENT in {"production", "prod"}) and RETURN_DEV_RESET_TOKEN and not is_email_configured():
+        return ForgotPasswordOut(message=generic_message, reset_token=reset_token)
+    return ForgotPasswordOut(message=generic_message)
 
 
 @router.post("/reset-password")
@@ -105,6 +138,30 @@ def reset_password(payload: ResetPasswordIn, request: Request, db: Session = Dep
     log_action(db, user, "auth.password_reset", "user", user.id, f"Reinitialisation mot de passe {user.username}")
     db.commit()
     return {"message": "Mot de passe réinitialisé avec succès"}
+
+
+@router.post("/change-password", response_model=TokenOut)
+def change_password(
+    payload: ChangePasswordIn,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Permet a l'utilisateur connecte de changer son propre mot de passe."""
+    enforce_rate_limit(request, scope="change-password", limit=10, window_seconds=900)
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mot de passe actuel incorrect")
+    if verify_password(payload.new_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Le nouveau mot de passe doit être différent de l'ancien")
+
+    current_user.password_hash = hash_password(payload.new_password)
+    # Revoque les autres sessions, puis re-emet un jeton valide pour la session courante.
+    current_user.token_version = (getattr(current_user, "token_version", 0) or 0) + 1
+    log_action(db, current_user, "auth.password_change", "user", current_user.id, f"Changement mot de passe {current_user.username}")
+    db.commit()
+    db.refresh(current_user)
+    token = create_access_token(current_user.id, current_user.token_version)
+    return TokenOut(access_token=token, user=current_user)
 
 
 @router.get("/me", response_model=UserPublic)

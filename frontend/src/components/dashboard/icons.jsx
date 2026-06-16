@@ -53,6 +53,7 @@ import {
   Utensils,
   UtensilsCrossed,
   Wallet,
+  X,
 } from "lucide-react";
 
 export const ICONS = {
@@ -110,6 +111,7 @@ export const ICONS = {
   Utensils,
   UtensilsCrossed,
   Wallet,
+  X,
 };
 
 export function DashboardIcon({ name, size = 24, className = "" }) {

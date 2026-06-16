@@ -12,7 +12,7 @@ from app.modules.finance.models import PromotionCode
 from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
-from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderPublic, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
+from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
 from app.modules.permissions.models import Permission, Role
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockMovement, StockMovementType, StockRecipeIngredient
@@ -183,29 +183,12 @@ def validate_cashier_payment(
         raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
     if order.status not in PAYABLE_STATUSES:
         raise HTTPException(status_code=400, detail="La caisse ne peut encaisser que les commandes prêtes ou servies")
-    previous_status = order.status
-    order.payment_method = payload.payment_method.strip()
-    if payload.discount_amount is not None:
-        order.discount_amount = payload.discount_amount
-    recalculate_order_total(order)
-    deduct_order_packaging_stock(db, order, current_user.id)
-    order.cashier_id = current_user.id
-    order.status = "Payée"
-    order.payment_status = "SUCCESS"
-    sync_table_status(db, order)
-    log_action(
+    settle_cash_payment(
         db,
+        order,
         current_user,
-        "payment.validate",
-        "order",
-        order.id,
-        f"Paiement valide commande {order.order_number}",
-        {
-            "previous_status": previous_status,
-            "payment_method": order.payment_method,
-            "discount_amount": order.discount_amount,
-            "total_amount": order.total_amount,
-        },
+        payload.payment_method,
+        payload.discount_amount,
     )
     db.commit()
     db.refresh(order)
@@ -329,7 +312,7 @@ def send_order_to_kitchen(
         title="Nouvelle commande cuisine",
         message=f"{order.order_number} contient {created_count} ticket(s) à préparer.",
         category="kitchen",
-        link="/cuisine/orders",
+        link="orders",
     )
     log_action(
         db,
@@ -369,8 +352,10 @@ def update_order_status(
             title="Commande prête" if payload.status == "Prête" else "Commande servie",
             message=f"{order.order_number}: {previous_status} -> {payload.status}",
             category="order",
-            link="/serveur/orders",
+            link="orders",
         )
+    if payload.status == "Annulée" and previous_status != "Annulée":
+        notify_order_cancelled(db, current_user, order, previous_status)
     log_action(
         db,
         current_user,
@@ -415,9 +400,12 @@ def update_order(
         if payload.status not in ALLOWED_STATUSES:
             raise HTTPException(status_code=400, detail="Statut de commande invalide")
         assert_status_transition_allowed(current_user, order, payload.status)
+        previous_status = order.status
         order.status = payload.status
         if payload.status == "Annulée" and order.cancelled_at is None:
             order.cancelled_at = datetime.utcnow()
+            if previous_status != "Annulée":
+                notify_order_cancelled(db, current_user, order, previous_status)
         sync_table_status(db, order)
     if payload.items is not None:
         replace_order_items(db, order, payload.items, current_user.restaurant_id)
@@ -430,6 +418,95 @@ def update_order(
         order.id,
         f"Modification commande {order.order_number}",
         {"fields": sorted(fields_set), "status": order.status, "total_amount": order.total_amount},
+    )
+    db.commit()
+    db.refresh(order)
+    return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+
+@router.post("/{order_id}/close", response_model=OrderPublic)
+def close_order(
+    order_id: str,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Le serveur ferme la commande quand le client demande la note.
+
+    Une commande fermée n'accepte plus d'ajout de plats et devient encaissable.
+    """
+    assert_can_update_orders(current_user)
+    order = get_order_or_404(db, order_id, current_user.restaurant_id)
+    if order.status in PAID_STATUSES:
+        raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
+    if order.is_closed:
+        return get_order_or_404(db, order.id, current_user.restaurant_id)
+    order.is_closed = True
+    order.closed_at = datetime.utcnow()
+    order.closed_by_id = current_user.id
+    log_action(
+        db,
+        current_user,
+        "order.close",
+        "order",
+        order.id,
+        f"Commande {order.order_number} fermée (note demandée)",
+        {"status": order.status, "total_amount": order.total_amount},
+    )
+    notify(
+        db,
+        restaurant_id=current_user.restaurant_id,
+        role=Role.CAISSE.value,
+        title="Commande fermée",
+        message=f"{order.order_number} fermée par le service. Prête à encaisser.",
+        category="order",
+        link="unpaid-orders",
+    )
+    db.commit()
+    db.refresh(order)
+    return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+
+@router.post("/{order_id}/reopen", response_model=OrderPublic)
+def reopen_order(
+    order_id: str,
+    payload: OrderReopenIn,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Réouvre une commande fermée. Action sensible : manager/admin, motif obligatoire,
+    tracée en audit et notifiée à l'administrateur (garde-fou anti-fraude)."""
+    if current_user.role not in {Role.ADMIN, Role.MANAGER}:
+        raise HTTPException(status_code=403, detail="Seul un manager ou un administrateur peut rouvrir une commande")
+    order = get_order_or_404(db, order_id, current_user.restaurant_id)
+    if order.payment_locked or order.status in PAID_STATUSES:
+        raise HTTPException(status_code=409, detail="Commande déjà payée ou paiement en cours : réouverture impossible")
+    if not order.is_closed:
+        raise HTTPException(status_code=400, detail="Cette commande n'est pas fermée")
+
+    reason = payload.reason.strip()
+    actor = f"{current_user.first_name} {current_user.last_name}".strip() or current_user.username
+    order.is_closed = False
+    order.closed_at = None
+    order.closed_by_id = None
+    log_action(
+        db,
+        current_user,
+        "order.reopen",
+        "order",
+        order.id,
+        f"Commande {order.order_number} rouverte par {actor}: {reason}",
+        {"status": order.status, "total_amount": order.total_amount, "reason": reason, "reopened_by": current_user.id},
+    )
+    # Garde-fou : alerter l'administrateur de toute réouverture.
+    notify(
+        db,
+        restaurant_id=current_user.restaurant_id,
+        role=Role.ADMIN.value,
+        title="Réouverture de commande",
+        message=f"{actor} a rouvert la commande {order.order_number}. Motif : {reason}",
+        category="security",
+        link="audit-logs",
+        email=True,
     )
     db.commit()
     db.refresh(order)
@@ -518,6 +595,59 @@ def assert_can_update_cashier(user: User) -> None:
     raise HTTPException(status_code=403, detail="Permission de gestion caisse requise")
 
 
+def settle_cash_payment(
+    db: Session,
+    order: CustomerOrder,
+    user: User,
+    payment_method: str,
+    discount_amount: float | None = None,
+) -> None:
+    """Encaisse une commande (espèces / règlement direct) : commande -> Payée/SUCCESS.
+
+    Les pré-conditions (statut payable, non verrouillée, non déjà payée) doivent
+    être vérifiées par l'appelant. Ne commit pas.
+    """
+    previous_status = order.status
+    order.payment_method = (payment_method or "").strip() or order.payment_method
+    if discount_amount is not None:
+        order.discount_amount = discount_amount
+    recalculate_order_total(order)
+    deduct_order_packaging_stock(db, order, user.id)
+    order.cashier_id = user.id
+    order.status = "Payée"
+    order.payment_status = "SUCCESS"
+    sync_table_status(db, order)
+    log_action(
+        db,
+        user,
+        "payment.validate",
+        "order",
+        order.id,
+        f"Paiement valide commande {order.order_number}",
+        {
+            "previous_status": previous_status,
+            "payment_method": order.payment_method,
+            "discount_amount": order.discount_amount,
+            "total_amount": order.total_amount,
+        },
+    )
+
+
+def notify_order_cancelled(db: Session, user: User, order: CustomerOrder, previous_status: str) -> None:
+    """Alerte l'administrateur d'une annulation de commande (sensible financièrement)."""
+    actor = f"{user.first_name} {user.last_name}".strip() or user.username
+    notify(
+        db,
+        restaurant_id=order.restaurant_id,
+        role=Role.ADMIN.value,
+        title="Commande annulée",
+        message=f"{order.order_number} annulée par {actor} (était « {previous_status} », {order.total_amount} FCFA).",
+        category="security",
+        link="orders",
+        email=True,
+    )
+
+
 def assert_can_collect_cashier(user: User) -> None:
     if user.role in {Role.MANAGER, Role.CAISSE}:
         return
@@ -587,6 +717,11 @@ def assert_order_edit_allowed(user: User, order: CustomerOrder, payload: OrderUp
         raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
     if order.status in PAID_STATUSES and user.role != Role.ADMIN:
         raise HTTPException(status_code=403, detail="Facture payee verrouillee. Modification interdite.")
+    if getattr(order, "is_closed", False) and payload.items is not None and user.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=409,
+            detail="Commande fermée : plus aucun ajout d'article possible. Rouvrez-la d'abord (manager/admin).",
+        )
 
     fields_set = getattr(payload, "model_fields_set", None) or payload.__fields_set__
     if user.role == Role.CAISSE:

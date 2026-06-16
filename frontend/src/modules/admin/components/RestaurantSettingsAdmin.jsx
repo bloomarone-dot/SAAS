@@ -188,7 +188,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         <button
           type="button"
           onClick={loadSettings}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition-all hover:border-[#f04438] hover:text-[#f04438]"
+          className="lte-btn lte-btn-default"
         >
           <DashboardIcon name="Activity" size={17} />
           Actualiser
@@ -233,7 +233,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
                   rows={3}
                   disabled={!canUpdate || isLoading}
                   placeholder="Présentation courte du restaurant, spécialités, ambiance..."
-                  className="mt-2 w-full border border-slate-200 bg-white px-3 py-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2] disabled:bg-slate-50 disabled:text-slate-400"
+                  className="mt-2 form-control disabled:bg-slate-50 disabled:text-slate-400"
                 />
               </label>
             </SettingsGroup>
@@ -336,7 +336,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
             <button
               type="submit"
               disabled={!canUpdate || isLoading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+              className="lte-btn lte-btn-primary"
             >
               <DashboardIcon name="CheckCircle2" size={17} />
               Enregistrer les paramètres
@@ -372,7 +372,7 @@ function Field({ label, required, ...props }) {
         {...props}
         {...validationFor(props.name)}
         required={required}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2] disabled:bg-slate-50 disabled:text-slate-400"
+        className="mt-2 form-control disabled:bg-slate-50 disabled:text-slate-400"
       />
     </label>
   );

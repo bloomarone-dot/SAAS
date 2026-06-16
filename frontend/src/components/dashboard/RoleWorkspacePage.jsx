@@ -258,7 +258,7 @@ function ResponsiveTable({ rows }) {
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
+        <table className="lte-table min-w-[760px]">
           <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
             <tr>
               {["Référence", "Type", "Statut", "Montant / Valeur", "Date / Responsable", "Actions"].map((header) => (
@@ -332,7 +332,7 @@ function FormSection({ title, fields }) {
         {fields.map((field) => (
           <label key={field} className="block">
             <span className="mb-2 block text-xs font-black text-slate-700">{field}</span>
-            <input className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none transition focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-emerald-50" placeholder={field} />
+            <input className="form-control transition focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-emerald-50" placeholder={field} />
           </label>
         ))}
       </div>

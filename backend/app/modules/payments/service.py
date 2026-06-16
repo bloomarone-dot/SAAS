@@ -10,8 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.modules.audit.models import AuditLog
+from app.modules.notifications.service import notify
 from app.modules.orders.models import CustomerOrder
-from app.modules.payments.models import PaymentTransaction
+from app.modules.payments.models import PaymentRequest, PaymentTransaction
+from app.modules.payments.realtime import payment_connections
+from app.modules.restaurants.models import Restaurant
 from app.modules.payments.mtn_service import (
     check_transaction_status as check_mtn_status,
     parse_mtn_status,
@@ -27,6 +30,30 @@ ACTIVE_STATUSES = {"PENDING"}
 TERMINAL_FAILURE_STATUSES = {"FAILED", "CANCELLED", "EXPIRED"}
 AGGREGATOR_RATE = Decimal("0.01")
 CAMEROON_VAT_MULTIPLIER = Decimal("1.1925")
+_CENTS = Decimal("0.01")
+
+
+def compute_payment_split(gross: Decimal, bloomar_rate_percent: Decimal) -> dict[str, Decimal]:
+    """Ventilation financière d'un paiement (tout en Decimal, persistée définitivement).
+
+    - Frais agrégateur TTC = brut × 1% × 1.1925
+    - Commission Bloomar One = brut × (taux tenant en %)
+    - Net restaurant = brut − frais agrégateur − commission Bloomar
+    """
+    aggregator_fee = (gross * AGGREGATOR_RATE * CAMEROON_VAT_MULTIPLIER).quantize(
+        _CENTS, rounding=ROUND_HALF_UP
+    )
+    bloomar_commission = (gross * (bloomar_rate_percent / Decimal("100"))).quantize(
+        _CENTS, rounding=ROUND_HALF_UP
+    )
+    restaurant_net = (gross - aggregator_fee - bloomar_commission).quantize(
+        _CENTS, rounding=ROUND_HALF_UP
+    )
+    return {
+        "aggregator_fee": aggregator_fee,
+        "bloomar_commission": bloomar_commission,
+        "restaurant_net": restaurant_net,
+    }
 
 
 def add_payment_audit(
@@ -189,11 +216,12 @@ def apply_webhook(
 
     if new_status == "SUCCESS":
         gross = Decimal(str(tx.amount))
-        aggregator_fee = (gross * AGGREGATOR_RATE * CAMEROON_VAT_MULTIPLIER).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
-        bloomar_commission = Decimal("0.00")
-        restaurant_net = gross - aggregator_fee - bloomar_commission
+        restaurant = db.get(Restaurant, tx.restaurant_id) if tx.restaurant_id else None
+        bloomar_rate = Decimal(str(getattr(restaurant, "bloomar_commission_rate", 0) or 0))
+        split = compute_payment_split(gross, bloomar_rate)
+        aggregator_fee = split["aggregator_fee"]
+        bloomar_commission = split["bloomar_commission"]
+        restaurant_net = split["restaurant_net"]
         tx.status = "SUCCESS"
         tx.aggregator_fee = float(aggregator_fee)
         tx.bloomar_commission = float(bloomar_commission)
@@ -220,8 +248,11 @@ def apply_webhook(
                 "restaurant_net": float(restaurant_net),
             },
         )
+        notify_payment_outcome(db, tx, order, success=True)
     elif new_status in TERMINAL_FAILURE_STATUSES:
+        order = db.get(CustomerOrder, tx.order_id) if tx.order_id else None
         release_failed_payment(db, tx, new_status, body.get("message"))
+        notify_payment_outcome(db, tx, order, success=False)
     else:
         add_payment_audit(
             db,
@@ -252,11 +283,32 @@ def find_transaction(db: Session, provider: str, body: dict) -> PaymentTransacti
     return None
 
 
+async def _broadcast_payment(tx: PaymentTransaction, event_name: str) -> None:
+    try:
+        await payment_connections.broadcast(
+            tx.restaurant_id,
+            {
+                "event": event_name,
+                "transaction_id": tx.id,
+                "order_id": tx.order_id,
+                "provider": tx.provider,
+                "status": tx.status,
+                "amount": tx.amount,
+            },
+        )
+    except Exception:  # le temps réel ne doit jamais casser la réconciliation
+        logger.debug("Broadcast de réconciliation impossible pour %s", tx.id)
+
+
 async def reconcile_pending_transactions() -> int:
     db = SessionLocal()
     checked = 0
+    expiry_seconds = max(60, int(os.getenv("PAYMENT_EXPIRY_SECONDS", "300")))
+    failed_events: list[tuple[PaymentTransaction, str]] = []
     try:
-        cutoff = datetime.utcnow() - timedelta(seconds=15)
+        now = datetime.utcnow()
+        cutoff = now - timedelta(seconds=15)
+        expiry_cutoff = now - timedelta(seconds=expiry_seconds)
         transactions = (
             db.query(PaymentTransaction)
             .filter(
@@ -285,6 +337,7 @@ async def reconcile_pending_transactions() -> int:
                 checked += 1
                 if provider_status in TERMINAL_FAILURE_STATUSES:
                     release_failed_payment(db, tx, provider_status, result.get("message"))
+                    failed_events.append((tx, "payment_failed"))
                 elif provider_status == "SUCCESS" and previous_reconciliation_status != "SUCCESS":
                     add_payment_audit(
                         db,
@@ -292,12 +345,22 @@ async def reconcile_pending_transactions() -> int:
                         "payment.reconciliation_success_waiting_webhook",
                         "Succès détecté par réconciliation; webhook authentifié toujours requis",
                     )
+                elif provider_status not in {"SUCCESS"} and tx.created_at <= expiry_cutoff:
+                    # Garde-fou: paiement jamais confirmé -> EXPIRED, facture déverrouillée.
+                    release_failed_payment(
+                        db, tx, "EXPIRED", "Délai de confirmation dépassé"
+                    )
+                    failed_events.append((tx, "payment_failed"))
                 db.commit()
             except Exception as exc:
                 db.rollback()
                 logger.warning("Réconciliation impossible pour %s: %s", tx.id, exc)
     finally:
         db.close()
+
+    # Notifications temps réel APRÈS persistance (jamais source de vérité).
+    for tx, event_name in failed_events:
+        await _broadcast_payment(tx, event_name)
     return checked
 
 
@@ -309,3 +372,181 @@ async def reconciliation_loop() -> None:
         except Exception:
             logger.exception("Échec de la tâche de réconciliation Mobile Money")
         await asyncio.sleep(interval)
+
+
+# --- Demandes de paiement (serveur -> caisse) ---
+
+REQUESTABLE_STATUSES = {"Prête", "Livrée", "Servie"}
+PAID_STATUSES = {"Payée", "Payee"}
+METHOD_LABELS = {"ORANGE": "Orange Money", "MTN": "MTN Mobile Money", "CASH": "Espèces"}
+
+
+def _money(value: float) -> str:
+    return f"{int(round(value or 0)):,} FCFA".replace(",", " ")
+
+
+def _user_display_name(user) -> str | None:
+    full = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip()
+    return full or getattr(user, "username", None)
+
+
+def _provider_label(provider: str) -> str:
+    return "Orange Money" if provider == "ORANGE_CM" else "MTN Mobile Money"
+
+
+def notify_payment_outcome(db: Session, tx: PaymentTransaction, order, success: bool) -> None:
+    """Notifie la caisse et le serveur demandeur de l'issue d'un paiement mobile.
+
+    Comble le maillon manquant : la confirmation/échec n'était diffusée qu'en
+    WebSocket éphémère. On persiste désormais une notification.
+    """
+    order_number = getattr(order, "order_number", None) or tx.order_id
+    label = _provider_label(tx.provider)
+    if success:
+        cashier_title, cashier_msg = (
+            "Paiement confirmé",
+            f"Commande {order_number} payée — {label} · {_money(tx.amount)}.",
+        )
+        owner_title, owner_msg = (
+            "Paiement client confirmé",
+            f"Votre demande de paiement pour {order_number} a été confirmée ({_money(tx.amount)}).",
+        )
+    else:
+        reason = tx.failure_reason or "non confirmé"
+        cashier_title, cashier_msg = (
+            "Paiement échoué",
+            f"Échec du paiement {label} pour {order_number} : {reason}.",
+        )
+        owner_title, owner_msg = (
+            "Paiement client échoué",
+            f"La demande de paiement pour {order_number} a échoué : {reason}.",
+        )
+
+    # Un echec de paiement est actionnable -> double canal email.
+    notify(
+        db,
+        title=cashier_title,
+        message=cashier_msg,
+        restaurant_id=tx.restaurant_id,
+        role="CAISSE",
+        category="payment",
+        link="unpaid-orders",
+        email=not success,
+    )
+    # Serveur à l'origine de la demande (le cas échéant).
+    request = (
+        db.query(PaymentRequest)
+        .filter(PaymentRequest.transaction_id == tx.id)
+        .order_by(PaymentRequest.created_at.desc())
+        .first()
+    )
+    if request and request.requested_by_id:
+        notify(
+            db,
+            title=owner_title,
+            message=owner_msg,
+            restaurant_id=tx.restaurant_id,
+            user_id=request.requested_by_id,
+            category="payment",
+            link="orders",
+            email=not success,
+        )
+
+
+def create_payment_request(
+    db: Session,
+    order: CustomerOrder,
+    method: str,
+    payer_msisdn: str | None,
+    note: str | None,
+    user,
+) -> PaymentRequest:
+    """Crée une demande de paiement émise par un serveur pour la caisse."""
+    if order.status in PAID_STATUSES:
+        raise ValueError("Cette commande est déjà payée")
+    if order.payment_locked or order.status == "PENDING_PAYMENT":
+        raise ValueError("Un paiement est déjà actif pour cette facture")
+    if not getattr(order, "is_closed", False) and order.status not in REQUESTABLE_STATUSES:
+        raise ValueError("La demande n'est possible que sur une commande fermée, prête, servie ou livrée")
+
+    existing = (
+        db.query(PaymentRequest)
+        .filter(PaymentRequest.order_id == order.id, PaymentRequest.status == "PENDING")
+        .first()
+    )
+    if existing:
+        raise ValueError("Une demande de paiement est déjà en attente pour cette commande")
+
+    request = PaymentRequest(
+        restaurant_id=order.restaurant_id,
+        order_id=order.id,
+        method=method,
+        payer_msisdn=payer_msisdn or None,
+        amount=float(order.total_amount or 0),
+        note=note or None,
+        status="PENDING",
+        requested_by_id=getattr(user, "id", None),
+        requested_by_name=_user_display_name(user),
+    )
+    db.add(request)
+
+    server_name = request.requested_by_name or "Un serveur"
+    notify(
+        db,
+        title="Nouvelle demande de paiement",
+        message=(
+            f"{server_name} demande l'encaissement de la commande {order.order_number} "
+            f"({METHOD_LABELS.get(method, method)} · {_money(request.amount)})."
+        ),
+        restaurant_id=order.restaurant_id,
+        role="CAISSE",
+        category="payment",
+        link="unpaid-orders",
+    )
+    db.commit()
+    db.refresh(request)
+    return request
+
+
+def list_payment_requests(
+    db: Session,
+    restaurant_id: str,
+    status: str | None = None,
+) -> list[PaymentRequest]:
+    query = db.query(PaymentRequest).filter(PaymentRequest.restaurant_id == restaurant_id)
+    if status:
+        query = query.filter(PaymentRequest.status == status.upper())
+    return query.order_by(PaymentRequest.created_at.desc()).limit(200).all()
+
+
+def notify_request_owner(
+    db: Session,
+    request: PaymentRequest,
+    order_number: str,
+    title: str,
+    message: str,
+) -> None:
+    if not request.requested_by_id:
+        return
+    notify(
+        db,
+        title=title,
+        message=message,
+        restaurant_id=request.restaurant_id,
+        user_id=request.requested_by_id,
+        category="payment",
+        link="orders",
+    )
+
+
+def reject_payment_request(db: Session, request: PaymentRequest, user, order_number: str) -> None:
+    request.status = "REJECTED"
+    request.validated_by_id = getattr(user, "id", None)
+    notify_request_owner(
+        db,
+        request,
+        order_number,
+        "Demande de paiement rejetée",
+        f"La caisse a rejeté la demande de paiement de la commande {order_number}.",
+    )
+    db.commit()

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { TableFooter } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { validationFor } from "@/utils/validation";
 import { formatApiError } from "@/utils/network";
@@ -119,7 +120,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
         <button
           type="button"
           onClick={fetchBranches}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition-all hover:border-[#f04438] hover:text-[#f04438]"
+          className="lte-btn lte-btn-default"
         >
           <DashboardIcon name="Activity" size={17} />
           Actualiser
@@ -147,7 +148,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
           <button
             type="submit"
             disabled={isLoading}
-            className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-6 lte-btn lte-btn-primary"
           >
             <DashboardIcon name="MapPin" size={17} />
             Créer la branche
@@ -157,19 +158,19 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
         {!focusCreate && <div className="border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 p-5">
             <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
-              <div className="flex h-12 items-center gap-3 border border-slate-200 bg-white px-4">
-                <DashboardIcon name="Search" size={17} className="text-slate-400" />
+              <div className="flex h-10 items-center gap-2 rounded border border-slate-300 bg-white px-3 focus-within:border-[var(--dashboard-primary)]">
+                <DashboardIcon name="Search" size={16} className="text-slate-400" />
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Rechercher par nom, ville, adresse ou téléphone..."
-                  className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
+                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                 />
               </div>
               <select
                 value={cityFilter}
                 onChange={(event) => setCityFilter(event.target.value)}
-                className="h-12 border border-slate-200 bg-white px-4 text-sm font-black outline-none"
+                className="form-control"
               >
                 <option value="ALL">Toutes les villes</option>
                 {cities.map((city) => (
@@ -182,21 +183,21 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse text-left">
-              <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[#b42318]">
+            <table className="lte-table min-w-[720px]">
+              <thead>
                 <tr>
-                  <th className="px-5 py-4"><SortButton label="Branche" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
-                  <th className="px-5 py-4"><SortButton label="Ville" column="city" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
-                  <th className="px-5 py-4"><SortButton label="Adresse" column="address" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
-                  <th className="px-5 py-4"><SortButton label="Téléphone" column="phone" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
-                  <th className="px-5 py-4"><SortButton label="Statut" column="status" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+                  <th><SortButton label="Branche" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+                  <th><SortButton label="Ville" column="city" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+                  <th><SortButton label="Adresse" column="address" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+                  <th><SortButton label="Téléphone" column="phone" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+                  <th><SortButton label="Statut" column="status" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {filteredBranches.map((branch) => (
-                  <tr key={branch.id} className="hover:bg-slate-50">
-                    <td className="px-5 py-4">
-                      <p className="font-black text-[#070528]">{branch.name}</p>
+                  <tr key={branch.id}>
+                    <td>
+                      <p className="font-semibold text-[#070528]">{branch.name}</p>
                       <p className="text-xs font-semibold text-slate-400">
                         Créée le {new Date(branch.created_at).toLocaleDateString("fr-FR")}
                       </p>
@@ -226,6 +227,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
               </div>
             )}
           </div>
+          {Boolean(filteredBranches.length) && <TableFooter count={filteredBranches.length} label="branche" flush={false} />}
         </div>}
       </div>
     </section>
@@ -234,15 +236,15 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
 
 function Field({ label, required, className = "", ...props }) {
   return (
-    <label className={`block ${className}`}>
-      <span className="text-xs font-black text-[#070528]">
-        {label} {required && <span className="text-red-500">*</span>}
+    <label className={`lte-form-group ${className}`}>
+      <span className="lte-label">
+        {label} {required && <span className="req">*</span>}
       </span>
       <input
         {...props}
         {...validationFor(props.name)}
         required={required}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+        className="form-control"
       />
     </label>
   );

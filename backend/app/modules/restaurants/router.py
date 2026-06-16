@@ -13,6 +13,7 @@ from app.dependencies import assert_permission, get_current_user, require_tenant
 from app.modules.branches.models import Branch
 from app.modules.restaurants.models import Restaurant
 from app.modules.restaurants.schemas import (
+    RestaurantCommissionIn,
     RestaurantDetailPublic,
     RestaurantProvisionIn,
     RestaurantProvisionOut,
@@ -20,6 +21,7 @@ from app.modules.restaurants.schemas import (
     RestaurantSettingsIn,
     RestaurantStatusIn,
 )
+from app.modules.audit.service import log_action
 from app.modules.platform.models import RestaurantSubscription
 from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
@@ -212,6 +214,39 @@ def update_restaurant_status(
     )
     if subscription and not payload.is_active:
         subscription.status = "Suspendu"
+    db.commit()
+    db.refresh(restaurant)
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
+    return restaurant
+
+
+@router.patch("/{restaurant_id}/commission", response_model=RestaurantPublic)
+def update_restaurant_commission(
+    restaurant_id: str,
+    payload: RestaurantCommissionIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Règle le taux de commission Bloomar One d'un tenant (SUPERADMIN, tracé)."""
+    if current_user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Seul un super administrateur peut régler la commission")
+    restaurant = db.get(Restaurant, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+    previous = restaurant.bloomar_commission_rate
+    restaurant.bloomar_commission_rate = payload.bloomar_commission_rate
+    log_action(
+        db,
+        current_user,
+        "restaurant.commission_update",
+        "restaurant",
+        restaurant.id,
+        f"Commission Bloomar {restaurant.name}: {previous}% -> {payload.bloomar_commission_rate}%",
+        {"previous_rate": previous, "new_rate": payload.bloomar_commission_rate},
+    )
     db.commit()
     db.refresh(restaurant)
     restaurant.branches_count = max(

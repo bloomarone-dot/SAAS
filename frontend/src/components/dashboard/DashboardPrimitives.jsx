@@ -44,7 +44,7 @@ function useTodayLabel() {
 
 export function KpiGrid({ kpis }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
       {kpis.map((kpi) => (
         <MetricCard key={kpi.label} {...kpi} />
       ))}
@@ -62,14 +62,14 @@ function MetricCard({ label, value, trend, icon, tone }) {
   };
 
   return (
-    <div className={`relative min-h-28 overflow-hidden rounded text-white shadow-sm ${colors[tone] ?? colors.pink}`}>
-      <div className="relative z-10 p-4">
-        <p className="text-3xl font-bold leading-none">{value}</p>
-        <p className="mt-2 text-sm font-semibold">{label}</p>
-        <p className="mt-1 text-xs text-white/75">{trend}</p>
+    <div className={`relative min-h-24 overflow-hidden rounded text-white shadow-sm sm:min-h-28 ${colors[tone] ?? colors.pink}`}>
+      <div className="relative z-10 p-3 sm:p-4">
+        <p className="truncate text-2xl font-bold leading-none sm:text-3xl">{value}</p>
+        <p className="mt-2 truncate text-xs font-semibold sm:text-sm">{label}</p>
+        <p className="mt-1 truncate text-xs text-white/75">{trend}</p>
       </div>
       <div className="absolute -right-2 top-2 text-black/15">
-        <DashboardIcon name={icon} size={72} />
+        <DashboardIcon name={icon} size={64} />
       </div>
       <div className="absolute inset-x-0 bottom-0 h-1 bg-black/10" />
     </div>
@@ -177,7 +177,7 @@ export function KitchenTable() {
 function StatusTable({ rows, action }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[520px] text-left text-sm">
+      <table className="lte-table min-w-[520px]">
         <tbody className="divide-y divide-slate-100">
           {rows.map((row) => (
             <tr key={row[0]}>

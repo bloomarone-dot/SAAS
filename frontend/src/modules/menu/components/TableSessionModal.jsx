@@ -75,7 +75,7 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
               {table.room || 'Rez-de-chaussée'} · {occupiedSeats}/{table.capacity} place(s) occupée(s) · {freeSeats} libre(s)
             </p>
           </div>
-          <button type="button" onClick={onClose} className="h-9 rounded border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600 hover:text-slate-900">
+          <button type="button" onClick={onClose} className="lte-btn lte-btn-default lte-btn-sm">
             Fermer
           </button>
         </div>
@@ -149,7 +149,7 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
               type="button"
               onClick={createSeparateOrder}
               disabled={!canCreateOrder || loading || freeSeats <= 0}
-              className="h-11 rounded bg-[var(--dashboard-primary)] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="lte-btn lte-btn-primary"
             >
               {otherServerOrders.length > 0 ? 'Oui' : 'Ouvrir une commande'}
             </button>
@@ -179,7 +179,7 @@ function OrderRow({ order, onOpen, disabled = false }) {
         type="button"
         disabled={disabled}
         onClick={onOpen}
-        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="lte-btn lte-btn-default lte-btn-sm"
       >
         Compléter
       </button>

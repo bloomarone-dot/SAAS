@@ -167,8 +167,8 @@ function BranchTable({ branches }) {
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[920px] text-left text-sm">
-        <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[#b42318]">
+      <table className="lte-table min-w-[920px]">
+        <thead>
           <tr>
             <th className="px-4 py-3">Branche</th>
             <th className="px-4 py-3">CA total</th>

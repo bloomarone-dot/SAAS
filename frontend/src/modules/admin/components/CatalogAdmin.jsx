@@ -200,7 +200,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
         <button
           type="button"
           onClick={loadCatalog}
-          className="inline-flex h-12 items-center justify-center gap-2 border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm hover:border-[#f04438] hover:text-[#f04438]"
+          className="lte-btn lte-btn-default"
         >
           <DashboardIcon name="Activity" size={17} />
           Actualiser
@@ -239,7 +239,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
                   value={itemForm.category_id}
                   onChange={updateItemField}
                   required
-                  className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                  className="mt-2 form-control"
                 >
                   <option value="">Choisir</option>
                   {categories.map((category) => (
@@ -255,7 +255,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
                   value={itemForm.description}
                   onChange={updateItemField}
                   rows={3}
-                  className="mt-2 w-full border border-slate-200 bg-white px-3 py-3 text-sm font-semibold outline-none focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+                  className="mt-2 form-control"
                 />
               </label>
               <label className="flex items-center gap-3 text-sm font-black text-slate-700">
@@ -282,7 +282,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
               <select
                 value={categoryFilter}
                 onChange={(event) => setCategoryFilter(event.target.value)}
-                className="h-12 border border-slate-200 bg-white px-4 text-sm font-black outline-none"
+                className="form-control"
               >
                 <option value="ALL">Toutes catégories</option>
                 {categories.map((category) => (
@@ -292,7 +292,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
               <select
                 value={availabilityFilter}
                 onChange={(event) => setAvailabilityFilter(event.target.value)}
-                className="h-12 border border-slate-200 bg-white px-4 text-sm font-black outline-none"
+                className="form-control"
               >
                 <option value="ALL">Tous statuts</option>
                 <option value="AVAILABLE">Disponibles</option>
@@ -302,8 +302,8 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] border-collapse text-left">
-              <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[#b42318]">
+            <table className="lte-table min-w-[820px]">
+              <thead>
                 <tr>
                   <th className="px-5 py-4"><SortButton label="Plat" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th className="px-5 py-4"><SortButton label="Catégorie" column="category" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
@@ -373,7 +373,7 @@ function Field({ label, required, ...props }) {
         {...props}
         {...validationFor(props.name)}
         required={required}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+        className="mt-2 form-control"
       />
     </label>
   );
@@ -384,7 +384,7 @@ function PrimaryButton({ children, icon, disabled }) {
     <button
       type="submit"
       disabled={disabled}
-      className="mt-6 inline-flex h-12 items-center justify-center gap-2 bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+      className="mt-6 lte-btn lte-btn-primary"
     >
       <DashboardIcon name={icon} size={17} />
       {children}

@@ -71,6 +71,24 @@ def validate_password_strength(password: str) -> str:
     return password
 
 
+def generate_temporary_password() -> str:
+    """Genere un mot de passe temporaire conforme a la politique (lisible, 12 car.)."""
+    lowers = "abcdefghijkmnpqrstuvwxyz"
+    uppers = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    digits = "23456789"
+    symbols = "@#%&*!?"
+    base = [
+        secrets.choice(lowers),
+        secrets.choice(uppers),
+        secrets.choice(digits),
+        secrets.choice(symbols),
+    ]
+    pool = lowers + uppers + digits + symbols
+    base += [secrets.choice(pool) for _ in range(8)]
+    secrets.SystemRandom().shuffle(base)
+    return "".join(base)
+
+
 def detect_image_extension(content: bytes) -> str | None:
     """Verifie les signatures binaires des formats image autorises."""
     if content.startswith(b"\x89PNG\r\n\x1a\n"):

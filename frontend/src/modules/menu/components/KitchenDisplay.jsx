@@ -175,7 +175,7 @@ function TicketCard({ ticket, action, onAdvance }) {
       {ticket.notes && <p className="mt-3 rounded bg-slate-50 p-2 text-xs font-semibold text-slate-500">{ticket.notes}</p>}
       <div className="mt-4 flex items-center justify-between gap-3">
         <span className="text-xs font-black text-slate-500">{minutesSince(ticket.created_at)} min</span>
-        <button type="button" onClick={onAdvance} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700">
+        <button type="button" onClick={onAdvance} className="lte-btn lte-btn-primary lte-btn-sm">
           {action}
         </button>
       </div>

@@ -75,18 +75,18 @@ export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
             Suivez les actions sensibles: paiements, factures, utilisateurs, stock et avaries.
           </p>
         </div>
-        <button type="button" onClick={loadLogs} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white">
+        <button type="button" onClick={loadLogs} className="lte-btn lte-btn-primary">
           <DashboardIcon name="Activity" size={17} />
           Actualiser
         </button>
       </div>
 
       <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-        <select value={action} onChange={(event) => setAction(event.target.value)} className="h-12 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black">
+        <select value={action} onChange={(event) => setAction(event.target.value)} className="form-control">
           <option value="">Toutes les actions</option>
           {actions.map((item) => <option key={item} value={item}>{actionLabels[item] ?? item}</option>)}
         </select>
-        <select value={entityType} onChange={(event) => setEntityType(event.target.value)} className="h-12 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black">
+        <select value={entityType} onChange={(event) => setEntityType(event.target.value)} className="form-control">
           <option value="">Tous les objets</option>
           {entityTypes.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
@@ -102,8 +102,8 @@ export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
           <div className="p-12 text-center text-sm font-semibold text-slate-500">Aucune action enregistrée.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[#b42318]">
+            <table className="lte-table min-w-[980px]">
+              <thead>
                 <tr>
                   <th className="px-5 py-4">Date</th>
                   <th className="px-5 py-4">Action</th>

@@ -38,6 +38,7 @@ class RestaurantPublic(OrmModel):
     nui: Optional[str] = None
     tax_id: Optional[str] = None
     legal_name: Optional[str] = None
+    bloomar_commission_rate: float = 0
     primary_color: str
     secondary_color: str
     currency: str
@@ -90,6 +91,12 @@ class RestaurantStatusIn(BaseModel):
     """Payload d'activation ou suspension d'un tenant restaurant."""
 
     is_active: bool
+
+
+class RestaurantCommissionIn(BaseModel):
+    """Réglage SUPERADMIN du taux de commission Bloomar One (en %)."""
+
+    bloomar_commission_rate: float = Field(ge=0, le=100)
 
 
 class RestaurantSettingsIn(BaseModel):

@@ -505,6 +505,46 @@ export function SuperadminPlatformActivity({ apiBaseUrl, onMessage }) {
   );
 }
 
+function CommissionCell({ restaurant, onSave }) {
+  const initial = String(restaurant.bloomar_commission_rate ?? 0);
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const dirty = value !== initial;
+
+  async function submit() {
+    const rate = Number(value);
+    if (Number.isNaN(rate) || rate < 0 || rate > 100) return;
+    setSaving(true);
+    await onSave(restaurant, rate);
+    setSaving(false);
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex h-9 w-24 items-center rounded border border-slate-300 bg-white px-2">
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.25"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          className="w-full bg-transparent text-sm outline-none"
+        />
+        <span className="text-xs font-semibold text-slate-400">%</span>
+      </div>
+      <button
+        type="button"
+        onClick={submit}
+        disabled={!dirty || saving}
+        className="lte-btn lte-btn-primary lte-btn-sm"
+      >
+        {saving ? "..." : "OK"}
+      </button>
+    </div>
+  );
+}
+
 export function SuperadminActivation({ apiBaseUrl, restaurants, onRefreshRestaurants, onMessage }) {
   const [isSaving, setIsSaving] = useState(null);
 
@@ -524,14 +564,27 @@ export function SuperadminActivation({ apiBaseUrl, restaurants, onRefreshRestaur
     }
   }
 
+  async function saveCommission(restaurant, rate) {
+    try {
+      await platformApi(apiBaseUrl, `/api/v1/restaurants/${restaurant.id}/commission`, {
+        method: "PATCH",
+        body: JSON.stringify({ bloomar_commission_rate: rate }),
+      });
+      await onRefreshRestaurants?.();
+      onMessage(`Commission Bloomar de ${restaurant.name} fixée à ${rate}%.`);
+    } catch (error) {
+      onMessage(error.message);
+    }
+  }
+
   return (
     <AdminSurface
       eyebrow="Accès plateforme"
-      title="Activation / suspension"
-      description="Activez ou suspendez les tenants restaurants avec les statuts réels de la base."
+      title="Activation / suspension & commission"
+      description="Activez/suspendez les tenants et réglez la commission Bloomar One (en %) prélevée sur chaque paiement Mobile Money."
     >
       <DataTable
-        columns={["Restaurant", "Tenant", "Téléphone", "Statut", "Création", "Action"]}
+        columns={["Restaurant", "Tenant", "Statut", "Commission Bloomar", "Action"]}
         emptyTitle="Aucun restaurant"
         emptyText="Créez d’abord un restaurant."
       >
@@ -539,9 +592,10 @@ export function SuperadminActivation({ apiBaseUrl, restaurants, onRefreshRestaur
           <tr key={restaurant.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
             <td className="px-5 py-4 font-black text-[#07133d]">{restaurant.name}</td>
             <td className="px-5 py-4 font-semibold text-[#64708b]">{restaurant.slug}</td>
-            <td className="px-5 py-4 font-semibold text-[#64708b]">{restaurant.phone ?? "-"}</td>
             <td className="px-5 py-4"><StatusBadge status={restaurant.is_active ? "Actif" : "Inactif"} /></td>
-            <td className="px-5 py-4 font-semibold text-[#64708b]">{formatDate(restaurant.created_at)}</td>
+            <td className="px-5 py-4">
+              <CommissionCell restaurant={restaurant} onSave={saveCommission} />
+            </td>
             <td className="px-5 py-4 text-right">
               <TableAction
                 label={isSaving === restaurant.id ? "Traitement..." : restaurant.is_active ? "Suspendre" : "Activer"}

@@ -98,10 +98,10 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
             <option value="ALL">Toutes les salles</option>
             {rooms.map((room) => <option key={room} value={room}>{room}</option>)}
           </select>
-          <button type="button" onClick={loadTables} className="inline-flex h-11 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-700">
+          <button type="button" onClick={loadTables} className="lte-btn lte-btn-default">
             <DashboardIcon name="Activity" size={15} /> Actualiser
           </button>
-          <button type="button" onClick={() => setShowForm((value) => !value)} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#f04438] px-3 text-xs font-black text-white">
+          <button type="button" onClick={() => setShowForm((value) => !value)} className="lte-btn lte-btn-primary">
             <DashboardIcon name="Plus" size={15} /> Table
           </button>
         </div>
@@ -150,7 +150,7 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
               className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438]"
             />
           </label>
-          <button type="submit" className="self-end rounded-lg bg-emerald-700 px-5 py-3 text-sm font-black text-white">
+          <button type="submit" className="self-end lte-btn lte-btn-primary">
             Créer
           </button>
         </form>
@@ -183,7 +183,7 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
           {positionedTables.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
               <p className="text-sm font-semibold text-slate-500">Aucune table configurée.</p>
-              <button type="button" onClick={() => setShowForm(true)} className="mt-3 rounded-lg bg-[#f04438] px-4 py-2 text-xs font-black text-white">Ajouter la première table</button>
+              <button type="button" onClick={() => setShowForm(true)} className="mt-3 lte-btn lte-btn-primary lte-btn-sm">Ajouter la première table</button>
             </div>
           )}
         </div>

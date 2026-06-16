@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.modules.permissions.models import Permission, Role
+from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
 from app.security import decode_access_token
 
@@ -30,6 +31,16 @@ def get_current_user(
     # globale porte une version anterieure et n'est plus accepte.
     if int(payload.get("ver", 0)) != int(getattr(user, "token_version", 0) or 0):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expirée")
+
+    # Suspension tenant: un restaurant suspendu (ou impaye) bloque tous ses comptes,
+    # quel que soit le jeton deja emis. Le superadmin (sans restaurant) n'est pas concerne.
+    if user.restaurant_id:
+        restaurant = db.get(Restaurant, user.restaurant_id)
+        if not restaurant or not restaurant.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Restaurant suspendu. Contactez l'administration de la plateforme.",
+            )
 
     return user
 

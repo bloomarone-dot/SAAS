@@ -1,9 +1,13 @@
 import asyncio
+import logging
+import time
+import uuid
 from contextlib import suppress
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from app.modules.tables.router import router as tables_router
@@ -32,11 +36,20 @@ from app.modules.users import router as users
 from app.security import hash_password
 from app.modules.kitchen.router import router as kitchen_router
 from app.modules.payments import router as payments
+from app.modules.payments.realtime import payment_connections
 from app.modules.payments.service import reconciliation_loop
+from app.modules.platform.service import subscription_enforcement_loop
 
 # Point d'entree FastAPI: assemble le middleware CORS, la creation de tables
 # en developpement et les routeurs versionnes de l'API.
 IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() in {"production", "prod"}
+
+# Logging structuré et configurable (LOG_LEVEL=INFO par défaut).
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("app")
 
 # En production, la documentation interactive et le schema OpenAPI sont coupes
 # pour ne pas exposer la cartographie complete de l'API.
@@ -103,6 +116,32 @@ async def security_headers(request, call_next):
     return response
 
 
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    """Trace chaque requête (id, méthode, chemin, statut, durée) pour l'observabilité."""
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.exception("request_id=%s %s %s -> 500 (%.1fms)", request_id, request.method, request.url.path, duration_ms)
+        raise
+    duration_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Request-ID"] = request_id
+    level = logging.WARNING if response.status_code >= 500 else logging.INFO
+    logger.log(
+        level,
+        "request_id=%s %s %s -> %s (%.1fms)",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
+
+
 @app.on_event("startup")
 def create_tables() -> None:
     """Cree les tables au demarrage tant qu'Alembic n'est pas installe."""
@@ -116,6 +155,8 @@ def create_tables() -> None:
     ensure_finance_columns()
     ensure_user_columns()
     ensure_payment_transactions_table()
+    ensure_payment_requests_table()
+    ensure_payment_webhook_events_table()
     ensure_performance_indexes()
     ensure_french_status_values()
     seed_superadmin()
@@ -123,17 +164,21 @@ def create_tables() -> None:
 
 
 @app.on_event("startup")
-async def start_payment_reconciliation() -> None:
+async def start_background_tasks() -> None:
+    await payment_connections.start()
     app.state.payment_reconciliation_task = asyncio.create_task(reconciliation_loop())
+    app.state.subscription_enforcement_task = asyncio.create_task(subscription_enforcement_loop())
 
 
 @app.on_event("shutdown")
-async def stop_payment_reconciliation() -> None:
-    task = getattr(app.state, "payment_reconciliation_task", None)
-    if task:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+async def stop_background_tasks() -> None:
+    for attr in ("payment_reconciliation_task", "subscription_enforcement_task"):
+        task = getattr(app.state, attr, None)
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+    await payment_connections.stop()
 
 
 def ensure_menu_category_columns() -> None:
@@ -209,6 +254,7 @@ def ensure_restaurant_settings_columns() -> None:
         "nui": "VARCHAR(100) NULL",
         "tax_id": "VARCHAR(100) NULL",
         "legal_name": "VARCHAR(191) NULL",
+        "bloomar_commission_rate": "FLOAT NOT NULL DEFAULT 0",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if not missing:
@@ -238,6 +284,9 @@ def ensure_order_columns() -> None:
         "transaction_id": "VARCHAR(100) NULL",
         "payment_locked": "BOOLEAN NOT NULL DEFAULT FALSE",
         "payment_previous_status": "VARCHAR(40) NULL",
+        "is_closed": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "closed_at": "DATETIME NULL",
+        "closed_by_id": "VARCHAR(36) NULL",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if missing:
@@ -395,6 +444,18 @@ def ensure_payment_transactions_table() -> None:
                     "ON payment_transactions (active_order_key)"
                 )
             )
+
+
+def ensure_payment_requests_table() -> None:
+    """Cree la table des demandes de paiement serveur -> caisse."""
+    from app.modules.payments.models import PaymentRequest  # noqa: F401
+    Base.metadata.create_all(bind=engine, tables=[PaymentRequest.__table__])
+
+
+def ensure_payment_webhook_events_table() -> None:
+    """Cree la table d'idempotence/audit des webhooks de paiement."""
+    from app.modules.payments.models import PaymentWebhookEvent  # noqa: F401
+    Base.metadata.create_all(bind=engine, tables=[PaymentWebhookEvent.__table__])
 
 
 def ensure_user_columns() -> None:
@@ -739,6 +800,27 @@ def seed_demo_restaurant() -> None:
 @app.get("/")
 async def root():
     return {"message": "Restaurant SaaS API Running"}
+
+
+@app.get("/health")
+async def health():
+    """Liveness: l'application répond (ne touche pas la base)."""
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    """Readiness: vérifie la connectivité base de données."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return {"status": "ready", "database": "ok"}
+    except Exception as exc:  # noqa: BLE001 - on rapporte l'indisponibilité
+        logger.warning("Readiness KO: base de données injoignable (%s)", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "database": "error"},
+        )
 
 
 app.include_router(auth.router, prefix="/api/v1")

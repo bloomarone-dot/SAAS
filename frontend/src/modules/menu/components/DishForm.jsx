@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { DashboardIcon } from "@/components/dashboard/icons";
+import { AdminCard, Field, PrimaryAction } from "@/modules/admin/components/AdminUi";
 import { menuApi } from "../services/menuApi";
 
 export default function DishForm({ categories, onDishCreated }) {
@@ -68,126 +68,96 @@ export default function DishForm({ categories, onDishCreated }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-[#070528]">Créer un plat</h2>
-          <p className="mt-1 text-sm font-medium text-slate-500">
-            Ajoutez un produit vendable avec son prix et sa catégorie.
-          </p>
-        </div>
-        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#f04438] text-white">
-          <DashboardIcon name="UtensilsCrossed" size={19} />
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
+    <form onSubmit={handleSubmit}>
+      <AdminCard
+        title="Créer un plat"
+        icon="UtensilsCrossed"
+        footer={
+          <PrimaryAction
+            icon="Plus"
+            type="submit"
+            disabled={loading || !name.trim() || !categoryId || !price}
+            className="ml-auto"
+          >
+            {loading ? "Ajout..." : "Ajouter le plat"}
+          </PrimaryAction>
+        }
+      >
         {error && (
-          <div className="border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-600 md:col-span-2">
+          <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">
             {error}
           </div>
         )}
 
-        <label className="block">
-          <span className="text-xs font-black text-[#070528]">
-            Catégorie <span className="text-red-500">*</span>
-          </span>
-          <select
-            required
-            value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
-            className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-black outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
-            disabled={loading}
-          >
-            <option value="">Choisir</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="grid gap-x-4 md:grid-cols-2">
+          <Field label="Catégorie" required>
+            <select
+              required
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              className="form-control"
+              disabled={loading}
+            >
+              <option value="">Choisir</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          </Field>
 
-        <label className="block">
-          <span className="text-xs font-black text-[#070528]">
-            Nom du plat <span className="text-red-500">*</span>
-          </span>
-          <input
-            type="text"
+          <Field
+            label="Nom du plat"
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ex: Ndolé, Poulet DG, Jus de Bissap"
-            className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
             disabled={loading}
           />
-        </label>
 
-        <label className="block">
-          <span className="text-xs font-black text-[#070528]">
-            Prix de vente <span className="text-red-500">*</span>
-          </span>
-          <input
-            type="number"
+          <Field
+            label="Prix de vente"
             required
+            type="number"
             min="1"
             step="any"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             placeholder="Ex: 2500"
-            className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
             disabled={loading}
           />
-        </label>
 
-        <label className="block md:col-span-2">
-          <span className="text-xs font-black text-[#070528]">Description du plat</span>
-          <textarea
-            required
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Ingrédients, accompagnements..."
-            rows="3"
-            className="mt-2 w-full border border-slate-200 bg-white px-3 py-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
-            disabled={loading}
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-xs font-black text-[#070528]">URL de l'image</span>
-          <input
+          <Field
+            label="URL de l'image"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
             placeholder="https://..."
-            className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
             disabled={loading}
           />
-        </label>
 
-        <label className="block">
-          <span className="text-xs font-black text-[#070528]">Importer une image</span>
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
-            onChange={handleImageUpload}
+          <Field label="Description du plat" required as="textarea" rows="3" className="md:col-span-2"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Ingrédients, accompagnements..."
             disabled={loading}
-            className="mt-2 w-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 file:mr-3 file:border-0 file:bg-[#fff4ed] file:px-3 file:py-1.5 file:text-xs file:font-black file:text-[#f04438]"
           />
-        </label>
 
-        {imageUrl && (
-          <img src={imageUrl} alt="" className="h-32 w-full border border-slate-200 object-cover md:col-span-2" />
-        )}
-      </div>
+          <Field label="Importer une image" className="md:col-span-2">
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              onChange={handleImageUpload}
+              disabled={loading}
+              className="block w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-[#fff4ed] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#f04438]"
+            />
+          </Field>
 
-      <button
-        type="submit"
-        disabled={loading || !name.trim() || !categoryId || !price}
-        className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <DashboardIcon name="Plus" size={17} />
-        {loading ? "Ajout..." : "Ajouter le plat"}
-      </button>
+          {imageUrl && (
+            <img src={imageUrl} alt="" className="h-32 w-full rounded border border-slate-200 object-cover md:col-span-2" />
+          )}
+        </div>
+      </AdminCard>
     </form>
   );
 }

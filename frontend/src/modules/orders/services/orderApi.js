@@ -38,6 +38,17 @@ export const orderApi = {
       body: JSON.stringify({ status }),
     }),
 
+  // Ferme la commande (client demande la note) : plus d'ajout d'articles possible.
+  close: (orderId) =>
+    request(`/api/v1/orders/${orderId}/close`, { method: "POST" }),
+
+  // Réouvre une commande fermée (manager/admin, motif obligatoire).
+  reopen: (orderId, reason) =>
+    request(`/api/v1/orders/${orderId}/reopen`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
   validatePayment: (orderId, payload) =>
     request(`/api/v1/orders/${orderId}/payment`, {
       method: "POST",

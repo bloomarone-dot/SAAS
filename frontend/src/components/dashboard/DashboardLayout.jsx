@@ -18,6 +18,7 @@ export function DashboardLayout({
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [openMenuKeys, setOpenMenuKeys] = useState({});
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
   const roleMeta = getRoleMeta(role);
   const isSuperadmin = role === "SUPERADMIN";
@@ -49,7 +50,7 @@ export function DashboardLayout({
     if (!token) return;
     try {
       const response = await fetch(
-        `${apiBaseUrl}/api/v1/notifications?limit=8`,
+        `${apiBaseUrl}/api/v1/notifications?limit=30`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
@@ -69,6 +70,13 @@ export function DashboardLayout({
       headers: { Authorization: `Bearer ${token}` },
     }).catch(() => {});
     loadNotifications();
+  }
+
+  function openNotification(notification) {
+    markNotificationRead(notification.id);
+    const view = (notification.link || "").split("/").filter(Boolean).pop();
+    if (view) navigateTo(view);
+    setIsNotificationsOpen(false);
   }
 
   async function markAllNotificationsRead() {
@@ -299,15 +307,24 @@ export function DashboardLayout({
               {roleMeta.userRole}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            title="Déconnexion"
-            className={`${isCollapsed ? "hidden" : ""}`}
-            style={{ color: sidebarMutedText }}
-          >
-            <DashboardIcon name="LogOut" size={16} />
-          </button>
+          <div className={`flex items-center gap-1 ${isCollapsed ? "hidden" : ""}`}>
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              title="Changer mon mot de passe"
+              style={{ color: sidebarMutedText }}
+            >
+              <DashboardIcon name="KeyRound" size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={onLogout}
+              title="Déconnexion"
+              style={{ color: sidebarMutedText }}
+            >
+              <DashboardIcon name="LogOut" size={16} />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -370,6 +387,53 @@ export function DashboardLayout({
             </div>
 
             <div className="space-y-2">{renderMenu(false)}</div>
+
+            <div className="mt-auto border-t pt-4" style={{ borderColor: sidebarBorder }}>
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-black text-white"
+                  style={{
+                    background: isSuperadmin
+                      ? "linear-gradient(135deg, #e2e8f0, #94a3b8)"
+                      : `linear-gradient(135deg, ${primary}, ${secondary})`,
+                  }}
+                >
+                  {user.first_name?.[0]}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-black" style={{ color: sidebarText }}>
+                    {user.first_name} {user.last_name}
+                  </p>
+                  <p className="text-xs font-semibold" style={{ color: sidebarMutedText }}>
+                    {roleMeta.userRole}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  setIsChangePasswordOpen(true);
+                }}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-black"
+                style={{ borderColor: sidebarBorder, color: sidebarText }}
+              >
+                <DashboardIcon name="KeyRound" size={16} />
+                Changer mon mot de passe
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onLogout();
+                }}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-black"
+                style={{ borderColor: sidebarBorder, color: sidebarText }}
+              >
+                <DashboardIcon name="LogOut" size={16} />
+                Déconnexion
+              </button>
+            </div>
           </aside>
         </div>
       )}
@@ -433,7 +497,7 @@ export function DashboardLayout({
                   className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-black text-white"
                   style={{ backgroundColor: accent }}
                 >
-                  {notifications.filter((item) => !item.is_read).length}
+                  {Math.min(9, notifications.filter((item) => !item.is_read).length)}{notifications.filter((item) => !item.is_read).length > 9 ? "+" : ""}
                 </span>
               )}
             </button>
@@ -458,7 +522,7 @@ export function DashboardLayout({
                       <button
                         key={notification.id}
                         type="button"
-                        onClick={() => markNotificationRead(notification.id)}
+                        onClick={() => openNotification(notification)}
                         className={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${notification.is_read ? "opacity-70" : ""}`}
                       >
                         <p className="text-sm font-black text-slate-900">
@@ -505,7 +569,7 @@ export function DashboardLayout({
               {new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())}
             </span>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-5">
             {children}
           </div>
           <footer className="flex flex-wrap justify-between gap-2 border-t border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
@@ -514,6 +578,93 @@ export function DashboardLayout({
           </footer>
         </div>
       </main>
+
+      {isChangePasswordOpen && (
+        <ChangePasswordModal apiBaseUrl={apiBaseUrl} onClose={() => setIsChangePasswordOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function ChangePasswordModal({ apiBaseUrl, onClose }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  async function submit() {
+    setError("");
+    if (next !== confirm) {
+      setError("La confirmation ne correspond pas au nouveau mot de passe.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const token = localStorage.getItem("access_token");
+      const response = await fetch(`${apiBaseUrl}/api/v1/auth/change-password`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: current, new_password: next }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = typeof data?.detail === "string" ? data.detail : "Changement impossible.";
+        setError(detail);
+        return;
+      }
+      // Le backend renvoie un nouveau jeton (les autres sessions sont révoquées).
+      if (data.access_token) localStorage.setItem("access_token", data.access_token);
+      setDone(true);
+    } catch {
+      setError("Connexion impossible. Réessayez.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4" onClick={() => !busy && onClose()}>
+      <div className="lte-card mb-0 w-full max-w-sm" onClick={(event) => event.stopPropagation()}>
+        <div className="lte-card-header">
+          <h2 className="lte-card-title"><DashboardIcon name="KeyRound" size={17} /> Changer mon mot de passe</h2>
+          <div className="lte-card-tools">
+            <button type="button" onClick={onClose} className="lte-tool-btn"><DashboardIcon name="X" size={14} /></button>
+          </div>
+        </div>
+        {done ? (
+          <div className="lte-card-body space-y-4 text-center">
+            <p className="text-sm font-semibold text-emerald-700">Mot de passe mis à jour. Vos autres sessions ont été déconnectées.</p>
+            <button type="button" onClick={onClose} className="lte-btn lte-btn-primary w-full">Fermer</button>
+          </div>
+        ) : (
+          <>
+            <div className="lte-card-body space-y-3">
+              <label className="lte-form-group">
+                <span className="lte-label">Mot de passe actuel <span className="req">*</span></span>
+                <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} className="form-control" autoFocus />
+              </label>
+              <label className="lte-form-group">
+                <span className="lte-label">Nouveau mot de passe <span className="req">*</span></span>
+                <input type="password" value={next} onChange={(e) => setNext(e.target.value)} className="form-control" />
+                <span className="lte-help">Min. 10 caractères, avec minuscule, majuscule, chiffre et symbole.</span>
+              </label>
+              <label className="lte-form-group">
+                <span className="lte-label">Confirmer le nouveau mot de passe <span className="req">*</span></span>
+                <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="form-control" />
+              </label>
+              {error && <p className="rounded bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
+            </div>
+            <div className="lte-card-footer">
+              <button type="button" onClick={onClose} disabled={busy} className="lte-btn lte-btn-default">Annuler</button>
+              <button type="button" onClick={submit} disabled={busy || !current || !next} className="ml-auto lte-btn lte-btn-primary">
+                {busy ? "Mise à jour…" : "Mettre à jour"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -11,7 +11,7 @@ from app.modules.finance.models import PromotionCode, RestaurantExpense
 from app.modules.notifications.models import Notification
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.platform.models import PlatformSetting, RestaurantSubscription
-from app.modules.payments.models import PaymentTransaction
+from app.modules.payments.models import PaymentRequest, PaymentTransaction, PaymentWebhookEvent
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import (
     StockCostCenter,
@@ -42,6 +42,8 @@ __all__ = [
     "Restaurant",
     "RestaurantSubscription",
     "PaymentTransaction",
+    "PaymentRequest",
+    "PaymentWebhookEvent",
     "StockDamage",
     "StockCostCenter",
     "StockInventory",

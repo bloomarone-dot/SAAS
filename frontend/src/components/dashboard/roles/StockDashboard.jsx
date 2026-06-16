@@ -296,8 +296,8 @@ function DataTable({ headers, rows, movement = false, empty }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] text-left text-sm">
-        <thead className="text-xs font-black text-slate-500">
+      <table className="lte-table min-w-[560px]">
+        <thead>
           <tr>{headers.map((header) => <th key={header} className="pb-3">{header}</th>)}</tr>
         </thead>
         <tbody className="divide-y divide-slate-100">

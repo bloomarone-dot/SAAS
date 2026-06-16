@@ -280,7 +280,7 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white hover:bg-emerald-700 transition"
+            className="w-full lte-btn lte-btn-primary"
           >
             Fermer
           </button>

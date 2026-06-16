@@ -427,8 +427,8 @@ export function InventoryManager({ inventories, items, costCenters, period, onPe
         </div>
         {!openInventory ? (
           <div className="flex flex-col gap-2 sm:flex-row">
-            <input value={period} onChange={(event) => onPeriodChange(event.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none" />
-            <button type="button" onClick={onOpen} disabled={isLoading} className="h-11 rounded-lg bg-emerald-700 px-4 text-sm font-black text-white disabled:opacity-60">Ouvrir</button>
+            <input value={period} onChange={(event) => onPeriodChange(event.target.value)} className="form-control" />
+            <button type="button" onClick={onOpen} disabled={isLoading} className="lte-btn lte-btn-primary">Ouvrir</button>
           </div>
         ) : (
           <button type="button" onClick={() => onClose(openInventory.id)} disabled={isLoading} className="h-11 rounded-lg bg-[#f04438] px-4 text-sm font-black text-white disabled:opacity-60">Clôturer l’inventaire</button>
@@ -436,7 +436,7 @@ export function InventoryManager({ inventories, items, costCenters, period, onPe
       </div>
       {openInventory ? (
         <div className="mt-5 overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-sm">
+          <table className="lte-table min-w-[920px]">
             <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
               <tr>
                 <th className="px-4 py-3">Article</th>
@@ -541,7 +541,7 @@ export function DamageForm({ form, items, selectedItem, isLoading, onChange, onS
           <button
             type="submit"
             disabled={isLoading || !items.length}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-5 text-sm font-black text-white shadow-sm hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="lte-btn lte-btn-primary"
           >
             <DashboardIcon name="CheckCircle2" size={17} />
             Enregistrer l’avarie
@@ -578,7 +578,7 @@ export function Field({ label, required, ...props }) {
         {...props}
         {...validationFor(props.name)}
         required={required}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+        className="mt-2 form-control"
       />
     </label>
   );
@@ -604,7 +604,7 @@ export function SelectField({ label, options, required, ...props }) {
       <select
         {...props}
         required={required}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all focus:border-[#f04438] focus:ring-4 focus:ring-[#fee4e2]"
+        className="mt-2 form-control"
       >
         <option value="">Choisir</option>
         {options.map(([value, label]) => (
@@ -620,7 +620,7 @@ export function PrimaryButton({ children, icon, disabled }) {
     <button
       type="submit"
       disabled={disabled}
-      className="mt-6 inline-flex h-12 items-center justify-center gap-2 bg-[#f04438] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[#d92d20] disabled:cursor-not-allowed disabled:opacity-60"
+      className="mt-6 lte-btn lte-btn-primary"
     >
       <DashboardIcon name={icon} size={17} />
       {children}
@@ -650,8 +650,8 @@ export function StockTable({ items, onEdit }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1160px] border-collapse text-left">
-        <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[#b42318]">
+      <table className="lte-table min-w-[1160px]">
+        <thead>
           <tr>
             <th className="px-5 py-4"><SortButton label="Produit" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
             <th className="px-5 py-4"><SortButton label="Type" column="type" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
@@ -691,7 +691,7 @@ export function StockTable({ items, onEdit }) {
                   <button
                     type="button"
                     onClick={() => onEdit?.(item)}
-                    className="inline-flex h-9 items-center justify-center gap-2 border border-slate-200 px-3 text-xs font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]"
+                    className="lte-btn lte-btn-default"
                   >
                     <DashboardIcon name="Pencil" size={14} />
                     Modifier
@@ -1074,7 +1074,7 @@ export function HistoryPanel({ title, filter, onFilter, rows, items }) {
     <div className="border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="text-lg font-black text-[#070528]">{title}</h2>
-        <select value={filter} onChange={(event) => onFilter(event.target.value)} className="h-10 border border-slate-200 bg-white px-3 text-xs font-black outline-none">
+        <select value={filter} onChange={(event) => onFilter(event.target.value)} className="form-control h-8 w-auto text-xs">
           <option value="ALL">Tous</option>
           {Object.entries(movementLabels).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>

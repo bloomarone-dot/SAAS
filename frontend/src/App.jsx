@@ -7,6 +7,7 @@ import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
 import { LoginPanel } from "@/features/auth/components/LoginPanel";
+import { PasswordRecovery } from "@/features/auth/components/PasswordRecovery";
 const SuperadminRestaurants = lazy(() =>
   import("@/features/restaurants/components/SuperadminRestaurants").then((m) => ({
     default: m.SuperadminRestaurants,
@@ -128,6 +129,7 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showLogin, setShowLogin] = useState(() => shouldShowLoginForPath());
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(() => readOfflineQueue().length);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
@@ -375,8 +377,33 @@ export default function App() {
     }
   }
 
+  if (!session && window.location.pathname.startsWith("/reset-password")) {
+    return (
+      <PasswordRecovery
+        apiBaseUrl={apiBaseUrl}
+        mode="reset"
+        token={new URLSearchParams(window.location.search).get("token") || ""}
+        onBackToLogin={() => {
+          window.history.pushState({}, "", "/login");
+          setRecoveryMode(false);
+          setShowLogin(true);
+        }}
+      />
+    );
+  }
+
   if (!session && !showLogin) {
     return <LandingPage apiBaseUrl={apiBaseUrl} />;
+  }
+
+  if (!session && recoveryMode) {
+    return (
+      <PasswordRecovery
+        apiBaseUrl={apiBaseUrl}
+        mode="forgot"
+        onBackToLogin={() => setRecoveryMode(false)}
+      />
+    );
   }
 
   if (!session) {
@@ -387,6 +414,7 @@ export default function App() {
         onSubmit={submitLogin}
         isLoading={isLoading}
         message={message}
+        onForgotPassword={() => setRecoveryMode(true)}
       />
     );
   }
@@ -494,7 +522,7 @@ export default function App() {
         return <ServerFreeTables restaurantId={session.restaurant_id} />;
       }
 
-      if (["orders", "new-table-order", "add-order-items", "send-kitchen", "ready-notifications", "served-orders", "request-bill"].includes(activeView) && session.role === "SERVEUR") {
+      if (["orders", "new-table-order", "add-order-items", "send-kitchen", "ready-notifications", "served-orders", "request-bill", "request-payment"].includes(activeView) && session.role === "SERVEUR") {
         return <ServerOrderWorkspace restaurantId={session.restaurant_id} role={session.role} view={activeView} />;
       }
 

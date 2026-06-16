@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
+from app.modules.audit.service import log_action
 from app.modules.finance.models import PromotionCode, RestaurantExpense
 from app.modules.finance.schemas import (
     BalanceSheetOut,
@@ -163,6 +164,12 @@ def create_expense(
         created_by_id=current_user.id,
     )
     db.add(expense)
+    db.flush()
+    log_action(
+        db, current_user, "expense.create", "expense", expense.id,
+        f"Dépense créée: {expense.label} ({expense.amount})",
+        {"amount": expense.amount, "category": expense.category, "payment_method": expense.payment_method},
+    )
     db.commit()
     db.refresh(expense)
     return expense
@@ -179,8 +186,14 @@ def update_expense(
     expense = db.get(RestaurantExpense, expense_id)
     if not expense or expense.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Depense introuvable")
-    for field, value in payload.dict(exclude_unset=True).items():
+    changed = payload.dict(exclude_unset=True)
+    for field, value in changed.items():
         setattr(expense, field, value)
+    log_action(
+        db, current_user, "expense.update", "expense", expense.id,
+        f"Dépense modifiée: {expense.label}",
+        {"fields": sorted(changed.keys()), "amount": expense.amount},
+    )
     db.commit()
     db.refresh(expense)
     return expense
@@ -197,6 +210,11 @@ def delete_expense(
     if not expense or expense.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Depense introuvable")
     expense.is_active = False
+    log_action(
+        db, current_user, "expense.delete", "expense", expense.id,
+        f"Dépense archivée: {expense.label} ({expense.amount})",
+        {"amount": expense.amount},
+    )
     db.commit()
     return None
 
@@ -242,6 +260,12 @@ def create_promotion(
         created_by_id=current_user.id,
     )
     db.add(promo)
+    db.flush()
+    log_action(
+        db, current_user, "promotion.create", "promotion", promo.id,
+        f"Code promo créé: {promo.code}",
+        {"discount_type": promo.discount_type, "discount_value": promo.discount_value},
+    )
     db.commit()
     db.refresh(promo)
     return promo
@@ -273,6 +297,11 @@ def update_promotion(
             if duplicate:
                 raise HTTPException(status_code=400, detail="Ce code promo existe déjà")
         setattr(promo, field, value)
+    log_action(
+        db, current_user, "promotion.update", "promotion", promo.id,
+        f"Code promo modifié: {promo.code}",
+        {"fields": sorted(payload.dict(exclude_unset=True).keys()), "is_active": promo.is_active},
+    )
     db.commit()
     db.refresh(promo)
     return promo
@@ -289,6 +318,11 @@ def delete_promotion(
     if not promo or promo.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Code promo introuvable")
     promo.is_active = False
+    log_action(
+        db, current_user, "promotion.delete", "promotion", promo.id,
+        f"Code promo archivé: {promo.code}",
+        {"code": promo.code},
+    )
     db.commit()
     return None
 

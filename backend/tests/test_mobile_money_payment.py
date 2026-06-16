@@ -8,6 +8,17 @@ from app.modules.payments.service import apply_webhook
 from app.security import verify_hmac_sha256_signature
 
 
+class _EmptyQuery:
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return None
+
+
 class FakeSession:
     def __init__(self, order):
         self.order = order
@@ -19,6 +30,9 @@ class FakeSession:
 
     def get(self, model, entity_id):
         return self.order if entity_id == self.order.id else None
+
+    def query(self, *args, **kwargs):
+        return _EmptyQuery()
 
     def commit(self):
         self.commits += 1

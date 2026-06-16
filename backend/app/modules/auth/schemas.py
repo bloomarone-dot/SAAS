@@ -41,3 +41,14 @@ class ResetPasswordIn(BaseModel):
     @validator("password")
     def password_is_strong(cls, value: str) -> str:
         return validate_password_strength(value)
+
+
+class ChangePasswordIn(BaseModel):
+    """Changement de mot de passe par l'utilisateur connecte (self-service)."""
+
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=10, max_length=128)
+
+    @validator("new_password")
+    def new_password_is_strong(cls, value: str) -> str:
+        return validate_password_strength(value)

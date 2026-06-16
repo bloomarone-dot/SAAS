@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
+import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { menuApi } from "../services/menuApi";
 
@@ -245,11 +245,11 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         <AdminCard>
           <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_180px_180px_auto]">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher un plat..." />
-            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none">
+            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="form-control">
               <option value="ALL">Toutes</option>
               {activeCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
-            <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none">
+            <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="form-control">
               <option value="ALL">Tous statuts</option>
               <option value="AVAILABLE">Disponibles</option>
               <option value="UNAVAILABLE">Indisponibles</option>
@@ -306,22 +306,22 @@ function DishEditor({ form, categories, onChange, onUpload, onSubmit }) {
         <div className="grid gap-4 md:grid-cols-2">
           <Field name="name" label="Nom du plat" required value={form.name} onChange={onChange} placeholder="Ex. Poulet braisé" />
           <Field label="Catégorie" required>
-            <select name="category_id" value={form.category_id} onChange={onChange} required className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none">
+            <select name="category_id" value={form.category_id} onChange={onChange} required className="form-control">
               <option value="">Sélectionner une catégorie</option>
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
           </Field>
           <Field name="price" label="Prix de vente (FCFA)" required type="number" min="1" value={form.price} onChange={onChange} />
           <Field name="cost_per_dish" label="Coût par plat (FCFA)" type="number" min="0" value={form.cost_per_dish} onChange={onChange} />
-          <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700">
+          <label className="flex h-10 items-center gap-3 self-end rounded border border-slate-300 px-3 text-sm font-semibold text-slate-700">
             <input name="is_available" type="checkbox" checked={form.is_available} onChange={onChange} />
             Disponible
           </label>
         </div>
       </div>
       <Field name="description" label="Description" as="textarea" rows={3} value={form.description} onChange={onChange} className="mt-4" placeholder="Décrivez votre plat..." />
-      <Field name="image_url" label="URL image" value={form.image_url} onChange={onChange} className="mt-4" placeholder="https://..." />
-      <div className="mt-5 flex justify-end gap-3">
+      <Field name="image_url" label="URL image" value={form.image_url} onChange={onChange} placeholder="https://..." />
+      <div className="mt-2 flex justify-end gap-3 border-t border-slate-100 pt-4">
         <PrimaryAction icon="Plus" type="submit">Enregistrer</PrimaryAction>
       </div>
     </form>
@@ -393,43 +393,44 @@ function OrderCart({ order, onQuantityChange, onSendToKitchen }) {
 function DishesTable({ dishes, categoryNameById, role, orderMode, onAddToOrder, onToggle, onDelete }) {
   if (!dishes.length) return <EmptyState icon="UtensilsCrossed" title="Aucun plat trouvé" text="Créez un plat ou ajustez vos filtres." />;
   return (
+    <>
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] text-left text-sm">
-        <thead className="text-xs font-black text-slate-500">
+      <table className="lte-table min-w-[980px]">
+        <thead>
           <tr>
-            <th className="py-3">Plat</th>
-            <th className="py-3">Catégorie</th>
-            <th className="py-3">Prix</th>
-            <th className="py-3">Coût</th>
-            <th className="py-3">Disponibilité</th>
-            <th className="py-3">Créé le</th>
-            <th className="py-3 text-right">Actions</th>
+            <th>Plat</th>
+            <th>Catégorie</th>
+            <th>Prix</th>
+            <th>Coût</th>
+            <th>Disponibilité</th>
+            <th>Créé le</th>
+            <th className="text-right">Actions</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody>
           {dishes.map((dish) => (
             <tr key={dish.id}>
-              <td className="py-3">
+              <td>
                 <div className="flex items-center gap-3">
-                  <img src={dish.image_url || "/Images/ImageLogin.jpg"} alt="" className="h-12 w-12 rounded-lg object-cover" />
+                  <img src={dish.image_url || "/Images/ImageLogin.jpg"} alt="" className="h-10 w-10 rounded object-cover" />
                   <div>
-                    <p className="font-black text-slate-950">{dish.name}</p>
-                    <p className="max-w-xs truncate text-xs font-semibold text-slate-500">{dish.description || "Sans description"}</p>
+                    <p className="font-semibold text-slate-800">{dish.name}</p>
+                    <p className="max-w-xs truncate text-xs text-slate-500">{dish.description || "Sans description"}</p>
                   </div>
                 </div>
               </td>
-              <td className="py-3"><StatusPill tone="green">{categoryNameById.get(dish.category_id) ?? "Sans catégorie"}</StatusPill></td>
-              <td className="py-3 font-black text-slate-900">{money(dish.price)}</td>
-              <td className="py-3 font-semibold text-slate-600">{money(dish.cost_per_dish)}</td>
-              <td className="py-3"><StatusPill tone={dish.is_available ? "green" : "red"}>{dish.is_available ? "Disponible" : "Indisponible"}</StatusPill></td>
-              <td className="py-3 font-semibold text-slate-500">{new Date(dish.created_at).toLocaleDateString("fr-FR")}</td>
-              <td className="py-3 text-right">
+              <td><StatusPill tone="green">{categoryNameById.get(dish.category_id) ?? "Sans catégorie"}</StatusPill></td>
+              <td className="font-semibold text-slate-800">{money(dish.price)}</td>
+              <td>{money(dish.cost_per_dish)}</td>
+              <td><StatusPill tone={dish.is_available ? "green" : "red"}>{dish.is_available ? "Disponible" : "Indisponible"}</StatusPill></td>
+              <td className="text-slate-500">{new Date(dish.created_at).toLocaleDateString("fr-FR")}</td>
+              <td className="text-right">
                 {orderMode ? (
                   <button
                     type="button"
                     disabled={!dish.is_available}
                     onClick={() => onAddToOrder(dish)}
-                    className="rounded-lg bg-[var(--dashboard-primary)] px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="lte-btn lte-btn-primary lte-btn-sm"
                   >
                     Ajouter
                   </button>
@@ -445,6 +446,8 @@ function DishesTable({ dishes, categoryNameById, role, orderMode, onAddToOrder, 
         </tbody>
       </table>
     </div>
+    {!orderMode && <TableFooter count={dishes.length} label="plat" />}
+    </>
   );
 }
 

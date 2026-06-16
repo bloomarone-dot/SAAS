@@ -3,7 +3,21 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import DishesPage from "@/modules/menu/pages/DishesPage";
 import { orderApi } from "@/modules/orders/services/orderApi";
+import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { tableApi } from "@/modules/menu/services/tableApi";
+
+const PAYMENT_REQUESTABLE_STATUSES = ["Prête", "Livrée", "Livree", "Servie"];
+const PAID_OR_DEAD_STATUSES = ["Payée", "Payee", "Annulée", "Annulee", "PENDING_PAYMENT", "Archivée"];
+
+function isPaymentRequestable(order) {
+  if (PAID_OR_DEAD_STATUSES.includes(order.status)) return false;
+  if (Number(order.total_amount || 0) <= 0) return false;
+  return Boolean(order.is_closed) || PAYMENT_REQUESTABLE_STATUSES.includes(order.status);
+}
+
+function formatMsisdn(raw) {
+  return String(raw || "").replace(/\D/g, "").replace(/^(?:237|00237)/, "").slice(0, 9);
+}
 
 export function ServerClients() {
   const [orders, setOrders] = useState([]);
@@ -126,14 +140,14 @@ export function ServerOpenTables({ restaurantId }) {
                 max={Math.max(1, Number(table.free_seats ?? table.capacity ?? 1))}
                 value={partySizes[table.id] || 1}
                 onChange={(event) => setPartySizes((current) => ({ ...current, [table.id]: event.target.value }))}
-                className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-black outline-none focus:border-emerald-600"
+                className="mt-2 form-control focus:border-emerald-600"
               />
             </label>
             <button
               type="button"
               onClick={() => openTable(table)}
               disabled={loadingTableId === table.id}
-              className="mt-4 h-11 w-full rounded-lg bg-emerald-700 text-sm font-black text-white disabled:opacity-60"
+              className="mt-4 w-full lte-btn lte-btn-primary"
             >
               Ouvrir la table
             </button>
@@ -269,6 +283,10 @@ export function ServerOrderWorkspace({ restaurantId, role, view }) {
     }
   }
 
+  if (view === "request-payment") {
+    return <ServerPaymentRequests orders={orders} onReload={loadOrders} />;
+  }
+
   if (view === "new-table-order") {
     return <ServerOpenTables restaurantId={restaurantId} />;
   }
@@ -390,7 +408,10 @@ function OrderActionCard({ order, actionLabel, disabled, loading, onAction }) {
             {order.table_id ? `${order.table_room || "Salle"} · Table ${order.table_name || order.table_id}` : order.customer_name}
           </p>
         </div>
-        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{order.status}</span>
+        <div className="flex flex-col items-end gap-1">
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{order.status}</span>
+          <OrderOpenBadge order={order} />
+        </div>
       </div>
       <div className="mt-4 space-y-2 text-sm font-semibold text-slate-600">
         <p>Source : {order.order_source || order.fulfillment_type}</p>
@@ -403,11 +424,184 @@ function OrderActionCard({ order, actionLabel, disabled, loading, onAction }) {
           type="button"
           onClick={onAction}
           disabled={disabled || loading}
-          className="mt-4 h-11 w-full rounded-lg bg-emerald-700 text-sm font-black text-white disabled:opacity-60"
+          className="mt-4 w-full lte-btn lte-btn-primary"
         >
           {actionLabel}
         </button>
       )}
+    </div>
+  );
+}
+
+function ServerPaymentRequests({ orders, onReload }) {
+  const [activeOrder, setActiveOrder] = useState(null);
+  const [message, setMessage] = useState("");
+  const [busyId, setBusyId] = useState("");
+  const eligible = orders.filter(isPaymentRequestable);
+
+  async function closeOrder(order) {
+    setBusyId(order.id);
+    setMessage("");
+    try {
+      await orderApi.close(order.id);
+      setMessage(`Commande ${order.order_number} fermée. Vous pouvez demander le paiement.`);
+      await onReload?.();
+    } catch (error) {
+      setMessage(error.message || "Fermeture de la commande impossible.");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  return (
+    <section className="space-y-5">
+      <Header title="Fermer & demander le paiement" subtitle="Quand le client demande la note : fermez la commande (plus d'ajout possible), puis transmettez le mode de paiement à la caisse." icon="Wallet" />
+      {message && <Message text={message} />}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {eligible.map((order) => (
+          <div key={order.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-black text-slate-950">{order.order_number}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  {order.table_id ? `${order.table_room || "Salle"} · Table ${order.table_name || order.table_id}` : order.customer_name}
+                </p>
+              </div>
+              <OrderOpenBadge order={order} />
+            </div>
+            <p className="mt-4 text-base font-black text-slate-950">{Number(order.total_amount || 0).toLocaleString("fr-FR")} FCFA</p>
+            {order.is_closed ? (
+              <button type="button" onClick={() => { setMessage(""); setActiveOrder(order); }} className="mt-4 w-full lte-btn lte-btn-primary">
+                <DashboardIcon name="Wallet" size={16} /> Demander le paiement
+              </button>
+            ) : (
+              <button type="button" onClick={() => closeOrder(order)} disabled={busyId === order.id} className="mt-4 w-full lte-btn lte-btn-default">
+                <DashboardIcon name="ReceiptText" size={16} /> {busyId === order.id ? "Fermeture…" : "Fermer la commande (note)"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!eligible.length && <EmptyBox text="Aucune commande finalisée à encaisser pour le moment." />}
+
+      {activeOrder && (
+        <PaymentRequestModal
+          order={activeOrder}
+          onClose={() => setActiveOrder(null)}
+          onDone={(label) => {
+            setActiveOrder(null);
+            setMessage(label);
+            onReload?.();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function OrderOpenBadge({ order }) {
+  return order.is_closed ? (
+    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">Fermée</span>
+  ) : (
+    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Ouverte</span>
+  );
+}
+
+function PaymentRequestModal({ order, onClose, onDone }) {
+  const [method, setMethod] = useState("ORANGE");
+  const [msisdn, setMsisdn] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const isMobile = method === "ORANGE" || method === "MTN";
+
+  async function submit() {
+    setError("");
+    const cleaned = formatMsisdn(msisdn);
+    if (isMobile && cleaned.length < 8) {
+      setError("Numéro Mobile Money du client invalide (ex: 690 000 000).");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await paymentApi.createRequest({
+        order_id: order.id,
+        method,
+        payer_msisdn: isMobile ? cleaned : null,
+      });
+      onDone(`Demande de paiement envoyée à la caisse pour ${order.order_number}.`);
+    } catch (err) {
+      setError(err.message || "Envoi de la demande impossible.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const methods = [
+    { value: "ORANGE", label: "Orange Money" },
+    { value: "MTN", label: "MTN Mobile Money" },
+    { value: "CASH", label: "Espèces" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
+      <div className="lte-card mb-0 w-full max-w-md" onClick={(event) => event.stopPropagation()}>
+        <div className="lte-card-header">
+          <h2 className="lte-card-title"><DashboardIcon name="Wallet" size={17} /> Demander le paiement</h2>
+          <div className="lte-card-tools">
+            <button type="button" onClick={onClose} className="lte-tool-btn"><DashboardIcon name="X" size={14} /></button>
+          </div>
+        </div>
+        <div className="lte-card-body space-y-4">
+          <p className="text-sm font-semibold text-slate-600">
+            Commande <strong>{order.order_number}</strong> · {Number(order.total_amount || 0).toLocaleString("fr-FR")} FCFA
+          </p>
+
+          <div>
+            <span className="lte-label">Mode de paiement choisi par le client</span>
+            <div className="grid grid-cols-3 gap-2">
+              {methods.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => setMethod(item.value)}
+                  className={`rounded border px-2 py-2 text-xs font-semibold transition ${method === item.value ? "border-[var(--dashboard-primary)] bg-[color-mix(in_srgb,var(--dashboard-primary)_10%,white)] text-[var(--dashboard-primary)]" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isMobile && (
+            <label className="lte-form-group">
+              <span className="lte-label">Numéro {method === "ORANGE" ? "Orange" : "MTN"} du client <span className="req">*</span></span>
+              <input
+                type="tel"
+                value={msisdn}
+                onChange={(event) => setMsisdn(event.target.value)}
+                placeholder="6XX XXX XXX"
+                className="form-control"
+                autoFocus
+              />
+              <span className="lte-help">Format camerounais : 6XX XXX XXX (sans indicatif). Le client confirmera le paiement par USSD.</span>
+            </label>
+          )}
+
+          {method === "CASH" && (
+            <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+              La caisse confirmera l'encaissement des espèces. Aucune notification automatique au client.
+            </p>
+          )}
+
+          {error && <p className="rounded bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>}
+        </div>
+        <div className="lte-card-footer">
+          <button type="button" onClick={onClose} className="lte-btn lte-btn-default">Annuler</button>
+          <button type="button" onClick={submit} disabled={submitting} className="ml-auto lte-btn lte-btn-primary">
+            {submitting ? "Envoi…" : "Envoyer à la caisse"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -518,7 +712,7 @@ function DataTable({ headers, rows, empty, footerLabel, footerValue }) {
         <div className="p-10 text-center text-sm font-semibold text-slate-500">{empty}</div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="lte-table min-w-[720px]">
             <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
               <tr>{headers.map((header) => <th key={header} className="px-5 py-4">{header}</th>)}</tr>
             </thead>

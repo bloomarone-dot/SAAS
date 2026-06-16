@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
+import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { apiFetch } from "@/config/http";
 import { MtnMoneyPayment } from "./MtnMoneyPayment";
@@ -30,7 +30,33 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
   const [isLoading, setIsLoading] = useState(false);
   const [orangePayOrderId, setOrangePayOrderId] = useState(null);
   const [mtnPayOrderId, setMtnPayOrderId] = useState(null);
+  const [reopenTarget, setReopenTarget] = useState(null);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenBusy, setReopenBusy] = useState(false);
   const reviewOnly = currentUser?.role === "ADMIN";
+
+  async function submitReopen() {
+    if (!reopenTarget) return;
+    if (reopenReason.trim().length < 5) {
+      onMessage("Le motif de réouverture est obligatoire (5 caractères minimum).");
+      return;
+    }
+    setReopenBusy(true);
+    try {
+      const updated = await api(`/api/v1/orders/${reopenTarget.id}/reopen`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reopenReason.trim() }),
+      });
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      onMessage(`Commande ${updated.order_number} rouverte. L'administrateur a été notifié.`);
+      setReopenTarget(null);
+      setReopenReason("");
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setReopenBusy(false);
+    }
+  }
 
   useEffect(() => {
     loadOrders();
@@ -174,7 +200,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
             <Field name="customer_phone" label="Téléphone" required value={editForm.customer_phone} onChange={updateEditField} />
             <Field name="customer_address" label="Adresse" value={editForm.customer_address} onChange={updateEditField} />
             <Field label="Statut">
-              <select name="status" value={editForm.status} onChange={updateEditField} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none">
+              <select name="status" value={editForm.status} onChange={updateEditField} className="form-control">
                 {nextStatuses.map((item) => <option key={item}>{item}</option>)}
               </select>
             </Field>
@@ -199,10 +225,10 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
           </div>
           <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_170px_170px_auto]">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une commande, client, table..." />
-            <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none">
+            <select value={status} onChange={(event) => setStatus(event.target.value)} className="form-control">
               {statuses.map((item) => <option key={item}>{item}</option>)}
             </select>
-            <input type="date" className="h-12 rounded-lg border border-slate-200 px-3 text-sm font-black outline-none" />
+            <input type="date" className="form-control" />
             <SecondaryAction icon="Activity" onClick={loadOrders}>Actualiser</SecondaryAction>
           </div>
           <OrdersTable
@@ -213,6 +239,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
                   onEdit={startEdit}
                   onDelete={deleteOrder}
                   onStatus={updateStatus}
+                  onReopen={setReopenTarget}
                   onOrangePay={reviewOnly ? undefined : setOrangePayOrderId}
                   onMtnPay={reviewOnly ? undefined : setMtnPayOrderId}
                 />
@@ -285,16 +312,49 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
           </div>
         );
       })()}
+      {reopenTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => !reopenBusy && setReopenTarget(null)}>
+          <div className="lte-card mb-0 w-full max-w-md" onClick={(event) => event.stopPropagation()}>
+            <div className="lte-card-header">
+              <h2 className="lte-card-title"><DashboardIcon name="AlertTriangle" size={17} /> Rouvrir la commande {reopenTarget.order_number}</h2>
+            </div>
+            <div className="lte-card-body space-y-3">
+              <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                Action sensible et tracée. L'administrateur sera notifié de cette réouverture.
+              </p>
+              <label className="lte-form-group">
+                <span className="lte-label">Motif de la réouverture <span className="req">*</span></span>
+                <textarea
+                  value={reopenReason}
+                  onChange={(event) => setReopenReason(event.target.value)}
+                  rows={3}
+                  placeholder="Ex : ajout d'un plat oublié à la demande du client"
+                  className="form-control"
+                  autoFocus
+                />
+                <span className="lte-help">5 caractères minimum.</span>
+              </label>
+            </div>
+            <div className="lte-card-footer">
+              <button type="button" onClick={() => setReopenTarget(null)} disabled={reopenBusy} className="lte-btn lte-btn-default">Annuler</button>
+              <button type="button" onClick={submitReopen} disabled={reopenBusy} className="ml-auto lte-btn lte-btn-primary">
+                {reopenBusy ? "Réouverture…" : "Confirmer la réouverture"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminPage>
   );
 }
 
-function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, onDelete, onStatus }) {
+function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, onDelete, onStatus, onReopen }) {
   if (!orders.length) return <EmptyState icon="ClipboardList" title="Aucune commande" text="Les commandes clients apparaîtront ici." />;
   return (
+    <>
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1120px] text-left text-sm">
-        <thead className="text-xs font-black text-slate-500">
+      <table className="lte-table min-w-[1120px]">
+        <thead>
           <tr>
             <th className="py-3">Référence</th>
             <th className="py-3">Client / Table</th>
@@ -326,6 +386,11 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, on
               <td className="py-3 font-semibold text-slate-500">{new Date(order.created_at).toLocaleDateString("fr-FR")}</td>
               <td className="py-3 text-right" onClick={(event) => event.stopPropagation()}>
                 <IconButton icon="Eye" title="Voir" onClick={() => onSelect(order.id)} />
+                {order.is_closed && !["Payée", "Payee"].includes(order.status) && (
+                  <button type="button" onClick={() => onReopen(order)} className="ml-2 lte-btn lte-btn-default lte-btn-sm">
+                    Rouvrir
+                  </button>
+                )}
                 {reviewOnly ? (
                   <>
                     {order.status !== "Annulée" && order.status !== "Archivée" && (
@@ -349,6 +414,8 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, on
         </tbody>
       </table>
     </div>
+    <TableFooter count={orders.length} label="commande" />
+    </>
   );
 }
 

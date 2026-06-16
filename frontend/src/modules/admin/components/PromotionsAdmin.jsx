@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, PrimaryAction, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
+import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, PrimaryAction, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { formatApiError } from "@/utils/network";
 
 const emptyPromo = {
@@ -141,7 +141,7 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
             <Field name="code" label="Code" required value={form.code} onChange={updateField} placeholder="BIENVENUE" />
             <Field name="label" label="Libellé" required value={form.label} onChange={updateField} placeholder="Offre de lancement" />
             <Field label="Type de remise">
-              <select name="discount_type" value={form.discount_type} onChange={updateField} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none">
+              <select name="discount_type" value={form.discount_type} onChange={updateField} className="form-control">
                 <option value="PERCENT">Pourcentage</option>
                 <option value="FIXED">Montant fixe</option>
               </select>
@@ -176,9 +176,10 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
 function PromotionsTable({ rows, onEdit, onDelete }) {
   if (!rows.length) return <EmptyState icon="BadgePercent" title="Aucun code promo" text="Créez un premier code pour autoriser les remises contrôlées." />;
   return (
+    <>
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[860px] text-left text-sm">
-        <thead className="text-xs font-black text-slate-500">
+      <table className="lte-table min-w-[860px]">
+        <thead>
           <tr>
             <th className="py-3">Code</th>
             <th className="py-3">Remise</th>
@@ -205,13 +206,15 @@ function PromotionsTable({ rows, onEdit, onDelete }) {
               <td className="py-3 font-semibold text-slate-600">{promo.used_count}{promo.max_uses ? ` / ${promo.max_uses}` : ""}</td>
               <td className="py-3"><StatusPill tone={promo.is_active ? "green" : "red"}>{promo.is_active ? "Actif" : "Inactif"}</StatusPill></td>
               <td className="py-3 text-right">
-                <button type="button" onClick={() => onEdit(promo)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700">Modifier</button>
-                <button type="button" onClick={() => onDelete(promo)} className="ml-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-600">Supprimer</button>
+                <button type="button" onClick={() => onEdit(promo)} className="lte-btn lte-btn-default lte-btn-sm">Modifier</button>
+                <button type="button" onClick={() => onDelete(promo)} className="ml-2 lte-btn lte-btn-danger lte-btn-sm">Supprimer</button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+    <TableFooter count={rows.length} label="code promo" plural="codes promo" />
+    </>
   );
 }

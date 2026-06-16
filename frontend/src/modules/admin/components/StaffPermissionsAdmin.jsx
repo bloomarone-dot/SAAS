@@ -327,7 +327,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
             <button
               type="button"
               onClick={() => setShowCreateForm((value) => !value)}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)]"
+              className="lte-btn lte-btn-primary"
             >
               <DashboardIcon name="UserPlus" size={17} />
               {showCreateForm ? "Fermer le formulaire" : "Ajouter un utilisateur"}
@@ -336,7 +336,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
           <button
             type="button"
             onClick={loadAccessData}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition-all hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
+            className="lte-btn lte-btn-default"
           >
             <DashboardIcon name="Activity" size={17} />
             Actualiser
@@ -380,7 +380,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
           <button
             type="submit"
             disabled={isLoading}
-            className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-5 text-sm font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-6 lte-btn lte-btn-primary"
           >
             <DashboardIcon name="Plus" size={17} />
             Créer l'utilisateur
@@ -404,7 +404,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
               <select
                 value={roleFilter}
                 onChange={(event) => setRoleFilter(event.target.value)}
-                className="h-12 border border-slate-200 bg-white px-4 text-sm font-black outline-none"
+                className="form-control"
               >
                 <option value="ALL">Tous les rôles</option>
                 {STAFF_ROLES.map((role) => (
@@ -416,7 +416,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
               <select
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value)}
-                className="h-12 border border-slate-200 bg-white px-4 text-sm font-black outline-none"
+                className="form-control"
               >
                 <option value="ALL">Tous les statuts</option>
                 <option value="ACTIVE">Actifs</option>
@@ -432,8 +432,8 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                 <p className="text-sm font-medium text-slate-500">{filteredUsers.length} compte(s) affiché(s)</p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] border-collapse text-left">
-                  <thead className="bg-[#fff8f3] text-xs font-black uppercase text-[var(--dashboard-primary)]">
+                <table className="lte-table min-w-[980px]">
+                  <thead>
                     <tr>
                       <th className="px-5 py-4">
                         <SortButton label="Nom" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} />
@@ -506,7 +506,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                                 type="button"
                                 onClick={() => deleteUser(user)}
                                 disabled={user.id === currentUser.id || isLoading}
-                                className="inline-flex h-9 w-9 items-center justify-center border border-red-100 text-red-600 transition-all hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                className="lte-btn lte-btn-danger lte-btn-sm"
                                 title="Archiver"
                               >
                                 <DashboardIcon name="Archive" size={16} />
@@ -559,7 +559,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                         type="button"
                         onClick={() => toggleStatus(selectedUser)}
                         disabled={selectedUser.id === currentUser.id || isLoading}
-                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-700 transition-all hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="lte-btn lte-btn-default"
                       >
                         <DashboardIcon name="Power" size={15} />
                         {selectedUser.is_active ? "Désactiver" : "Restaurer"}
@@ -569,7 +569,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                           type="button"
                           onClick={() => deleteUser(selectedUser)}
                           disabled={selectedUser.id === currentUser.id || isLoading}
-                          className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-100 px-3 text-xs font-black text-red-600 transition-all hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="lte-btn lte-btn-danger lte-btn-sm"
                         >
                           <DashboardIcon name="Archive" size={15} />
                           Archiver
@@ -605,7 +605,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                     <button
                       type="submit"
                       disabled={isLoading}
-                      className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-4 text-xs font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 lte-btn lte-btn-primary"
                     >
                       <DashboardIcon name="Pencil" size={15} />
                       Enregistrer les informations
@@ -634,7 +634,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                       <button
                         type="submit"
                         disabled={isLoading || selectedUser.id === currentUser.id}
-                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-xs font-black text-slate-700 transition-all hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="lte-btn lte-btn-default"
                       >
                         <DashboardIcon name="KeyRound" size={15} />
                         Réinitialiser
@@ -663,7 +663,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
                       type="button"
                       onClick={saveSelectedPermissions}
                       disabled={isLoading}
-                      className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[var(--dashboard-primary)] px-4 text-xs font-black text-white shadow-lg shadow-[#fecdca] transition-all hover:bg-[var(--dashboard-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 lte-btn lte-btn-primary"
                     >
                       <DashboardIcon name="ShieldCheck" size={15} />
                       Enregistrer les permissions
@@ -707,7 +707,7 @@ function Field({ label, required, ...props }) {
         autoCorrect={isPassword ? "off" : props.autoCorrect}
         autoCapitalize={isPassword ? "none" : props.autoCapitalize}
         spellCheck={isPassword ? false : props.spellCheck}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition-all placeholder:text-slate-400 focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-[#fee4e2]"
+        className="mt-2 form-control"
       />
     </label>
   );
@@ -720,7 +720,7 @@ function Select({ label, required, children, ...props }) {
       <select
         {...props}
         required={required}
-        className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-black outline-none transition-all focus:border-[var(--dashboard-primary)] focus:ring-4 focus:ring-[#fee4e2]"
+        className="mt-2 form-control"
       >
         {children}
       </select>

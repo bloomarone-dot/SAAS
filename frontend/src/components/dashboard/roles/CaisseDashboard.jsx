@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardHeader, KpiGrid, Panel } from "../DashboardPrimitives";
 import { DashboardIcon } from "../icons";
 import { orderApi } from "@/modules/orders/services/orderApi";
+import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
 import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
 import { getApiBaseUrl } from "@/config/api";
@@ -71,10 +72,13 @@ export function CaisseDashboard({ overrides = {} }) {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [paymentRequests, setPaymentRequests] = useState([]);
+  const [requestActionId, setRequestActionId] = useState("");
 
   useEffect(() => {
     loadCashierReport();
     loadRestaurant();
+    loadPaymentRequests();
   }, []);
 
   useEffect(() => {
@@ -84,6 +88,7 @@ export function CaisseDashboard({ overrides = {} }) {
     const socket = new WebSocket(`${wsBase}/api/v1/payments/ws?token=${encodeURIComponent(token)}`);
     socket.onmessage = (event) => {
       const payload = JSON.parse(event.data || "{}");
+      if (payload.event?.startsWith("payment_request")) loadPaymentRequests();
       if (payload.event?.startsWith("payment_")) loadCashierReport({ silent: true });
     };
     return () => socket.close();
@@ -124,6 +129,40 @@ export function CaisseDashboard({ overrides = {} }) {
       }));
     } catch {
       setRestaurant(null);
+    }
+  }
+
+  async function loadPaymentRequests() {
+    try {
+      setPaymentRequests(await paymentApi.listRequests("PENDING"));
+    } catch {
+      // chargement silencieux des demandes serveur
+    }
+  }
+
+  async function validatePaymentRequest(req) {
+    setRequestActionId(req.id);
+    setMessage("");
+    try {
+      const result = await paymentApi.validateRequest(req.id);
+      setMessage(result.message || "Demande de paiement validée.");
+      await Promise.all([loadPaymentRequests(), loadCashierReport({ silent: true })]);
+    } catch (error) {
+      setMessage(error.message || "Validation de la demande impossible.");
+    } finally {
+      setRequestActionId("");
+    }
+  }
+
+  async function rejectPaymentRequest(req) {
+    setRequestActionId(req.id);
+    try {
+      await paymentApi.rejectRequest(req.id);
+      await loadPaymentRequests();
+    } catch (error) {
+      setMessage(error.message || "Rejet de la demande impossible.");
+    } finally {
+      setRequestActionId("");
     }
   }
 
@@ -280,6 +319,17 @@ export function CaisseDashboard({ overrides = {} }) {
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">
           {message}
         </div>
+      )}
+
+      {!adminReviewOnly && paymentRequests.length > 0 && (
+        <Panel title="Demandes de paiement (serveurs)" link={`${paymentRequests.length} en attente`}>
+          <PaymentRequestsList
+            requests={paymentRequests}
+            actionId={requestActionId}
+            onValidate={validatePaymentRequest}
+            onReject={rejectPaymentRequest}
+          />
+        </Panel>
       )}
 
       {showPaymentArea && <div className={paymentGridClass}>
@@ -509,13 +559,58 @@ function PaymentTotals({ rows }) {
   );
 }
 
+const REQUEST_METHOD_LABELS = { ORANGE: "Orange Money", MTN: "MTN Mobile Money", CASH: "Espèces" };
+
+function PaymentRequestsList({ requests, actionId, onValidate, onReject }) {
+  return (
+    <div className="divide-y divide-slate-100">
+      {requests.map((req) => {
+        const busy = actionId === req.id;
+        return (
+          <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div className="min-w-0">
+              <p className="font-black text-slate-950">
+                {req.order_number || req.order_id} · {money(req.amount)}
+              </p>
+              <p className="text-xs font-semibold text-slate-500">
+                {REQUEST_METHOD_LABELS[req.method] || req.method}
+                {req.payer_msisdn ? ` · ${req.payer_msisdn}` : ""}
+                {req.requested_by_name ? ` · par ${req.requested_by_name}` : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onValidate(req)}
+                disabled={busy}
+                className="lte-btn lte-btn-primary lte-btn-sm"
+              >
+                <DashboardIcon name="CheckCircle2" size={15} />
+                {busy ? "..." : req.method === "CASH" ? "Encaisser" : "Valider & lancer"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onReject(req)}
+                disabled={busy}
+                className="lte-btn lte-btn-danger lte-btn-sm"
+              >
+                Rejeter
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function OrdersTable({ orders, selectedOrderId, onSelect }) {
   if (!orders.length) return <EmptyState text="Aucune commande à encaisser." />;
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-left text-sm">
-        <thead className="text-xs font-black uppercase text-slate-400">
+      <table className="lte-table min-w-[760px]">
+        <thead>
           <tr>
             <th className="py-3">N° Commande</th>
             <th className="py-3">Client / Table</th>
@@ -553,7 +648,7 @@ function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCance
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-left text-sm">
+      <table className="lte-table min-w-[760px]">
         <tbody className="divide-y divide-slate-100">
           {receipts.slice(0, 8).map((order) => (
             <tr
@@ -590,8 +685,8 @@ function OrderDetail({ order, discountPreview }) {
   return (
     <div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-left text-sm">
-          <thead className="text-xs font-black uppercase text-slate-400">
+        <table className="lte-table min-w-[520px]">
+          <thead>
             <tr>
               <th className="py-3">Article</th>
               <th className="py-3 text-center">Qté</th>
@@ -656,6 +751,10 @@ function receiptHtml(order, restaurant, currentUser) {
     return currency === "XAF" ? `${amount} FCFA` : `${amount} ${currency}`;
   };
   const restaurantName = restaurant?.legal_name || restaurant?.name || "Restaurant";
+  const rawLogo = restaurant?.logo_url || "";
+  const logoUrl = rawLogo && !/^https?:\/\//i.test(rawLogo)
+    ? `${getApiBaseUrl()}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
+    : rawLogo;
   const cashierName = order.cashier_name
     || [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ")
     || currentUser?.username
@@ -713,6 +812,7 @@ function receiptHtml(order, restaurant, currentUser) {
       </head>
       <body>
         <div class="receipt">
+          ${logoUrl ? `<p class="center"><img src="${escapeHtml(logoUrl)}" alt="" style="max-height:52px; max-width:60mm; object-fit:contain;" /></p>` : ""}
           <h1>${escapeHtml(restaurantName)}</h1>
           ${restaurantLines.map((line) => `<p class="center muted">${escapeHtml(line)}</p>`).join("")}
           ${restaurant?.nui ? `<p class="center"><strong>NUI : ${escapeHtml(restaurant.nui)}</strong></p>` : ""}

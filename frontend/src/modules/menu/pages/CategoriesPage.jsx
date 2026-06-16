@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
+import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { menuApi } from "../services/menuApi";
 
 const emptyForm = { name: "", description: "", image_url: "" };
@@ -181,32 +181,33 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
 function CategoriesTable({ categories, dishesByCategory, onDelete, role }) {
   if (!categories.length) return <EmptyState title="Aucune catégorie" text="Créez une catégorie pour organiser la carte." />;
   return (
+    <>
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[780px] text-left text-sm">
-        <thead className="text-xs font-black text-slate-500">
+      <table className="lte-table min-w-[780px]">
+        <thead>
           <tr>
-            <th className="py-3">Catégorie</th>
-            <th className="py-3">Description</th>
-            <th className="py-3">Nombre de plats</th>
-            <th className="py-3">Statut</th>
-            <th className="py-3">Date de création</th>
-            <th className="py-3 text-right">Actions</th>
+            <th>Catégorie</th>
+            <th>Description</th>
+            <th>Nombre de plats</th>
+            <th>Statut</th>
+            <th>Date de création</th>
+            <th className="text-right">Actions</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody>
           {categories.map((category) => (
             <tr key={category.id}>
-              <td className="py-3">
+              <td>
                 <div className="flex items-center gap-3">
-                  {category.image_url ? <img src={category.image_url} alt="" className="h-11 w-11 rounded-full object-cover" /> : <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-[var(--dashboard-primary)]"><DashboardIcon name="ClipboardList" size={17} /></span>}
-                  <span className="font-black text-slate-950">{category.name}</span>
+                  {category.image_url ? <img src={category.image_url} alt="" className="h-10 w-10 rounded-full object-cover" /> : <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 text-[var(--dashboard-primary)]"><DashboardIcon name="ClipboardList" size={17} /></span>}
+                  <span className="font-semibold text-slate-800">{category.name}</span>
                 </div>
               </td>
-              <td className="py-3 font-semibold text-slate-500">{category.description || "Sans description"}</td>
-              <td className="py-3 font-black text-[var(--dashboard-primary)]">{dishesByCategory[category.id]?.length || 0}</td>
-              <td className="py-3"><StatusPill tone={category.is_active ? "green" : "red"}>{category.is_active ? "Active" : "Inactive"}</StatusPill></td>
-              <td className="py-3 font-semibold text-slate-500">{new Date(category.created_at).toLocaleDateString("fr-FR")}</td>
-              <td className="py-3 text-right">
+              <td className="text-slate-500">{category.description || "Sans description"}</td>
+              <td className="font-semibold text-[var(--dashboard-primary)]">{dishesByCategory[category.id]?.length || 0}</td>
+              <td><StatusPill tone={category.is_active ? "green" : "red"}>{category.is_active ? "Active" : "Inactive"}</StatusPill></td>
+              <td className="text-slate-500">{new Date(category.created_at).toLocaleDateString("fr-FR")}</td>
+              <td className="text-right">
                 <IconButton icon="Eye" title="Voir" />
                 {role !== "CUISINE" && <IconButton icon="Trash2" title="Supprimer" tone="red" onClick={() => onDelete(category)} />}
               </td>
@@ -215,6 +216,8 @@ function CategoriesTable({ categories, dishesByCategory, onDelete, role }) {
         </tbody>
       </table>
     </div>
+    <TableFooter count={categories.length} label="catégorie" plural="catégories" />
+    </>
   );
 }
 
