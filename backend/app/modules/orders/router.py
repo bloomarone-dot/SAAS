@@ -6,10 +6,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
 from app.modules.audit.service import log_action
-from app.modules.catalog.classification import classify_menu_item
-from app.modules.catalog.models import MenuItem
+from app.modules.catalog.classification import classify_menu_item, requires_kitchen_preparation
+from app.modules.catalog.models import MenuCategory, MenuItem
 from app.modules.finance.models import PromotionCode
-from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
 from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
@@ -284,7 +283,32 @@ def send_order_to_kitchen(
 
     table_number = str(order.table_id or order.customer_name or order.order_number)
     created_count = 0
+    skipped_bar = 0
     for item in order.items:
+        if item.sale_channel == "EMBALLAGE":
+            continue
+        dish = db.get(MenuItem, item.menu_item_id) if item.menu_item_id else None
+        category = db.get(MenuCategory, dish.category_id) if dish and dish.category_id else None
+        if dish is not None:
+            needs_kitchen = (
+                dish.requires_kitchen
+                if dish.requires_kitchen is not None
+                else requires_kitchen_preparation(
+                    item.name,
+                    dish.description,
+                    category.name if category else None,
+                    category.description if category else None,
+                    sale_channel=item.sale_channel or dish.sale_channel,
+                )
+            )
+        else:
+            needs_kitchen = requires_kitchen_preparation(
+                item.name,
+                sale_channel=item.sale_channel or "REPAS",
+            )
+        if not needs_kitchen:
+            skipped_bar += 1
+            continue
         requested_quantity = int(item.quantity or 0)
         already_sent = existing_quantities.get(item.name, 0)
         quantity_to_send = requested_quantity - already_sent
@@ -305,15 +329,16 @@ def send_order_to_kitchen(
     previous_status = order.status
     if order.status == "Nouvelle":
         order.status = "Acceptée"
-    notify(
-        db,
-        restaurant_id=current_user.restaurant_id,
-        role=Role.CUISINE.value,
-        title="Nouvelle commande cuisine",
-        message=f"{order.order_number} contient {created_count} ticket(s) à préparer.",
-        category="kitchen",
-        link="orders",
-    )
+    if created_count > 0:
+        notify(
+            db,
+            restaurant_id=current_user.restaurant_id,
+            role=Role.CUISINE.value,
+            title="Nouvelle commande cuisine",
+            message=f"{order.order_number} contient {created_count} ticket(s) à préparer.",
+            category="kitchen",
+            link="dashboard",
+        )
     log_action(
         db,
         current_user,
@@ -321,7 +346,12 @@ def send_order_to_kitchen(
         "order",
         order.id,
         f"Envoi cuisine commande {order.order_number}",
-        {"previous_status": previous_status, "new_status": order.status, "tickets_created": created_count},
+        {
+            "previous_status": previous_status,
+            "new_status": order.status,
+            "tickets_created": created_count,
+            "bar_items_skipped": skipped_bar,
+        },
     )
     db.commit()
     db.refresh(order)

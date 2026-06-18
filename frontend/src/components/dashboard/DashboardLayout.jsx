@@ -21,7 +21,7 @@ export function DashboardLayout({
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
   const roleMeta = getRoleMeta(role);
-  const hideSidebar = role === "SERVEUR";
+  const hideSidebar = role === "SERVEUR" || role === "CUISINE";
   const isSuperadmin = role === "SUPERADMIN";
   const primary = isSuperadmin ? "#a855f7" : "#FF6347";
   const secondary =
@@ -723,8 +723,8 @@ function getRoleMeta(role) {
         userRole: "Serveuse",
       },
       CUISINE: {
-        heading: "3. CUISINIER",
-        mode: "Mode cuisine",
+        heading: "CUISINE",
+        mode: "Production simplifiée",
         sync: "En ligne",
         userRole: "Cuisinier",
       },

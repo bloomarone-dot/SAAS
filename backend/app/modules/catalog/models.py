@@ -39,6 +39,7 @@ class MenuItem(Base):
     price: Mapped[float] = mapped_column(Float, nullable=False)
     cost_per_dish: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     sale_channel: Mapped[str] = mapped_column(String(20), default="REPAS", nullable=False, index=True)
+    requires_kitchen: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

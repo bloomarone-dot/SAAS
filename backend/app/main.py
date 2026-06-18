@@ -224,6 +224,7 @@ def ensure_menu_item_columns() -> None:
     columns = {
         "sale_channel": "VARCHAR(20) NOT NULL DEFAULT 'REPAS'",
         "cost_per_dish": "FLOAT NOT NULL DEFAULT 0",
+        "requires_kitchen": "BOOLEAN NULL",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if not missing:

@@ -1,5 +1,12 @@
-import KitchenDisplay from "@/modules/menu/components/KitchenDisplay";
+import KitchenWorkspace from "@/modules/menu/components/KitchenWorkspace";
 
-export function CuisineDashboard() {
-  return <KitchenDisplay filter="orders" />;
+export function CuisineDashboard({ overrides = {} }) {
+  const currentUser = overrides.__currentUser;
+  return (
+    <KitchenWorkspace
+      restaurantId={currentUser?.restaurant_id}
+      currentUser={currentUser}
+      role="CUISINE"
+    />
+  );
 }

@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.modules.catalog.classification import classify_sale_channel
+from app.modules.catalog.classification import classify_sale_channel, requires_kitchen_preparation
 from app.modules.menu.models import CategoryModel, DishModel
 from app.modules.menu.schemas import CategoryCreate, DishCreate, DishUpdate
 
@@ -63,6 +63,14 @@ class MenuService:
             category.name if category else None,
             category.description if category else None,
         )
+        dish.requires_kitchen = requires_kitchen_preparation(
+            dish.name,
+            dish.description,
+            category.name if category else None,
+            category.description if category else None,
+            sale_channel=dish.sale_channel,
+            explicit=dish_data.requires_kitchen,
+        )
         db.add(dish)
         db.commit()
         db.refresh(dish)
@@ -103,6 +111,15 @@ class MenuService:
             category.name if category else None,
             category.description if category else None,
         )
+        if "requires_kitchen" not in update_data:
+            dish.requires_kitchen = requires_kitchen_preparation(
+                dish.name,
+                dish.description,
+                category.name if category else None,
+                category.description if category else None,
+                sale_channel=dish.sale_channel,
+                explicit=dish.requires_kitchen,
+            )
         db.commit()
         db.refresh(dish)
         return dish

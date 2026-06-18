@@ -500,6 +500,10 @@ export default function App() {
         return <RoleDashboard role="SERVEUR" overrides={{ ...overrides, __currentUser: session }} />;
       }
 
+      if (session.role === "CUISINE") {
+        return <RoleDashboard role="CUISINE" overrides={{ ...overrides, __currentUser: session }} />;
+      }
+
       const stockViews = ["stocks", "stock", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
 
       if (["staff", "create-user", "user-detail"].includes(activeView) && session.role === "ADMIN") {

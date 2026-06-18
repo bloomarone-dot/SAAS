@@ -1,4 +1,7 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
@@ -79,6 +82,51 @@ def update_ticket_status(
     db.commit()
     db.refresh(db_ticket)
     return db_ticket
+
+
+@router.get("/stats/month")
+def kitchen_month_stats(
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_kitchen_read_allowed(current_user)
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    base = (
+        db.query(KitchenTicketModel)
+        .join(CustomerOrder, CustomerOrder.id == KitchenTicketModel.order_id)
+        .filter(
+            CustomerOrder.restaurant_id == current_user.restaurant_id,
+            KitchenTicketModel.created_at >= month_start,
+            KitchenTicketModel.status != KitchenStatus.EN_ATTENTE,
+        )
+    )
+    total_dishes = (
+        db.query(func.coalesce(func.sum(KitchenTicketModel.quantity), 0))
+        .select_from(KitchenTicketModel)
+        .join(CustomerOrder, CustomerOrder.id == KitchenTicketModel.order_id)
+        .filter(
+            CustomerOrder.restaurant_id == current_user.restaurant_id,
+            KitchenTicketModel.created_at >= month_start,
+            KitchenTicketModel.status != KitchenStatus.EN_ATTENTE,
+        )
+        .scalar()
+    )
+    rows = (
+        base.with_entities(
+            KitchenTicketModel.item_name,
+            func.sum(KitchenTicketModel.quantity).label("quantity"),
+        )
+        .group_by(KitchenTicketModel.item_name)
+        .order_by(func.sum(KitchenTicketModel.quantity).desc())
+        .limit(12)
+        .all()
+    )
+    return {
+        "month": month_start.strftime("%Y-%m"),
+        "total_dishes": int(total_dishes or 0),
+        "top_items": [{"name": name, "quantity": int(qty or 0)} for name, qty in rows],
+    }
 
 
 def get_order_for_user(db: Session, order_id: str, user: User) -> CustomerOrder:

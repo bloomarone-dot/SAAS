@@ -17,4 +17,6 @@ export const kitchenApi = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
+
+  getMonthStats: () => request("/kitchen/stats/month"),
 };

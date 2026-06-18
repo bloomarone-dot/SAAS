@@ -35,6 +35,7 @@ class MenuItemPublic(OrmModel):
     price: float
     cost_per_dish: float = 0
     sale_channel: str = "REPAS"
+    requires_kitchen: Optional[bool] = None
     image_url: Optional[str] = None
     is_available: bool
     created_at: datetime
@@ -46,6 +47,7 @@ class MenuItemIn(BaseModel):
     price: float = Field(gt=0)
     cost_per_dish: float = Field(default=0, ge=0)
     category_id: Optional[str] = None
+    requires_kitchen: Optional[bool] = None
     image_url: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -55,5 +57,6 @@ class MenuItemUpdateIn(BaseModel):
     price: Optional[float] = Field(default=None, gt=0)
     cost_per_dish: Optional[float] = Field(default=None, ge=0)
     category_id: Optional[str] = None
+    requires_kitchen: Optional[bool] = None
     image_url: Optional[str] = Field(default=None, max_length=500)
     is_available: Optional[bool] = None

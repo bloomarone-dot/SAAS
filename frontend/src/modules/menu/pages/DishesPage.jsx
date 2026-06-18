@@ -5,7 +5,16 @@ import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, Primary
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { menuApi } from "../services/menuApi";
 
-const emptyDish = { category_id: "", name: "", description: "", price: "", cost_per_dish: "", image_url: "", is_available: true };
+const emptyDish = {
+  category_id: "",
+  name: "",
+  description: "",
+  price: "",
+  cost_per_dish: "",
+  image_url: "",
+  is_available: true,
+  requires_kitchen: null,
+};
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
@@ -128,6 +137,10 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         cost_per_dish: Number(form.cost_per_dish || 0),
         description: form.description || null,
         image_url: form.image_url || null,
+        requires_kitchen:
+          form.requires_kitchen === "" || form.requires_kitchen === null
+            ? null
+            : Boolean(form.requires_kitchen),
       });
       setDishes((current) => [created, ...current]);
       setForm({ ...emptyDish, category_id: form.category_id });
@@ -235,7 +248,7 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
       {showForm && (
         <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
           <AdminCard>
-            <DishEditor form={form} categories={activeCategories} onChange={updateForm} onUpload={uploadImage} onSubmit={createDish} />
+            <DishEditor form={form} categories={activeCategories} onChange={updateForm} onUpload={uploadImage} onSubmit={createDish} role={role} />
           </AdminCard>
           <DishPreview dish={form} categoryName={categoryNameById.get(form.category_id)} />
         </div>
@@ -293,7 +306,8 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   );
 }
 
-function DishEditor({ form, categories, onChange, onUpload, onSubmit }) {
+function DishEditor({ form, categories, onChange, onUpload, onSubmit, role }) {
+  const canSetKitchen = role === "CUISINE" || role === "ADMIN";
   return (
     <form onSubmit={onSubmit}>
       <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
@@ -317,6 +331,30 @@ function DishEditor({ form, categories, onChange, onUpload, onSubmit }) {
             <input name="is_available" type="checkbox" checked={form.is_available} onChange={onChange} />
             Disponible
           </label>
+          {canSetKitchen && (
+            <label className="flex min-h-10 items-start gap-3 rounded border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 md:col-span-2">
+              <input
+                name="requires_kitchen"
+                type="checkbox"
+                checked={form.requires_kitchen !== false}
+                onChange={(event) =>
+                  onChange({
+                    target: {
+                      name: "requires_kitchen",
+                      type: "checkbox",
+                      checked: event.target.checked,
+                    },
+                  })
+                }
+              />
+              <span>
+                Préparer en cuisine
+                <span className="mt-1 block text-xs font-medium text-slate-500">
+                  Décochez pour les boissons bar (vin, whisky, sodas). Cochez pour jus naturel et plats chauds.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
       </div>
       <Field name="description" label="Description" as="textarea" rows={3} value={form.description} onChange={onChange} className="mt-4" placeholder="Décrivez votre plat..." />

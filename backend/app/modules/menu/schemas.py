@@ -32,6 +32,7 @@ class DishBase(BaseModel):
     cost_per_dish: float = Field(default=0, ge=0)
     image_url: Optional[str] = Field(default=None, max_length=500)
     is_available: bool = True
+    requires_kitchen: Optional[bool] = None
 
 
 class DishCreate(DishBase):
@@ -46,6 +47,7 @@ class DishUpdate(BaseModel):
     category_id: Optional[str] = None
     image_url: Optional[str] = Field(default=None, max_length=500)
     is_available: Optional[bool] = None
+    requires_kitchen: Optional[bool] = None
 
 
 class DishResponse(DishBase, OrmModel):
@@ -53,6 +55,7 @@ class DishResponse(DishBase, OrmModel):
     restaurant_id: str
     category_id: Optional[str] = None
     cost_per_dish: float = 0
+    requires_kitchen: Optional[bool] = None
     created_at: datetime
 
 

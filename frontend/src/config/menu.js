@@ -315,51 +315,7 @@ export const APP_MENUS = {
     { key: "dashboard", label: "Service en salle", icon: "Utensils" },
   ],
   CUISINE: [
-    { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    {
-      key: "orders",
-      label: "Commandes cuisine",
-      icon: "ClipboardList",
-      children: [
-        { key: "orders", label: "À préparer", icon: "ClipboardList" },
-        { key: "kitchen-detail", label: "Détail commande", icon: "Eye" },
-        { key: "notes", label: "Notes spéciales", icon: "FileText" },
-        { key: "start-preparation", label: "En préparation", icon: "Clock3" },
-        { key: "dish-ready", label: "Plat prêt", icon: "CheckCircle2" },
-        { key: "order-ready", label: "Commande prête", icon: "Bell" },
-        { key: "urgent", label: "Urgentes", icon: "AlertTriangle" },
-      ],
-    },
-    {
-      key: "menu-categories",
-      label: "Carte",
-      icon: "UtensilsCrossed",
-      children: [
-        {
-          key: "menu-categories",
-          label: "Catégories carte",
-          icon: "ClipboardList",
-        },
-        { key: "menu-dishes", label: "Plats", icon: "UtensilsCrossed" },
-        { key: "availability", label: "Disponibilités", icon: "CheckCircle2" },
-        {
-          key: "dish-unavailable",
-          label: "Plat indisponible",
-          icon: "AlertTriangle",
-        },
-      ],
-    },
-    { key: "preparation", label: "En préparation", icon: "FileText" },
-    { key: "ready", label: "Prêtes", icon: "Package" },
-    {
-      key: "history",
-      label: "Historique",
-      icon: "History",
-      children: [
-        { key: "preparation-history", label: "Préparations", icon: "History" },
-        { key: "damages", label: "Avaries", icon: "AlertTriangle" },
-      ],
-    },
+    { key: "dashboard", label: "Production cuisine", icon: "ChefHat" },
   ],
   STOCK: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },

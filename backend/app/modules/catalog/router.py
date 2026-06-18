@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
-from app.modules.catalog.classification import classify_sale_channel
+from app.modules.catalog.classification import classify_sale_channel, requires_kitchen_preparation
 from app.modules.audit.service import log_action
 from app.modules.catalog.models import MenuCategory, MenuItem
 from app.modules.catalog.schemas import (
@@ -118,6 +118,14 @@ def create_item(
         category.name if category else None,
         category.description if category else None,
     )
+    if item.requires_kitchen is None:
+        item.requires_kitchen = requires_kitchen_preparation(
+            item.name,
+            item.description,
+            category.name if category else None,
+            category.description if category else None,
+            sale_channel=item.sale_channel,
+        )
     db.add(item)
     log_action(db, current_user, "catalog.item_create", "menu_item", item.id, f"Création plat {item.name}", {"price": item.price})
     db.commit()
@@ -147,6 +155,14 @@ def update_item(
         category.name if category else None,
         category.description if category else None,
     )
+    if "requires_kitchen" not in payload_data and item.requires_kitchen is None:
+        item.requires_kitchen = requires_kitchen_preparation(
+            item.name,
+            item.description,
+            category.name if category else None,
+            category.description if category else None,
+            sale_channel=item.sale_channel,
+        )
     log_action(db, current_user, "catalog.item_update", "menu_item", item.id, f"Modification plat {item.name}", {"fields": sorted(payload_data)})
     db.commit()
     db.refresh(item)
