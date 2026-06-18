@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { tableApi } from '../services/tableApi';
 
-export default function TableSessionModal({ table, currentUser, onClose, onOpenMenuForOrder }) {
+export default function TableSessionModal({ table, currentUser, onClose, onOpenMenuForOrder, primaryActionLabel = "Ouvrir une commande" }) {
   const [activeOrders, setActiveOrders] = useState([]);
   const [partySize, setPartySize] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -151,7 +151,7 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
               disabled={!canCreateOrder || loading || freeSeats <= 0}
               className="lte-btn lte-btn-primary"
             >
-              {otherServerOrders.length > 0 ? 'Oui' : 'Ouvrir une commande'}
+              {otherServerOrders.length > 0 ? 'Oui' : primaryActionLabel}
             </button>
             <button
               type="button"
@@ -181,7 +181,7 @@ function OrderRow({ order, onOpen, disabled = false }) {
         onClick={onOpen}
         className="lte-btn lte-btn-default lte-btn-sm"
       >
-        Compléter
+        Commande
       </button>
     </div>
   );

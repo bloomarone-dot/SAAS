@@ -25,7 +25,7 @@ const tableSlots = [
   { left: 78, top: 69, shape: 'square' },
 ];
 
-export default function TableGrid({ restaurantId, onSelectTable }) {
+export default function TableGrid({ restaurantId, onSelectTable, readOnly = false }) {
   const [tables, setTables] = useState([]);
   const [form, setForm] = useState(emptyTable);
   const [showForm, setShowForm] = useState(false);
@@ -101,13 +101,15 @@ export default function TableGrid({ restaurantId, onSelectTable }) {
           <button type="button" onClick={loadTables} className="lte-btn lte-btn-default">
             <DashboardIcon name="Activity" size={15} /> Actualiser
           </button>
+          {!readOnly && (
           <button type="button" onClick={() => setShowForm((value) => !value)} className="lte-btn lte-btn-primary">
             <DashboardIcon name="Plus" size={15} /> Table
           </button>
+          )}
         </div>
       </div>
 
-      {showForm && (
+      {showForm && !readOnly && (
         <form onSubmit={createTable} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_180px_140px_auto]">
           <label className="space-y-1">
             <span className="text-xs font-black text-slate-500">

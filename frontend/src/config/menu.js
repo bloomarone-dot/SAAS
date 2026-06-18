@@ -312,55 +312,7 @@ export const APP_MENUS = {
     },
   ],
   SERVEUR: [
-    { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    {
-      key: "orders",
-      label: "Commandes",
-      icon: "ClipboardList",
-      children: [
-        { key: "orders", label: "Suivi commandes", icon: "ClipboardList" },
-        { key: "new-table-order", label: "Nouvelle commande", icon: "Plus" },
-        {
-          key: "add-order-items",
-          label: "Ajouter plats",
-          icon: "UtensilsCrossed",
-        },
-        { key: "send-kitchen", label: "Envoyer cuisine", icon: "ChefHat" },
-        { key: "ready-notifications", label: "Commandes prêtes", icon: "Bell" },
-        { key: "served-orders", label: "Marquer servie", icon: "CheckCircle2" },
-        {
-          key: "request-bill",
-          label: "Demander addition",
-          icon: "ReceiptText",
-        },
-        {
-          key: "request-payment",
-          label: "Demander paiement",
-          icon: "Wallet",
-        },
-      ],
-    },
-    {
-      key: "tables",
-      label: "Tables",
-      icon: "Table2",
-      children: [
-        { key: "tables", label: "Liste des tables", icon: "Table2" },
-        { key: "open-table", label: "Ouverture table", icon: "Plus" },
-        { key: "free-table", label: "Libération table", icon: "Power" },
-      ],
-    },
-    { key: "clients", label: "Clients", icon: "Users" },
-    { key: "invoices", label: "Factures", icon: "FileText" },
-    {
-      key: "history",
-      label: "Historiques",
-      icon: "History",
-      children: [
-        { key: "history", label: "Commandes serveur", icon: "History" },
-        { key: "served-clients", label: "Clients servis", icon: "Users" },
-      ],
-    },
+    { key: "dashboard", label: "Service en salle", icon: "Utensils" },
   ],
   CUISINE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
@@ -599,14 +551,10 @@ export const ROLE_DASHBOARDS = {
     ],
   },
   SERVEUR: {
-    title: "Dashboard Serveur",
-    subtitle: "Suivi des commandes, tables servies et temps moyen de service.",
+    title: "Service en salle",
+    subtitle: "Prenez la commande, servez et demandez le paiement en une seule interface.",
     accent: "#ff2c7d",
-    cards: [
-      { title: "Commandes", value: "0", icon: "ShoppingCart" },
-      { title: "Tables servies", value: "0", icon: "UtensilsCrossed" },
-      { title: "Temps moyen", value: "0 min", icon: "Clock3" },
-    ],
+    cards: [],
   },
   CUISINE: {
     title: "Dashboard Cuisine",

@@ -21,6 +21,7 @@ export function DashboardLayout({
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
   const roleMeta = getRoleMeta(role);
+  const hideSidebar = role === "SERVEUR";
   const isSuperadmin = role === "SUPERADMIN";
   const primary = isSuperadmin ? "#a855f7" : "#FF6347";
   const secondary =
@@ -213,7 +214,7 @@ export function DashboardLayout({
       }}
     >
       <aside
-        className={`hidden shrink-0 border-r transition-all duration-200 lg:flex lg:flex-col ${isCollapsed ? "w-[60px]" : "w-60"}`}
+        className={`hidden shrink-0 border-r transition-all duration-200 lg:flex lg:flex-col ${isCollapsed ? "w-[60px]" : "w-60"} ${hideSidebar ? "!hidden" : ""}`}
         style={{
           background: isSuperadmin
             ? `linear-gradient(180deg, ${sidebarBackground}, color-mix(in srgb, ${sidebarBackground} 78%, black))`
@@ -328,7 +329,7 @@ export function DashboardLayout({
         </div>
       </aside>
 
-      {isMobileMenuOpen && (
+      {isMobileMenuOpen && !hideSidebar && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <button
             type="button"
@@ -445,18 +446,21 @@ export function DashboardLayout({
             backgroundColor: primary,
           }}
         >
-          <div className="flex items-center gap-3 lg:hidden">
+          <div className={`flex items-center gap-3 ${hideSidebar ? "" : "lg:hidden"}`}>
+            {!hideSidebar && (
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(true)}
-              className="flex h-10 w-10 items-center justify-center text-white transition-colors hover:bg-black/10"
+              className="flex h-10 w-10 items-center justify-center text-white transition-colors hover:bg-black/10 lg:hidden"
               title="Ouvrir le menu"
             >
               <DashboardIcon name="Menu" size={21} />
             </button>
-            <h1 className="text-base font-bold text-white">{displayName}</h1>
+            )}
+            <h1 className={`text-base font-bold text-white ${hideSidebar ? "block" : "lg:hidden"}`}>{displayName}</h1>
           </div>
 
+          {!hideSidebar && (
           <button
             type="button"
             onClick={() => setIsCollapsed((value) => !value)}
@@ -465,6 +469,7 @@ export function DashboardLayout({
           >
             <DashboardIcon name="Menu" size={20} />
           </button>
+          )}
 
           <div
             className="absolute left-1/2 hidden -translate-x-1/2 text-center text-sm font-bold uppercase tracking-wide text-white xl:block"
@@ -554,10 +559,21 @@ export function DashboardLayout({
             >
               {user.first_name?.[0]}
             </div>
+            {hideSidebar && (
+              <button
+                type="button"
+                onClick={onLogout}
+                title="Déconnexion"
+                className="flex h-10 w-10 items-center justify-center text-white/90 hover:bg-black/10"
+              >
+                <DashboardIcon name="LogOut" size={18} />
+              </button>
+            )}
           </div>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {!hideSidebar && (
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-1 pt-4">
             <div>
               <h1 className="text-2xl font-bold text-slate-800">{pageTitle}</h1>
@@ -569,6 +585,7 @@ export function DashboardLayout({
               {new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())}
             </span>
           </div>
+          )}
           <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-5">
             {children}
           </div>
@@ -700,10 +717,10 @@ function getRoleMeta(role) {
         userRole: "Manager",
       },
       SERVEUR: {
-        heading: "2. SERVEUR / SERVEUSE",
-        mode: "Mode hors ligne",
-        sync: "Données locales",
-        userRole: "Serveur",
+        heading: "SERVICE EN SALLE",
+        mode: "Interface simplifiée",
+        sync: "En ligne",
+        userRole: "Serveuse",
       },
       CUISINE: {
         heading: "3. CUISINIER",

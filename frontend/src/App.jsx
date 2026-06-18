@@ -496,6 +496,10 @@ export default function App() {
 
   function renderContent() {
     if (session.role !== "SUPERADMIN") {
+      if (session.role === "SERVEUR") {
+        return <RoleDashboard role="SERVEUR" overrides={{ ...overrides, __currentUser: session }} />;
+      }
+
       const stockViews = ["stocks", "stock", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
 
       if (["staff", "create-user", "user-detail"].includes(activeView) && session.role === "ADMIN") {
