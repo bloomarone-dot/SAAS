@@ -735,8 +735,6 @@ def assert_order_edit_allowed(user: User, order: CustomerOrder, payload: OrderUp
         forbidden_fields = {"payment_method", "discount_amount", "delivery_fee"}
         if fields_set.intersection(forbidden_fields):
             raise HTTPException(status_code=403, detail="Le serveur ne peut pas modifier les informations de facturation")
-        if order.status in {"Prête", "Livrée"}:
-            raise HTTPException(status_code=403, detail="Commande deja transformee en facture. Modification interdite au serveur.")
 
 
 def get_order_or_404(db: Session, order_id: str, restaurant_id: str) -> CustomerOrder:

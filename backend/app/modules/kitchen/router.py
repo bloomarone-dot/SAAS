@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.dependencies import assert_permission, has_permission, require_tenant_user
+from app.modules.notifications.service import notify
 from app.modules.orders.models import CustomerOrder
 from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
@@ -118,6 +119,7 @@ def sync_order_status_from_tickets(db: Session, order_id: str) -> None:
     tickets = db.query(KitchenTicketModel).filter(KitchenTicketModel.order_id == order_id).all()
     if not tickets:
         return
+    previous_status = order.status
     statuses = {ticket.status for ticket in tickets}
     if statuses == {KitchenStatus.SERVIE}:
         order.status = "Livrée"
@@ -125,3 +127,29 @@ def sync_order_status_from_tickets(db: Session, order_id: str) -> None:
         order.status = "Prête"
     elif KitchenStatus.EN_PREPARATION in statuses:
         order.status = "En préparation"
+    else:
+        return
+
+    if order.status == previous_status:
+        return
+
+    if order.status == "Prête":
+        notify(
+            db,
+            restaurant_id=order.restaurant_id,
+            role=Role.SERVEUR.value,
+            title="Commande prête en cuisine",
+            message=f"{order.order_number} est prête. Récupérez les plats et servez le client.",
+            category="kitchen",
+            link="dashboard",
+        )
+    elif order.status == "Livrée" and previous_status != "Livrée":
+        notify(
+            db,
+            restaurant_id=order.restaurant_id,
+            role=Role.SERVEUR.value,
+            title="Commande servie en cuisine",
+            message=f"{order.order_number} : tous les plats sont prêts. Vous pouvez demander le paiement.",
+            category="order",
+            link="dashboard",
+        )

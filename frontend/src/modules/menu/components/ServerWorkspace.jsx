@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { menuApi } from "../services/menuApi";
-import { tableApi } from "../services/tableApi";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import TableGrid from "./TableGrid";
@@ -11,6 +10,32 @@ import TableSessionModal from "./TableSessionModal";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 const PAID_STATUSES = ["Payée", "Payee", "Annulée", "Annulee"];
+const PAYMENT_READY_STATUSES = ["Prête", "Prete", "Livrée", "Livree", "Servie"];
+
+function normalizeStatus(status) {
+  const value = String(status || "").trim();
+  if (value === "Prete") return "Prête";
+  if (value === "Livree") return "Livrée";
+  return value;
+}
+
+function isPaid(status) {
+  return PAID_STATUSES.includes(normalizeStatus(status));
+}
+
+function isReadyStatus(status) {
+  return normalizeStatus(status) === "Prête";
+}
+
+function isServedStatus(status) {
+  return ["Livrée", "Servie"].includes(normalizeStatus(status));
+}
+
+function canPayOrder(order) {
+  if (!order || isPaid(order.status)) return false;
+  if (Number(order.total_amount || 0) <= 0) return false;
+  return order.is_closed || PAYMENT_READY_STATUSES.includes(normalizeStatus(order.status));
+}
 
 const STEPS = [
   { key: "table", label: "Table" },
@@ -29,11 +54,11 @@ function formatMsisdn(raw) {
 
 function activeStep(order) {
   if (!order) return "table";
-  if (PAID_STATUSES.includes(order.status)) return "payment";
-  if (order.is_closed) return "payment";
-  if (["Livrée", "Livree", "Servie"].includes(order.status)) return "serve";
-  if (order.status === "Prête") return "serve";
-  if (["En préparation", "Acceptée"].includes(order.status)) return "kitchen";
+  if (isPaid(order.status)) return "payment";
+  if (canPayOrder(order) && order.is_closed) return "payment";
+  if (isServedStatus(order.status)) return "serve";
+  if (isReadyStatus(order.status)) return "serve";
+  if (["En préparation", "Acceptée"].includes(normalizeStatus(order.status))) return "kitchen";
   return "order";
 }
 
@@ -50,13 +75,17 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const [menuMode, setMenuMode] = useState(true);
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [readyAlert, setReadyAlert] = useState(false);
+  const [dailyStats, setDailyStats] = useState(null);
 
   const loadOrder = useCallback(async (orderId) => {
     if (!orderId) return;
     try {
       const data = await orderApi.get(orderId);
       setOrder(data);
-      if (data.status === "Prête") setReadyAlert(true);
+      const status = normalizeStatus(data.status);
+      if (isReadyStatus(status) || (isServedStatus(status) && !isPaid(status) && !data.is_closed)) {
+        setReadyAlert(true);
+      }
     } catch (err) {
       setError(err.message || "Impossible de charger la commande.");
     }
@@ -89,7 +118,36 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
   useAutoRefresh(() => {
     if (session?.orderId) loadOrder(session.orderId);
-  }, 8000, [session?.orderId, loadOrder]);
+  }, session?.orderId ? 5000 : 0, [session?.orderId, loadOrder]);
+
+  useEffect(() => {
+    if (session || !currentUser?.id) return;
+    orderApi
+      .list({ server_id: currentUser.id, limit: 200 })
+      .then((orders) => {
+        const today = new Date().toDateString();
+        const mineToday = orders.filter(
+          (item) =>
+            item.server_id === currentUser.id &&
+            new Date(item.created_at).toDateString() === today &&
+            !["Annulée", "Annulee"].includes(normalizeStatus(item.status))
+        );
+        const clients = mineToday.reduce(
+          (total, item) => total + Math.max(1, Number(item.party_size || 1)),
+          0
+        );
+        const sales = mineToday.reduce((total, item) => total + Number(item.total_amount || 0), 0);
+        const paid = mineToday.filter((item) => isPaid(item.status)).length;
+        setDailyStats({
+          orders: mineToday.length,
+          clients,
+          sales,
+          paid,
+          recent: mineToday.slice(0, 6),
+        });
+      })
+      .catch(() => setDailyStats(null));
+  }, [session, currentUser?.id]);
 
   const visibleDishes = useMemo(() => {
     if (categoryFilter === "ALL") return dishes;
@@ -101,21 +159,19 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     [order?.items]
   );
 
+  const orderStatus = normalizeStatus(order?.status);
   const currentStep = session ? activeStep(order) : "table";
-  const canEditOrder = order && !order.is_closed && !PAID_STATUSES.includes(order.status);
+  const canEditOrder = order && !order.is_closed && !isPaid(order?.status);
   const showMenu = menuMode && canEditOrder;
   const hasItems = visibleItems.length > 0;
   const canSendKitchen =
     canEditOrder &&
     hasItems &&
-    ["Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Livree"].includes(order?.status ?? "");
-  const isReady = order?.status === "Prête";
-  const isServed = ["Livrée", "Livree", "Servie"].includes(order?.status ?? "");
-  const canRequestPayment =
-    order &&
-    order.is_closed &&
-    !PAID_STATUSES.includes(order.status) &&
-    Number(order.total_amount || 0) > 0;
+    ["Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée"].includes(orderStatus);
+  const isReady = isReadyStatus(order?.status);
+  const isServed = isServedStatus(order?.status);
+  const canRequestPayment = canPayOrder(order);
+  const waitingKitchen = ["En préparation", "Acceptée"].includes(orderStatus) && !isReady && !isServed;
 
   function openOrder(orderId, tableName, tableRoom) {
     setSession({ orderId, tableName, tableRoom: tableRoom || "Rez-de-chaussée" });
@@ -261,22 +317,40 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
       {(message || error || readyAlert) && (
         <div className="space-y-2">
-          {readyAlert && isReady && (
+          {readyAlert && (isReady || isServed) && !isPaid(order?.status) && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-4">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-white">
                   <DashboardIcon name="Bell" size={18} />
                 </span>
                 <div>
-                  <p className="text-sm font-black text-emerald-900">Commande prête en cuisine</p>
+                  <p className="text-sm font-black text-emerald-900">
+                    {isReady && !isServed ? "Commande prête en cuisine" : "Étape suivante : paiement"}
+                  </p>
                   <p className="text-xs font-semibold text-emerald-700">
-                    Récupérez les plats, servez le client puis validez le service.
+                    {isReady && !isServed
+                      ? "Récupérez les plats, servez le client puis validez ou demandez directement le paiement."
+                      : "Le client peut régler. Envoyez la demande à la caisse."}
                   </p>
                 </div>
               </div>
-              <button type="button" onClick={markServed} disabled={busy === "served"} className="lte-btn lte-btn-primary">
-                {busy === "served" ? "Validation…" : "Marquer comme servie"}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                {isReady && !isServed && (
+                  <button type="button" onClick={markServed} disabled={busy === "served"} className="lte-btn lte-btn-default">
+                    {busy === "served" ? "Validation…" : "Marquer servie"}
+                  </button>
+                )}
+                {canRequestPayment && (
+                  <button type="button" onClick={() => setPaymentOrder(order)} className="lte-btn lte-btn-primary">
+                    Demander le paiement
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {waitingKitchen && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+              Commande en cuisine — vous serez notifiée dès que les plats seront prêts.
             </div>
           )}
           {message && (
@@ -294,6 +368,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
       {!session ? (
         <>
+          {dailyStats && <ServerDailyStats stats={dailyStats} name={currentUser?.first_name} />}
           <TableGrid
             restaurantId={restaurantId}
             readOnly
@@ -332,6 +407,8 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
             isReady={isReady}
             isServed={isServed}
             canRequestPayment={canRequestPayment}
+            waitingKitchen={waitingKitchen}
+            orderStatus={orderStatus}
             busy={busy}
             onQuantityChange={changeQuantity}
             onSendKitchen={sendToKitchen}
@@ -451,6 +528,45 @@ function MenuPanel({ hidden, categories, dishes, categoryFilter, onCategoryChang
   );
 }
 
+function ServerDailyStats({ stats, name }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs font-black uppercase text-slate-500">Vos ventes du jour{name ? ` · ${name}` : ""}</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-4">
+        <StatChip label="Commandes" value={stats.orders} />
+        <StatChip label="Clients servis" value={stats.clients} />
+        <StatChip label="Encaissées" value={stats.paid} />
+        <StatChip label="Total du jour" value={money(stats.sales)} highlight />
+      </div>
+      {stats.recent.length > 0 && (
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <p className="text-xs font-black uppercase text-slate-500">Dernières commandes</p>
+          <div className="mt-2 space-y-2">
+            {stats.recent.map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="font-bold text-slate-800">{item.order_number}</span>
+                <span className="font-semibold text-slate-500">{normalizeStatus(item.status)}</span>
+                <span className="font-black text-slate-900">{money(item.total_amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatChip({ label, value, highlight = false }) {
+  return (
+    <div className="rounded-lg bg-slate-50 px-3 py-3">
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className={`mt-1 text-lg font-black ${highlight ? "text-[var(--dashboard-primary)]" : "text-slate-950"}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function OrderPanel({
   order,
   session,
@@ -462,6 +578,8 @@ function OrderPanel({
   isReady,
   isServed,
   canRequestPayment,
+  waitingKitchen,
+  orderStatus,
   busy,
   onQuantityChange,
   onSendKitchen,
@@ -482,10 +600,24 @@ function OrderPanel({
           {order?.order_number ? `Commande ${order.order_number}` : "Chargement…"}
         </h2>
         <p className="mt-1 text-xs font-semibold text-slate-500">
-          Table {session.tableName} · {order?.status ?? "…"}
+          Table {session.tableName} · {orderStatus || "…"}
           {order?.is_closed ? " · Clôturée" : " · Ouverte"}
         </p>
       </div>
+
+      {waitingKitchen && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+          En attente de la cuisine…
+        </p>
+      )}
+
+      {(isReady || isServed) && canRequestPayment && (
+        <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+          {isServed
+            ? "Client servi : vous pouvez demander le paiement à la caisse."
+            : "Plats prêts : servez le client puis demandez le paiement."}
+        </p>
+      )}
 
       <div className="mt-4 max-h-[280px] space-y-2 overflow-y-auto">
         {items.length === 0 && (
@@ -554,33 +686,34 @@ function OrderPanel({
         )}
 
         {isReady && !isServed && (
-          <button type="button" onClick={onMarkServed} disabled={busy === "served"} className="lte-btn lte-btn-primary w-full">
+          <button type="button" onClick={onMarkServed} disabled={busy === "served"} className="lte-btn lte-btn-default w-full">
             <DashboardIcon name="CheckCircle2" size={16} />
             {busy === "served" ? "Validation…" : "Marquer comme servie"}
           </button>
         )}
 
-        {isServed && canEditOrder && (
-          <>
-            <button type="button" onClick={onCompleteOrder} className="lte-btn lte-btn-default w-full">
-              <DashboardIcon name="UtensilsCrossed" size={16} />
-              Compléter la commande
-            </button>
-            <button
-              type="button"
-              onClick={onCloseForBill}
-              disabled={busy === "close"}
-              className="h-11 w-full rounded-lg bg-slate-800 text-sm font-black text-white"
-            >
-              {busy === "close" ? "Clôture…" : "Clôturer pour l'addition"}
-            </button>
-          </>
-        )}
-
         {canRequestPayment && (
           <button type="button" onClick={onRequestPayment} className="lte-btn lte-btn-primary w-full">
             <DashboardIcon name="Wallet" size={16} />
-            Demander le paiement
+            Demander le paiement (caisse)
+          </button>
+        )}
+
+        {(isServed || isReady) && canEditOrder && (
+          <button type="button" onClick={onCompleteOrder} className="lte-btn lte-btn-default w-full">
+            <DashboardIcon name="UtensilsCrossed" size={16} />
+            Compléter la commande
+          </button>
+        )}
+
+        {canEditOrder && !order?.is_closed && (isServed || isReady) && (
+          <button
+            type="button"
+            onClick={onCloseForBill}
+            disabled={busy === "close"}
+            className="h-11 w-full rounded-lg border border-slate-300 bg-white text-sm font-black text-slate-700"
+          >
+            {busy === "close" ? "Clôture…" : "Verrouiller la commande (plus d'ajout)"}
           </button>
         )}
       </div>
