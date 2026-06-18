@@ -9,6 +9,7 @@ from app.modules.audit.service import log_action
 from app.modules.catalog.classification import classify_menu_item, requires_kitchen_preparation
 from app.modules.catalog.models import MenuCategory, MenuItem
 from app.modules.finance.models import PromotionCode
+from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
 from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
@@ -329,6 +330,16 @@ def send_order_to_kitchen(
     previous_status = order.status
     if order.status == "Nouvelle":
         order.status = "Acceptée"
+    if created_count == 0:
+        kitchen_items = [item for item in order.items if item.sale_channel != "EMBALLAGE"]
+        if kitchen_items and skipped_bar == len(kitchen_items):
+            raise HTTPException(
+                status_code=400,
+                detail="Cette commande ne contient que des boissons bar — rien à envoyer en cuisine.",
+            )
+        if tickets:
+            raise HTTPException(status_code=400, detail="Tous les plats sont déjà envoyés en cuisine.")
+        raise HTTPException(status_code=400, detail="Aucun plat à envoyer en cuisine.")
     if created_count > 0:
         notify(
             db,
