@@ -69,16 +69,8 @@ export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
     <section className="space-y-6">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
-          <p className="text-xs font-black uppercase text-[#f04438]">Contrôle administrateur</p>
           <h1 className="mt-2 text-4xl font-black text-[#070528]">Journaux d'activité</h1>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-            Suivez les actions sensibles: paiements, factures, utilisateurs, stock et avaries.
-          </p>
         </div>
-        <button type="button" onClick={loadLogs} className="lte-btn lte-btn-primary">
-          <DashboardIcon name="Activity" size={17} />
-          Actualiser
-        </button>
       </div>
 
       <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">

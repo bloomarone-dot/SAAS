@@ -46,15 +46,9 @@ export function SuperadminRestaurants({
     <section className="space-y-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="mb-2 text-xs font-black uppercase tracking-normal text-[#f04438]">
-            Super administration
-          </p>
           <h1 className="text-3xl font-black text-[#07133d] md:text-4xl">
             Restaurants
           </h1>
-          <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#64708b]">
-            Créez les restaurants, leurs propriétaires et suivez uniquement les tenants de la plateforme.
-          </p>
         </div>
 
         <button

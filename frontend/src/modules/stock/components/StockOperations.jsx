@@ -1,1095 +1,716 @@
 import { useEffect, useMemo, useState } from "react";
-
-import { DashboardIcon } from "@/components/dashboard/icons";
-import { nextSort, SortButton, sortRows } from "@/utils/sort";
-import { enqueueOfflineAction, formatApiError, friendlyNetworkMessage, isNetworkError } from "@/utils/network";
-import { validationFor } from "@/utils/validation";
-import { money, movementLabels, productTypeLabels, damageReasonLabels, locationLabels } from "./stockShared";
 import {
-  getPageCopy,
-  buildPdfReport,
-  getRestaurantExportHeader,
-  safeJsonParse,
-  pdfCard,
-  pdfTable,
-  printHtmlDocument,
-  formatDateInput,
-  escapeHtml,
-  selectedMovementItem,
-  getTotalQuantity,
-  getLocationOptions,
-  formatMovementLocations,
-  numberPayload,
-  SectionTitle,
-  SupplyGuide,
-  StockSummaryStrip,
-  AnalyticStockPanel,
-  LossReasonPanel,
-  ExpiringLotsPanel,
-  InventoryStatusPanel,
-  InventoryManager,
-  CompactPanel,
-  DamageForm,
-  CompactInfo,
-  getLocationQuantityFromItem,
-  Field,
-  ReadonlyField,
-  SelectField,
-  PrimaryButton,
-  StockTable,
-  RecipeRows,
-  PackagingRows,
-  ProductionRows,
-  ReportPanel,
-  ReportRows,
-  sumObject,
-  FinancePanel,
-  SimpleRows,
-  HistoryPanel,
-  DamagePanel,
-} from "./stockPanels";
+  AlertTriangle,
+  ArrowLeftRight,
+  BarChart3,
+  Boxes,
+  ClipboardCheck,
+  ClipboardList,
+  Factory,
+  PackagePlus,
+  PackageX,
+  Plus,
+  Search,
+  Warehouse,
+} from "lucide-react";
 
-const emptyItem = {
+import { formatApiError } from "@/utils/network";
+
+const tabs = [
+  { key: "dashboard", label: "Tableau de bord", icon: BarChart3 },
+  { key: "products", label: "Produits", icon: Boxes },
+  { key: "depots", label: "Dépôts", icon: Warehouse },
+  { key: "entries", label: "Entrées", icon: PackagePlus },
+  { key: "transfers", label: "Transferts", icon: ArrowLeftRight },
+  { key: "outputs", label: "Sorties", icon: PackageX },
+  { key: "inventories", label: "Inventaires", icon: ClipboardCheck },
+  { key: "reports", label: "Rapports", icon: ClipboardList },
+  { key: "alerts", label: "Alertes", icon: AlertTriangle },
+];
+
+const movementLabels = {
+  ENTRY: "Entrée",
+  DIRECT_ENTRY: "Entrée directe",
+  TRANSFER: "Transfert",
+  OUTPUT: "Sortie",
+  LOSS: "Perte",
+  INVENTORY_PLUS: "Inventaire +",
+  INVENTORY_MINUS: "Inventaire -",
+  CANCELLATION: "Annulation",
+};
+
+const depotTypeLabels = {
+  principal: "Principal",
+  cuisine: "Cuisine",
+  boisson: "Boisson",
+  autre: "Autre",
+};
+
+const today = () => new Date().toISOString().slice(0, 10);
+const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+const qty = (value) => Number(value || 0).toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+
+const emptyProduct = {
+  code: "",
   name: "",
   product_type: "INGREDIENT",
-  unit: "Kilogramme",
-  quantity: "",
-  kitchen_quantity: "",
-  drink_quantity: "",
-  alert_threshold: "",
+  unit_id: "",
   purchase_price: "",
-  cmup_current: "",
-  packaging_sale_price: "",
-  sale_margin_rate: "",
-  is_active: true,
+  minimum_stock: "",
 };
 
-const emptyMovement = {
-  item_id: "",
-  movement_type: "IN",
-  source_location: "MAGASIN",
-  destination_location: "CUISINE",
+const emptyDepot = { name: "", code: "", type: "autre", description: "" };
+
+const emptyEntry = {
+  movement_date: today(),
+  product_id: "",
+  destination_depot_id: "",
   quantity: "",
   unit_price: "",
-  expiration_date: "",
-  destination: "",
-  note: "",
-};
-
-const emptyDamage = {
-  item_id: "",
-  location: "MAGASIN",
-  quantity: "",
-  estimated_loss: "",
-  reason: "PERIME",
-};
-
-const emptyRecipe = {
-  menu_item_id: "",
-  stock_item_id: "",
-  quantity_per_dish: "",
-  location: "CUISINE",
-};
-
-const emptyPackagingLink = {
-  menu_item_id: "",
-  packaging_item_id: "",
-  required_quantity: "1",
-};
-
-const emptyProduction = {
-  menu_item_id: "",
-  quantity: "",
-  note: "",
-};
-
-const emptyExpense = {
-  label: "",
-  category: "Charges",
-  amount: "",
-  payment_method: "",
+  supplier_id: "",
+  reason: "",
   reference: "",
-  expense_date: new Date().toISOString().slice(0, 10),
-  note: "",
 };
 
-
-
-
-
-const unitsByType = {
-  INGREDIENT: ["Kilogramme"],
-  BOISSON: ["Bouteille", "Carton", "Casier"],
-  EMBALLAGE: ["Unité", "Paquet", "Carton"],
+const emptyTransfer = {
+  movement_date: today(),
+  product_id: "",
+  source_depot_id: "",
+  destination_depot_id: "",
+  quantity: "",
+  reason: "",
 };
 
+const emptyOutput = {
+  movement_date: today(),
+  product_id: "",
+  source_depot_id: "",
+  quantity: "",
+  reason: "consommation",
+  reference: "",
+};
 
-export function StockOperations({ apiBaseUrl, role, mode = "stock", onMessage, focusCreate = false }) {
-  const [items, setItems] = useState([]);
-  const [movements, setMovements] = useState([]);
-  const [lots, setLots] = useState([]);
-  const [costCenters, setCostCenters] = useState([]);
-  const [packagingLinks, setPackagingLinks] = useState([]);
-  const [inventories, setInventories] = useState([]);
-  const [damages, setDamages] = useState([]);
-  const [recipes, setRecipes] = useState([]);
-  const [productionSheets, setProductionSheets] = useState([]);
-  const [menuItems, setMenuItems] = useState([]);
-  const [report, setReport] = useState(null);
-  const [finance, setFinance] = useState(null);
-  const [expenses, setExpenses] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [margins, setMargins] = useState([]);
-  const [rotation, setRotation] = useState([]);
-  const [serverRevenue, setServerRevenue] = useState([]);
-  const [statements, setStatements] = useState(null);
+export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
+  const [activeTab, setActiveTab] = useState(resolveInitialTab(mode));
   const [summary, setSummary] = useState(null);
-  const [itemForm, setItemForm] = useState(emptyItem);
-  const [editingItemId, setEditingItemId] = useState(null);
-  const [movementForm, setMovementForm] = useState(emptyMovement);
-  const [damageForm, setDamageForm] = useState(emptyDamage);
-  const [recipeForm, setRecipeForm] = useState(emptyRecipe);
-  const [packagingForm, setPackagingForm] = useState(emptyPackagingLink);
-  const [productionForm, setProductionForm] = useState(emptyProduction);
-  const [expenseForm, setExpenseForm] = useState(emptyExpense);
-  const [inventoryPeriod, setInventoryPeriod] = useState(`Semaine ${new Date().toISOString().slice(0, 10)}`);
-  const [reportRange, setReportRange] = useState({
-    start_date: new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
-    end_date: new Date().toISOString().slice(0, 10),
-  });
-  const [search, setSearch] = useState("");
-  const [stockFilter, setStockFilter] = useState("ALL");
-  const [movementFilter, setMovementFilter] = useState("ALL");
+  const [products, setProducts] = useState([]);
+  const [depots, setDepots] = useState([]);
+  const [units, setUnits] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [movements, setMovements] = useState([]);
+  const [inventories, setInventories] = useState([]);
+  const [report, setReport] = useState(null);
+  const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [productForm, setProductForm] = useState(emptyProduct);
+  const [depotForm, setDepotForm] = useState(emptyDepot);
+  const [entryForm, setEntryForm] = useState(emptyEntry);
+  const [directEntry, setDirectEntry] = useState(false);
+  const [transferForm, setTransferForm] = useState(emptyTransfer);
+  const [outputForm, setOutputForm] = useState(emptyOutput);
+  const [isLoss, setIsLoss] = useState(false);
+  const [inventoryDepotId, setInventoryDepotId] = useState("");
+  const [inventoryRows, setInventoryRows] = useState([]);
+  const [filters, setFilters] = useState({
+    start_date: new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
+    end_date: today(),
+    depot_id: "",
+    product_id: "",
+    movement_type: "",
+  });
 
   const token = localStorage.getItem("access_token");
-  const canAccountDamage = role === "ADMIN" || role === "COMPTABLE";
-  const canEditAccounting = role === "ADMIN" || role === "COMPTABLE";
-  const pageCopy = getPageCopy(mode);
 
-  const filteredItems = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return items.filter((item) => {
-      const isLow = Number(item.quantity) <= Number(item.alert_threshold);
-      const totalQuantity = getTotalQuantity(item);
-      const matchesSearch =
-        !query ||
-        item.name.toLowerCase().includes(query) ||
-        item.unit.toLowerCase().includes(query) ||
-        (productTypeLabels[item.product_type] ?? item.product_type ?? "").toLowerCase().includes(query);
-      const matchesStock =
-        stockFilter === "ALL" ||
-        (stockFilter === "LOW" && totalQuantity <= Number(item.alert_threshold)) ||
-        (stockFilter === "OK" && totalQuantity > Number(item.alert_threshold));
-      return matchesSearch && matchesStock;
-    });
-  }, [items, search, stockFilter]);
+  const visibleProducts = useMemo(() => {
+    const value = query.trim().toLowerCase();
+    if (!value) return products;
+    return products.filter((product) =>
+      [product.code, product.name, product.unit_name, product.unit_symbol]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(value))
+    );
+  }, [products, query]);
 
-  const filteredMovements = useMemo(() => {
-    return movements.filter((movement) => movementFilter === "ALL" || movement.movement_type === movementFilter);
-  }, [movementFilter, movements]);
-  const selectedDamageItem = useMemo(
-    () => selectedMovementItem(items, damageForm.item_id),
-    [damageForm.item_id, items]
+  const lowStock = useMemo(
+    () => products.filter((product) => Number(product.current_stock || 0) <= Number(product.minimum_stock || 0)),
+    [products]
   );
 
-  const analyticSummary = useMemo(() => {
-    const movementCost = (types) => movements
-      .filter((movement) => types.includes(movement.movement_type))
-      .reduce((total, movement) => total + Number(movement.value || (Number(movement.quantity || 0) * Number(movement.unit_price || 0))), 0);
-    return [
-      { label: "Centre magasin", value: money(summary?.main_stock_value), detail: "Valorisation grand magasin", icon: "Package" },
-      { label: "Centre cuisine", value: money(summary?.kitchen_stock_value), detail: "Stock disponible pour production", icon: "ChefHat" },
-      { label: "Centre boisson", value: money(summary?.drink_stock_value), detail: "Boissons et vins disponibles", icon: "Wallet" },
-      { label: "Coût sorties", value: money(movementCost(["OUT"])), detail: "Consommations enregistrées", icon: "TrendingDown" },
-      { label: "Transferts internes", value: money(movementCost(["TRANSFER"])), detail: "Magasin vers cuisine/boisson", icon: "Truck" },
-      { label: "Pertes / avaries", value: money(summary?.total_damage_loss), detail: "Charges analytiques stock", icon: "AlertTriangle" },
-      { label: "Emballages consommés", value: money(summary?.packaging_consumed_value), detail: "Valeur FIFO sortie", icon: "ReceiptText" },
-    ];
-  }, [movements, summary]);
-
   useEffect(() => {
-    loadStock();
+    loadAll();
   }, []);
 
-  async function api(path, options = {}) {
-    try {
-      const response = await fetch(`${apiBaseUrl}${path}`, {
-        ...options,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          ...(options.headers ?? {}),
-        },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(formatApiError(data.detail, "Opération impossible."));
-      return data;
-    } catch (error) {
-      throw new Error(friendlyNetworkMessage(error, "Opération impossible."));
-    }
-  }
+  useEffect(() => {
+    if (!inventoryDepotId && depots[0]) setInventoryDepotId(depots[0].id);
+    if (!entryForm.destination_depot_id && depots[0]) setEntryForm((form) => ({ ...form, destination_depot_id: depots[0].id }));
+    if (!transferForm.source_depot_id && depots[0]) setTransferForm((form) => ({ ...form, source_depot_id: depots[0].id }));
+    if (!outputForm.source_depot_id && depots[0]) setOutputForm((form) => ({ ...form, source_depot_id: depots[0].id }));
+  }, [depots]);
 
-  async function loadStock() {
-    setIsLoading(true);
-    try {
-      const [summaryData, itemData, movementData, damageData] = await Promise.all([
-        api("/api/v1/stock/summary"),
-        api("/api/v1/stock/items"),
-        api("/api/v1/stock/movements"),
-        api("/api/v1/stock/damages"),
-      ]);
-      setSummary(summaryData);
-      setItems(itemData);
-      setMovements(movementData);
-      setDamages(damageData);
-      const [menuData, recipeData, productionData, lotData, centerData, packagingData, inventoryData] = await Promise.all([
-        api("/api/v1/stock/menu-items").catch(() => []),
-        api("/api/v1/stock/recipes").catch(() => []),
-        api("/api/v1/stock/production-sheets").catch(() => []),
-        api("/api/v1/stock/lots").catch(() => []),
-        api("/api/v1/stock/cost-centers").catch(() => []),
-        api("/api/v1/stock/packaging-links").catch(() => []),
-        api("/api/v1/stock/inventories").catch(() => []),
-      ]);
-      setMenuItems(menuData);
-      setRecipes(recipeData);
-      setProductionSheets(productionData);
-      setLots(lotData);
-      setCostCenters(centerData);
-      setPackagingLinks(packagingData);
-      setInventories(inventoryData);
-      setMovementForm((current) => ({ ...current, item_id: current.item_id || itemData[0]?.id || "" }));
-      setDamageForm((current) => {
-        const selectedItem = itemData.find((item) => item.id === current.item_id) || itemData[0];
+  useEffect(() => {
+    if (!productForm.unit_id && units[0]) setProductForm((form) => ({ ...form, unit_id: units[0].id }));
+    if (!entryForm.product_id && products[0]) {
+      setEntryForm((form) => ({ ...form, product_id: products[0].id }));
+      setTransferForm((form) => ({ ...form, product_id: products[0].id }));
+      setOutputForm((form) => ({ ...form, product_id: products[0].id }));
+    }
+  }, [units, products]);
+
+  useEffect(() => {
+    if (!inventoryDepotId) return;
+    setInventoryRows(
+      products.map((product) => {
+        const depotStock = product.stock_by_depot?.find((row) => row.depot_id === inventoryDepotId);
         return {
-          ...current,
-          item_id: selectedItem?.id || "",
-          location: selectedItem?.product_type === "BOISSON" ? "BOISSON" : "CUISINE",
+          product_id: product.id,
+          name: product.name,
+          theoretical_quantity: Number(depotStock?.quantity || 0),
+          real_quantity: Number(depotStock?.quantity || 0),
         };
-      });
-      setRecipeForm((current) => ({
-        ...current,
-        menu_item_id: current.menu_item_id || menuData[0]?.id || "",
-        stock_item_id: current.stock_item_id || itemData[0]?.id || "",
-      }));
-      setPackagingForm((current) => ({
-        ...current,
-        menu_item_id: current.menu_item_id || menuData[0]?.id || "",
-        packaging_item_id: current.packaging_item_id || itemData.find((item) => item.product_type === "EMBALLAGE")?.id || "",
-      }));
-      setProductionForm((current) => ({ ...current, menu_item_id: current.menu_item_id || menuData[0]?.id || "" }));
-      await loadReport(reportRange);
-      await loadFinance(reportRange);
+      })
+    );
+  }, [inventoryDepotId, products]);
+
+  async function api(path, options = {}) {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(formatApiError(data?.detail));
+    }
+    if (response.status === 204) return null;
+    return response.json();
+  }
+
+  async function loadAll() {
+    setIsLoading(true);
+    try {
+      const [summaryData, productData, depotData, unitData, supplierData, movementData, inventoryData, reportData] =
+        await Promise.all([
+          api("/api/v1/stock/summary"),
+          api("/api/v1/stock/products"),
+          api("/api/v1/stock/depots"),
+          api("/api/v1/stock/units"),
+          api("/api/v1/stock/suppliers"),
+          api("/api/v1/stock/movements"),
+          api("/api/v1/stock/inventories"),
+          api("/api/v1/stock/reports"),
+        ]);
+      setSummary(summaryData);
+      setProducts(productData);
+      setDepots(depotData);
+      setUnits(unitData);
+      setSuppliers(supplierData);
+      setMovements(movementData);
+      setInventories(inventoryData);
+      setReport(reportData);
     } catch (error) {
-      onMessage(error.message);
+      emit(error.message || "Chargement du stock impossible.");
     } finally {
       setIsLoading(false);
     }
   }
 
-  function updateItemField(event) {
-    const { name, value } = event.target;
-    setItemForm((current) => ({ ...current, [name]: value }));
+  function emit(message) {
+    if (onMessage) onMessage(message);
   }
 
-  function updateMovementField(event) {
-    const { name, value } = event.target;
-    setMovementForm((current) => {
-      const next = { ...current, [name]: value };
-      const nextItem = selectedMovementItem(items, name === "item_id" ? value : next.item_id);
-      const nextType = name === "movement_type" ? value : next.movement_type;
-      if (name === "item_id" || name === "movement_type") {
-        if (nextType === "TRANSFER") {
-          next.source_location = "MAGASIN";
-          next.destination_location = nextItem?.product_type === "BOISSON" ? "BOISSON" : "CUISINE";
-        } else if (nextType === "OUT") {
-          next.source_location = nextItem?.product_type === "BOISSON" ? "BOISSON" : "CUISINE";
-          next.destination_location = "";
-        } else if (nextType === "ADJUSTMENT") {
-          next.source_location = "MAGASIN";
-          next.destination_location = "";
-        } else {
-          next.source_location = "";
-          next.destination_location = "MAGASIN";
-        }
-      }
-      return next;
+  function productName(id) {
+    return products.find((product) => product.id === id)?.name || "Produit";
+  }
+
+  function depotName(id) {
+    return depots.find((depot) => depot.id === id)?.name || "-";
+  }
+
+  function numericPayload(payload, fields) {
+    return Object.fromEntries(
+      Object.entries(payload).map(([key, value]) => [key, fields.includes(key) ? Number(value || 0) : value || null])
+    );
+  }
+
+  async function submitProduct(event) {
+    event.preventDefault();
+    await submit("/api/v1/stock/products", numericPayload(productForm, ["purchase_price", "minimum_stock"]), () => {
+      setProductForm({ ...emptyProduct, unit_id: units[0]?.id || "" });
+      emit("Produit stock créé.");
     });
   }
 
-  function updateDamageField(event) {
-    const { name, value } = event.target;
-    setDamageForm((current) => {
-      const next = { ...current, [name]: value };
-      if (name === "item_id" || name === "quantity") {
-        const nextItem = selectedMovementItem(items, name === "item_id" ? value : next.item_id);
-        next.location = nextItem?.product_type === "BOISSON" ? "BOISSON" : "CUISINE";
-        if (nextItem && name === "quantity") {
-          next.estimated_loss = String(Number(value || 0) * Number(nextItem.purchase_price || 0));
-        }
-      }
-      return next;
+  async function submitDepot(event) {
+    event.preventDefault();
+    await submit("/api/v1/stock/depots", depotForm, () => {
+      setDepotForm(emptyDepot);
+      emit("Dépôt créé.");
     });
   }
 
-  async function createItem(event) {
+  async function submitEntry(event) {
     event.preventDefault();
-    setIsLoading(true);
-    try {
-      const payload = numberPayload(itemForm, [
-        "quantity",
-        "kitchen_quantity",
-        "drink_quantity",
-        "alert_threshold",
-        "purchase_price",
-        "cmup_current",
-        "packaging_sale_price",
-        "sale_margin_rate",
-      ]);
-      const created = await api(editingItemId ? `/api/v1/stock/items/${editingItemId}` : "/api/v1/stock/items", {
-        method: editingItemId ? "PATCH" : "POST",
-        body: JSON.stringify(
-          editingItemId
-            ? payload
-            : payload
-        ),
-      });
-      setItems((current) => editingItemId ? current.map((item) => item.id === created.id ? created : item) : [created, ...current]);
-      setItemForm(emptyItem);
-      setEditingItemId(null);
-      await loadStock();
-      onMessage(`Produit stock "${created.name}" ${editingItemId ? "modifié" : "créé"}.`);
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  function editItem(item) {
-    setEditingItemId(item.id);
-    setItemForm({
-      name: item.name,
-      product_type: item.product_type,
-      unit: item.unit,
-      quantity: String(item.quantity),
-      kitchen_quantity: String(item.kitchen_quantity),
-      drink_quantity: String(item.drink_quantity),
-      alert_threshold: String(item.alert_threshold),
-      purchase_price: String(item.purchase_price),
-      cmup_current: String(item.cmup_current || item.purchase_price || 0),
-      packaging_sale_price: String(item.packaging_sale_price || 0),
-      sale_margin_rate: String(item.sale_margin_rate),
-      is_active: item.is_active !== false,
+    const path = directEntry ? "/api/v1/stock/direct-entries" : "/api/v1/stock/entries";
+    await submit(path, numericPayload(entryForm, ["quantity", "unit_price"]), () => {
+      setEntryForm({ ...emptyEntry, product_id: products[0]?.id || "", destination_depot_id: depots[0]?.id || "" });
+      emit(directEntry ? "Entrée directe validée." : "Entrée stock validée.");
     });
   }
 
-  async function createMovement(event) {
+  async function submitTransfer(event) {
     event.preventDefault();
-    setIsLoading(true);
-    const movementType = isSupplyView ? "IN" : movementForm.movement_type;
-    const movementPayload = isSupplyView
-      ? {
-          item_id: movementForm.item_id,
-          movement_type: "IN",
-          quantity: Number(movementForm.quantity || 0),
-          unit_price: Number(movementForm.unit_price || 0),
-          expiration_date: movementForm.expiration_date || null,
-          note: movementForm.note || null,
-        }
-      : {
-          ...numberPayload(movementForm, ["quantity", "unit_price"]),
-          movement_type: movementType,
-          unit_price: Number(movementForm.unit_price || 0),
-          expiration_date: movementForm.expiration_date || null,
-          destination: movementForm.destination || null,
-          note: movementForm.note || null,
-        };
-    try {
-      await api("/api/v1/stock/movements", {
-        method: "POST",
-        body: JSON.stringify(movementPayload),
-      });
-      setMovementForm({ ...emptyMovement, movement_type: movementType, item_id: movementForm.item_id });
-      await loadStock();
-      onMessage(isSupplyView ? "Approvisionnement enregistré en stock magasin." : "Mouvement de stock enregistré.");
-    } catch (error) {
-      if (isNetworkError(error)) {
-        enqueueOfflineAction({
-          label: isSupplyView ? "Approvisionnement stock" : "Mouvement stock",
-          requests: [
-            {
-              path: "/api/v1/stock/movements",
-              method: "POST",
-              requiresAuth: true,
-              body: movementPayload,
-            },
-          ],
-        });
-        setMovementForm({ ...emptyMovement, movement_type: movementType, item_id: movementForm.item_id });
-        onMessage("Connexion indisponible. Le mouvement est mis en attente et sera synchronisé automatiquement.");
-      } else {
-        onMessage(error.message);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function createDamage(event) {
-    event.preventDefault();
-    setIsLoading(true);
-    try {
-      await api("/api/v1/stock/damages", {
-        method: "POST",
-        body: JSON.stringify(numberPayload(damageForm, ["quantity", "estimated_loss"])),
-      });
-      setDamageForm({ ...emptyDamage, item_id: damageForm.item_id });
-      await loadStock();
-      onMessage("Avarie enregistrée.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function accountDamage(damage) {
-    setIsLoading(true);
-    try {
-      await api(`/api/v1/stock/damages/${damage.id}/account`, { method: "PATCH" });
-      await loadStock();
-      onMessage("Avarie comptabilisée.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function openInventory() {
-    setIsLoading(true);
-    try {
-      await api("/api/v1/stock/inventories", {
-        method: "POST",
-        body: JSON.stringify({ period: inventoryPeriod, tolerance_rate: 2 }),
-      });
-      await loadStock();
-      onMessage("Inventaire ouvert.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function updateInventoryLine(inventoryId, lineId, realStock) {
-    try {
-      await api(`/api/v1/stock/inventories/${inventoryId}/lines/${lineId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ real_stock: Number(realStock || 0) }),
-      });
-      await loadStock();
-    } catch (error) {
-      onMessage(error.message);
-    }
-  }
-
-  async function closeInventory(inventoryId) {
-    if (!window.confirm("Clôturer cet inventaire ? Les stocks réels deviendront les nouvelles valeurs de stock.")) return;
-    setIsLoading(true);
-    try {
-      await api(`/api/v1/stock/inventories/${inventoryId}/close`, { method: "PATCH" });
-      await loadStock();
-      onMessage("Inventaire clôturé.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function createRecipe(event) {
-    event.preventDefault();
-    setIsLoading(true);
-    try {
-      await api("/api/v1/stock/recipes", {
-        method: "POST",
-        body: JSON.stringify(numberPayload(recipeForm, ["quantity_per_dish"])),
-      });
-      setRecipeForm((current) => ({ ...emptyRecipe, menu_item_id: current.menu_item_id, stock_item_id: current.stock_item_id }));
-      await loadStock();
-      onMessage("Ingrédient lié au plat.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function deleteRecipe(link) {
-    setIsLoading(true);
-    try {
-      await api(`/api/v1/stock/recipes/${link.id}`, { method: "DELETE" });
-      await loadStock();
-      onMessage("Liaison supprimée.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function createPackagingLink(event) {
-    event.preventDefault();
-    setIsLoading(true);
-    try {
-      await api("/api/v1/stock/packaging-links", {
-        method: "POST",
-        body: JSON.stringify(numberPayload(packagingForm, ["required_quantity"])),
-      });
-      setPackagingForm((current) => ({ ...emptyPackagingLink, menu_item_id: current.menu_item_id, packaging_item_id: current.packaging_item_id }));
-      await loadStock();
-      onMessage("Emballage lié au plat.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function deletePackagingLink(link) {
-    setIsLoading(true);
-    try {
-      await api(`/api/v1/stock/packaging-links/${link.id}`, { method: "DELETE" });
-      await loadStock();
-      onMessage("Liaison emballage supprimée.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function createProductionSheet(event) {
-    event.preventDefault();
-    setIsLoading(true);
-    try {
-      await api("/api/v1/stock/production-sheets", {
-        method: "POST",
-        body: JSON.stringify(numberPayload(productionForm, ["quantity"])),
-      });
-      setProductionForm((current) => ({ ...emptyProduction, menu_item_id: current.menu_item_id }));
-      await loadStock();
-      onMessage("Fiche de production créée et stock cuisine déduit.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function loadReport(range = reportRange) {
-    const query = new URLSearchParams({
-      start_date: `${range.start_date}T00:00:00`,
-      end_date: `${range.end_date}T23:59:59`,
+    await submit("/api/v1/stock/transfers", numericPayload(transferForm, ["quantity"]), () => {
+      setTransferForm({ ...emptyTransfer, product_id: products[0]?.id || "", source_depot_id: depots[0]?.id || "" });
+      emit("Transfert validé.");
     });
-    const data = await api(`/api/v1/stock/reports?${query.toString()}`);
-    setReport(data);
   }
 
-  async function loadFinance(range = reportRange) {
-    const query = new URLSearchParams({
-      start_date: `${range.start_date}T00:00:00`,
-      end_date: `${range.end_date}T23:59:59`,
+  async function submitOutput(event) {
+    event.preventDefault();
+    const path = isLoss ? "/api/v1/stock/losses" : "/api/v1/stock/outputs";
+    await submit(path, numericPayload(outputForm, ["quantity"]), () => {
+      setOutputForm({ ...emptyOutput, product_id: products[0]?.id || "", source_depot_id: depots[0]?.id || "" });
+      emit(isLoss ? "Perte enregistrée." : "Sortie validée.");
     });
-    const [summaryData, expenseData, paymentData, marginData, rotationData, serverRevenueData, statementData] = await Promise.all([
-      api(`/api/v1/finance/summary?${query.toString()}`).catch(() => null),
-      api(`/api/v1/finance/expenses?${query.toString()}`).catch(() => []),
-      api(`/api/v1/finance/payments?${query.toString()}`).catch(() => []),
-      api(`/api/v1/finance/dish-margins?${query.toString()}`).catch(() => []),
-      api(`/api/v1/finance/stock-rotation?${query.toString()}`).catch(() => []),
-      api(`/api/v1/finance/server-revenue?${query.toString()}`).catch(() => []),
-      api(`/api/v1/finance/statements?${query.toString()}`).catch(() => null),
-    ]);
-    setFinance(summaryData);
-    setExpenses(expenseData);
-    setPayments(paymentData);
-    setMargins(marginData);
-    setRotation(rotationData);
-    setServerRevenue(serverRevenueData);
-    setStatements(statementData);
   }
 
-  async function submitReport(event) {
+  async function submitInventory(event) {
     event.preventDefault();
-    setIsLoading(true);
-    try {
-      await loadReport(reportRange);
-      await loadFinance(reportRange);
-      onMessage("Rapport stock généré.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function createExpense(event) {
-    event.preventDefault();
-    setIsLoading(true);
-    try {
-      await api("/api/v1/finance/expenses", {
-        method: "POST",
-        body: JSON.stringify({
-          ...expenseForm,
-          amount: Number(expenseForm.amount || 0),
-          payment_method: expenseForm.payment_method || null,
-          reference: expenseForm.reference || null,
-          note: expenseForm.note || null,
-          expense_date: `${expenseForm.expense_date}T12:00:00`,
-        }),
-      });
-      setExpenseForm(emptyExpense);
-      await loadFinance(reportRange);
-      onMessage("Dépense enregistrée.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function deleteExpense(expense) {
-    if (!window.confirm(`Archiver cette dépense ?\n\nElle restera en base de données pour l'historique.`)) return;
-    setIsLoading(true);
-    try {
-      await api(`/api/v1/finance/expenses/${expense.id}`, { method: "DELETE" });
-      await loadFinance(reportRange);
-      onMessage("Dépense supprimée.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  function exportExcel() {
-    const exportHeader = getRestaurantExportHeader();
-    const rows = [
-      [exportHeader.name],
-      [exportHeader.subtitle],
-      [],
-      ["Produit", "Unité", "Quantité", "Seuil", "Prix achat", "Marge"],
-      ...items.map((item) => [
-        item.name,
-        item.unit,
-        `Magasin: ${item.quantity} / Cuisine: ${item.kitchen_quantity} / Boisson: ${item.drink_quantity}`,
-        item.alert_threshold,
-        item.purchase_price,
-        item.sale_margin_rate,
-      ]),
-      [],
-      ["Date", "Produit", "Type", "Quantité", "Destination", "Note"],
-      ...movements.map((movement) => [
-        new Date(movement.created_at).toLocaleString("fr-FR"),
-        items.find((item) => item.id === movement.item_id)?.name ?? "-",
-        movementLabels[movement.movement_type],
-        movement.quantity,
-        `${movement.source_location ? locationLabels[movement.source_location] : "-"} -> ${movement.destination_location ? locationLabels[movement.destination_location] : "-"}`,
-        movement.note ?? "",
-      ]),
-      [],
-      ["Finances"],
-      ["CA", finance?.revenue ?? 0],
-      ["Dépenses", finance?.expenses ?? 0],
-      ["Pertes", finance?.damage_loss ?? 0],
-      ["Bénéfice net", finance?.net_profit ?? 0],
-      [],
-      ["Dépense", "Catégorie", "Montant", "Date", "Référence"],
-      ...expenses.map((expense) => [
-        expense.label,
-        expense.category,
-        expense.amount,
-        new Date(expense.expense_date).toLocaleDateString("fr-FR"),
-        expense.reference ?? "",
-      ]),
-    ];
-    const tableRows = rows
-      .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`)
-      .join("");
-    const html = `<html><head><meta charset="utf-8" /></head><body><table border="1">${tableRows}</table></body></html>`;
-    const url = URL.createObjectURL(new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `stock-${new Date().toISOString().slice(0, 10)}.xls`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function exportPdf() {
-    printHtmlDocument(
-      buildPdfReport({
-        title: pageCopy.title,
-        header: getRestaurantExportHeader(),
-        range: reportRange,
-        summary,
-        report,
-        finance,
-        items,
-        movements,
-        expenses,
-        payments,
-        margins,
-        rotation,
-      }),
-      () => {
-      onMessage("Export PDF bloqué par le navigateur. Autorisez les fenêtres pop-up puis réessayez.");
+    await submit(
+      "/api/v1/stock/inventories",
+      {
+        depot_id: inventoryDepotId,
+        inventory_date: new Date().toISOString(),
+        observation: "Inventaire saisi depuis l'interface stock",
+        details: inventoryRows.map((row) => ({ product_id: row.product_id, real_quantity: Number(row.real_quantity || 0) })),
+      },
+      async (inventory) => {
+        await api(`/api/v1/stock/inventories/${inventory.id}/validate`, { method: "PATCH" });
+        emit("Inventaire validé et ajustements générés.");
       }
     );
   }
 
-  const isStockHome = ["stocks", "stock"].includes(mode);
-  const isMovementView = mode === "movements";
-  const isSupplyView = ["suppliers", "purchases"].includes(mode);
-  const isInventoryView = mode === "inventory";
-  const isAccountingView = ["accounting", "expenses"].includes(mode);
-  const isReportView = ["reports", "sales-report", "profit-report", "server-report", "financial-report"].includes(mode);
-  const isCreateStockProduct = focusCreate && isStockHome;
-  const showExecutivePanels = !isCreateStockProduct && (isAccountingView || isReportView);
-  const showOperationalSummary = !isCreateStockProduct && (isStockHome || isMovementView || isSupplyView || isInventoryView);
-  const effectiveMovementType = isSupplyView ? "IN" : movementForm.movement_type;
-  const showReferenceForm = isStockHome;
-  const showMovementForm = isMovementView || isSupplyView;
-  const showDamageForm = isInventoryView || isAccountingView;
-  const showProductionForms = isStockHome && !isCreateStockProduct;
-  const showStockTable = (isStockHome || isInventoryView) && !isCreateStockProduct;
-  const showHistory = (isMovementView || isInventoryView) && !isCreateStockProduct;
-  const showFinance = isAccountingView;
-  const showReports = isReportView;
-  const showLeftColumn = showReferenceForm || showMovementForm || showDamageForm;
-  const showRightColumn = showProductionForms || showReports || showFinance || showStockTable || showHistory || isAccountingView;
+  async function loadReport(event) {
+    event?.preventDefault();
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+    try {
+      setReport(await api(`/api/v1/stock/reports?${params.toString()}`));
+    } catch (error) {
+      emit(error.message || "Rapport indisponible.");
+    }
+  }
+
+  async function submit(path, payload, afterSuccess) {
+    try {
+      const result = await api(path, { method: "POST", body: JSON.stringify(payload) });
+      if (afterSuccess) await afterSuccess(result);
+      await loadAll();
+    } catch (error) {
+      emit(error.message || "Opération impossible.");
+    }
+  }
 
   return (
-    <section className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
+    <div className="space-y-5">
+      <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-xs font-black uppercase text-[#f04438]">Gestionnaire stock / Comptable</p>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">{isCreateStockProduct ? "Créer un produit stock" : pageCopy.title}</h1>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-            {isCreateStockProduct ? "Renseignez les informations du produit à suivre dans le stock." : pageCopy.subtitle}
-          </p>
+          <h2 className="text-2xl font-semibold text-slate-950">Gestion de stock multi-dépôts</h2>
         </div>
-        {!isCreateStockProduct && <div className="flex flex-wrap gap-3">
-          {(isAccountingView || isReportView) && (
-            <>
-              <button type="button" onClick={exportExcel} className="lte-btn lte-btn-default">
-                <DashboardIcon name="FileText" size={17} />
-                Exporter en Excel
-              </button>
-              <button type="button" onClick={exportPdf} className="lte-btn lte-btn-default">
-                <DashboardIcon name="ReceiptText" size={17} />
-                Exporter en PDF
-              </button>
-            </>
-          )}
-          <button type="button" onClick={loadStock} className="lte-btn lte-btn-primary">
-            <DashboardIcon name="Activity" size={17} />
-            Actualiser
+      </header>
+
+      <nav className="flex gap-2 overflow-x-auto border-b border-slate-200 pb-2">
+        {tabs.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveTab(key)}
+            className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium ${
+              activeTab === key ? "bg-slate-950 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+            }`}
+          >
+            <Icon size={16} />
+            {label}
           </button>
-        </div>}
-      </div>
+        ))}
+      </nav>
 
-      {showOperationalSummary && (
-        <StockSummaryStrip
-          summary={summary}
-          items={items}
-          movements={movements}
-          damages={damages}
-          mode={mode}
+      {isLoading && <div className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">Chargement...</div>}
+
+      {activeTab === "dashboard" && <Dashboard summary={summary} />}
+      {activeTab === "products" && (
+        <Products
+          products={visibleProducts}
+          units={units}
+          query={query}
+          setQuery={setQuery}
+          form={productForm}
+          setForm={setProductForm}
+          onSubmit={submitProduct}
         />
       )}
-
-      {showExecutivePanels && <AnalyticStockPanel rows={analyticSummary} />}
-      {showExecutivePanels && (
-        <div className="grid gap-4 xl:grid-cols-3">
-          <LossReasonPanel rows={summary?.loss_by_reason || {}} />
-          <ExpiringLotsPanel lots={lots} items={items} costCenters={costCenters} />
-          <InventoryStatusPanel inventories={inventories} />
-        </div>
+      {activeTab === "depots" && <Depots depots={depots} form={depotForm} setForm={setDepotForm} onSubmit={submitDepot} />}
+      {activeTab === "entries" && (
+        <EntryForm
+          form={entryForm}
+          setForm={setEntryForm}
+          products={products}
+          depots={depots}
+          suppliers={suppliers}
+          directEntry={directEntry}
+          setDirectEntry={setDirectEntry}
+          onSubmit={submitEntry}
+        />
       )}
-
-      {isInventoryView && (
-        <InventoryManager
+      {activeTab === "transfers" && (
+        <TransferForm form={transferForm} setForm={setTransferForm} products={products} depots={depots} onSubmit={submitTransfer} />
+      )}
+      {activeTab === "outputs" && (
+        <OutputForm form={outputForm} setForm={setOutputForm} products={products} depots={depots} isLoss={isLoss} setIsLoss={setIsLoss} onSubmit={submitOutput} />
+      )}
+      {activeTab === "inventories" && (
+        <InventoryForm
+          depots={depots}
+          depotId={inventoryDepotId}
+          setDepotId={setInventoryDepotId}
+          rows={inventoryRows}
+          setRows={setInventoryRows}
+          onSubmit={submitInventory}
           inventories={inventories}
-          items={items}
-          costCenters={costCenters}
-          period={inventoryPeriod}
-          onPeriodChange={setInventoryPeriod}
-          onOpen={openInventory}
-          onLineChange={updateInventoryLine}
-          onClose={closeInventory}
-          isLoading={isLoading}
         />
       )}
+      {activeTab === "reports" && (
+        <Reports
+          filters={filters}
+          setFilters={setFilters}
+          depots={depots}
+          products={products}
+          report={report}
+          movements={movements}
+          onSubmit={loadReport}
+          productName={productName}
+          depotName={depotName}
+        />
+      )}
+      {activeTab === "alerts" && <Alerts products={lowStock} />}
+    </div>
+  );
+}
 
-      {isSupplyView && <SupplyGuide />}
+function resolveInitialTab(mode) {
+  // Clés d'onglet directes (menu nettoyé) : mapping 1:1.
+  if (tabs.some((tab) => tab.key === mode)) return mode;
+  if (["stock", "stocks", "create-stock-product"].includes(mode)) return "products";
+  if (["movements", "stock-in"].includes(mode)) return "entries";
+  if (mode === "transfer") return "transfers";
+  if (["stock-out", "damages"].includes(mode)) return "outputs";
+  if (mode === "inventory") return "inventories";
+  if (["reports", "stock-report", "rotation"].includes(mode)) return "reports";
+  if (mode === "low-stock") return "alerts";
+  return "dashboard";
+}
 
-      <div className={showLeftColumn && showRightColumn ? "grid gap-6 xl:grid-cols-[0.9fr_1.1fr]" : "space-y-6"}>
-        {showLeftColumn && (
-        <div className="space-y-6">
-          {showReferenceForm && (
-          <form onSubmit={createItem} className="border border-slate-200 bg-white p-6 shadow-sm">
-            <SectionTitle
-              title={isSupplyView ? "Créer un produit stock" : "Référence stock"}
-              subtitle={isSupplyView ? "Créez ici le produit à approvisionner s’il n’existe pas encore." : "Définissez les produits suivis dans le magasin, la cuisine ou le stock boisson."}
-              icon="Package"
-            />
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <Field name="name" label="Produit" value={itemForm.name} onChange={updateItemField} required />
-              <SelectField
-                name="product_type"
-                label="Nature du produit"
-                value={itemForm.product_type}
-                onChange={(event) => {
-                  const nextType = event.target.value;
-                  setItemForm((current) => ({
-                    ...current,
-                    product_type: nextType,
-	                    unit: unitsByType[nextType][0],
-	                    drink_quantity: nextType === "BOISSON" ? current.drink_quantity : "",
-	                    kitchen_quantity: nextType === "INGREDIENT" ? current.kitchen_quantity : "",
-	                    packaging_sale_price: nextType === "EMBALLAGE" ? current.packaging_sale_price : "",
-	                  }));
-                }}
-                options={Object.entries(productTypeLabels)}
-                required
-              />
-              <SelectField
-                name="unit"
-                label="Unité d’entrée"
-                value={itemForm.unit}
-                onChange={updateItemField}
-                options={unitsByType[itemForm.product_type].map((unit) => [unit, unit])}
-                required
-              />
-              <Field name="quantity" label="Quantité magasin initiale" type="number" min="0" value={itemForm.quantity} onChange={updateItemField} required />
-	              <Field name="alert_threshold" label="Seuil alerte" type="number" min="0" value={itemForm.alert_threshold} onChange={updateItemField} required />
-	              <Field name="purchase_price" label="Prix achat unitaire" type="number" min="0" value={itemForm.purchase_price} onChange={updateItemField} required />
-	              <Field name="cmup_current" label="CMUP actuel" type="number" min="0" value={itemForm.cmup_current} onChange={updateItemField} />
-	              {itemForm.product_type === "EMBALLAGE" && (
-	                <Field name="packaging_sale_price" label="Prix vente emballage" type="number" min="0" value={itemForm.packaging_sale_price} onChange={updateItemField} required />
-	              )}
-	              <Field name="sale_margin_rate" label="Taux marge (%)" type="number" min="0" value={itemForm.sale_margin_rate} onChange={updateItemField} required />
+function Dashboard({ summary }) {
+  const cards = [
+    ["Produits", summary?.product_count, Boxes],
+    ["Valeur stock", money(summary?.stock_value), Factory],
+    ["Sous seuil", summary?.low_stock_count, AlertTriangle],
+    ["Ruptures", summary?.out_of_stock_count, PackageX],
+  ];
+  return (
+    <section className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-4">
+        {cards.map(([label, value, Icon]) => (
+          <div key={label} className="rounded-md border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between text-slate-500">
+              <span className="text-sm">{label}</span>
+              <Icon size={18} />
             </div>
-            <div className="flex flex-wrap gap-3">
-              <PrimaryButton disabled={isLoading} icon={editingItemId ? "Pencil" : "Plus"}>{editingItemId ? "Modifier le produit" : "Créer le produit"}</PrimaryButton>
-              {editingItemId && (
-                <button type="button" onClick={() => { setEditingItemId(null); setItemForm(emptyItem); }} className="mt-6 h-12 border border-slate-200 px-5 text-sm font-black text-slate-700">
-                  Annuler
-                </button>
-              )}
-            </div>
-          </form>
-          )}
-
-          {showMovementForm && (
-          <form onSubmit={createMovement} className="border border-slate-200 bg-white p-6 shadow-sm">
-            <SectionTitle
-              title={isSupplyView ? "Approvisionnement magasin" : "Mouvement stock"}
-              subtitle={isSupplyView ? "Sélectionnez un produit stock existant, puis saisissez la quantité reçue et le prix d’achat. Aucun fournisseur n’est requis." : "Enregistrez une entrée, une sortie, un transfert ou un ajustement."}
-              icon="Truck"
-            />
-            {!items.length && (
-              <div className="mt-5 border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
-                Aucun produit stock n’existe encore. Créez d’abord une référence stock dans le formulaire au-dessus.
-              </div>
-            )}
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <SelectField name="item_id" label="Produit" value={movementForm.item_id} onChange={updateMovementField} options={items.map((item) => [item.id, item.name])} required />
-              {isSupplyView ? (
-                <div className="block">
-                  <span className="text-xs font-black text-[#070528]">Type</span>
-                  <div className="mt-2 flex h-11 items-center border border-emerald-200 bg-emerald-50 px-3 text-sm font-black text-emerald-700">
-                    Entrée vers magasin
-                  </div>
-                </div>
-              ) : (
-                <SelectField name="movement_type" label="Type" value={movementForm.movement_type} onChange={updateMovementField} options={Object.entries(movementLabels)} required />
-              )}
-              {effectiveMovementType !== "IN" && (
-                <SelectField
-                  name="source_location"
-                  label={effectiveMovementType === "TRANSFER" ? "Source" : "Stock concerné"}
-                  value={movementForm.source_location}
-                  onChange={updateMovementField}
-                  options={getLocationOptions(effectiveMovementType, selectedMovementItem(items, movementForm.item_id), "source")}
-                  required
-                />
-              )}
-              {effectiveMovementType === "TRANSFER" && (
-                <SelectField
-                  name="destination_location"
-                  label="Destination"
-                  value={movementForm.destination_location}
-                  onChange={updateMovementField}
-                  options={getLocationOptions(effectiveMovementType, selectedMovementItem(items, movementForm.item_id), "destination")}
-                  required
-                />
-              )}
-              <Field name="quantity" label="Quantité" type="number" min="0" value={movementForm.quantity} onChange={updateMovementField} required />
-              <Field name="unit_price" label="Prix unitaire achat" type="number" min="0" value={movementForm.unit_price} onChange={updateMovementField} />
-              {effectiveMovementType === "IN" && (
-                <Field name="expiration_date" label="Date de péremption" type="date" value={movementForm.expiration_date} onChange={updateMovementField} />
-              )}
-              {!isSupplyView && (
-                <Field name="destination" label="Service ou motif" value={movementForm.destination} onChange={updateMovementField} />
-              )}
-              <Field name="note" label="Note" value={movementForm.note} onChange={updateMovementField} />
-            </div>
-            <PrimaryButton disabled={isLoading || !items.length} icon="Truck">
-              {isSupplyView ? "Enregistrer l’approvisionnement" : "Enregistrer le mouvement"}
-            </PrimaryButton>
-          </form>
-          )}
-
-          {showDamageForm && (
-          <DamageForm
-            form={damageForm}
-            items={items}
-            selectedItem={selectedDamageItem}
-            isLoading={isLoading}
-            onChange={updateDamageField}
-            onSubmit={createDamage}
-          />
-          )}
-        </div>
-        )}
-
-        {showRightColumn && (
-        <div className="space-y-6">
-          {showProductionForms && (
-          <details className="group rounded-xl border border-slate-200 bg-white shadow-sm">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-              <div>
-                <p className="text-xs font-black uppercase text-[#f04438]">Configuration avancée</p>
-                <h2 className="text-base font-black text-[#070528]">Production, recettes et emballages</h2>
-              </div>
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition group-open:rotate-180">
-                <DashboardIcon name="ChevronDown" size={18} />
-              </span>
-            </summary>
-          <div className="grid gap-6 border-t border-slate-100 p-5 2xl:grid-cols-2">
-            <form onSubmit={createRecipe} className="border border-slate-200 bg-white p-6 shadow-sm">
-              <SectionTitle title="Ingrédients liés aux plats" icon="UtensilsCrossed" />
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <SelectField name="menu_item_id" label="Plat" value={recipeForm.menu_item_id} onChange={(event) => setRecipeForm((current) => ({ ...current, menu_item_id: event.target.value }))} options={menuItems.map((item) => [item.id, item.name])} required />
-                <SelectField name="stock_item_id" label="Ingrédient stock" value={recipeForm.stock_item_id} onChange={(event) => setRecipeForm((current) => ({ ...current, stock_item_id: event.target.value }))} options={items.map((item) => [item.id, item.name])} required />
-                <Field name="quantity_per_dish" label="Quantité par plat" type="number" min="0" step="0.001" value={recipeForm.quantity_per_dish} onChange={(event) => setRecipeForm((current) => ({ ...current, quantity_per_dish: event.target.value }))} required />
-                <SelectField name="location" label="Stock à déduire" value={recipeForm.location} onChange={(event) => setRecipeForm((current) => ({ ...current, location: event.target.value }))} options={Object.entries(locationLabels)} required />
-              </div>
-	              <PrimaryButton disabled={isLoading || !menuItems.length || !items.length} icon="Plus">Lier au plat</PrimaryButton>
-	              <RecipeRows recipes={recipes} items={items} menuItems={menuItems} onDelete={deleteRecipe} />
-	            </form>
-
-	            <form onSubmit={createPackagingLink} className="border border-slate-200 bg-white p-6 shadow-sm">
-	              <SectionTitle title="Emballages facturables" icon="ReceiptText" />
-	              <div className="mt-5 grid gap-4 md:grid-cols-2">
-	                <SelectField name="menu_item_id" label="Plat" value={packagingForm.menu_item_id} onChange={(event) => setPackagingForm((current) => ({ ...current, menu_item_id: event.target.value }))} options={menuItems.map((item) => [item.id, item.name])} required />
-	                <SelectField name="packaging_item_id" label="Emballage" value={packagingForm.packaging_item_id} onChange={(event) => setPackagingForm((current) => ({ ...current, packaging_item_id: event.target.value }))} options={items.filter((item) => item.product_type === "EMBALLAGE").map((item) => [item.id, item.name])} required />
-	                <Field name="required_quantity" label="Quantité requise" type="number" min="1" value={packagingForm.required_quantity} onChange={(event) => setPackagingForm((current) => ({ ...current, required_quantity: event.target.value }))} required />
-	              </div>
-	              <PrimaryButton disabled={isLoading || !menuItems.length || !items.some((item) => item.product_type === "EMBALLAGE")} icon="Plus">Lier l’emballage</PrimaryButton>
-	              <PackagingRows links={packagingLinks} items={items} menuItems={menuItems} onDelete={deletePackagingLink} />
-	            </form>
-
-	            <form onSubmit={createProductionSheet} className="border border-slate-200 bg-white p-6 shadow-sm">
-              <SectionTitle title="Fiche de production" icon="ClipboardList" />
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <SelectField name="menu_item_id" label="Plat produit" value={productionForm.menu_item_id} onChange={(event) => setProductionForm((current) => ({ ...current, menu_item_id: event.target.value }))} options={menuItems.map((item) => [item.id, item.name])} required />
-                <Field name="quantity" label="Quantité produite" type="number" min="0" value={productionForm.quantity} onChange={(event) => setProductionForm((current) => ({ ...current, quantity: event.target.value }))} required />
-                <Field name="note" label="Note production" value={productionForm.note} onChange={(event) => setProductionForm((current) => ({ ...current, note: event.target.value }))} />
-              </div>
-              <PrimaryButton disabled={isLoading || !menuItems.length} icon="ClipboardList">Établir la fiche</PrimaryButton>
-              <ProductionRows rows={productionSheets} menuItems={menuItems} />
-            </form>
+            <strong className="mt-3 block text-2xl text-slate-950">{value ?? 0}</strong>
           </div>
-          </details>
-          )}
-
-          {showReports && (
-          <ReportPanel
-            report={report}
-            finance={finance}
-            serverRevenue={serverRevenue}
-            statements={statements}
-            margins={margins}
-            rotation={rotation}
-            range={reportRange}
-            setRange={setReportRange}
-            onSubmit={submitReport}
-          />
-          )}
-          {showFinance && (
-          <FinancePanel
-            finance={finance}
-            expenses={expenses}
-            payments={payments}
-            margins={margins}
-            rotation={rotation}
-            form={expenseForm}
-            setForm={setExpenseForm}
-            canEdit={canEditAccounting}
-            isLoading={isLoading}
-            onSubmit={createExpense}
-            onDelete={deleteExpense}
-          />
-          )}
-
-          {showStockTable && (
-          <div className="border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 p-5">
-              <div className="grid gap-3 lg:grid-cols-[1fr_190px]">
-                <div className="flex h-12 items-center gap-3 border border-slate-200 bg-white px-4">
-                  <DashboardIcon name="Search" size={17} className="text-slate-400" />
-                  <input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Rechercher produit, unité..."
-                    className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
-                  />
-                </div>
-                <select value={stockFilter} onChange={(event) => setStockFilter(event.target.value)} className="form-control">
-                  <option value="ALL">Tous les produits</option>
-                  <option value="LOW">Stock faible</option>
-                  <option value="OK">Stock normal</option>
-                </select>
-              </div>
-            </div>
-            <StockTable items={filteredItems} onEdit={editItem} />
-          </div>
-          )}
-
-          {showHistory && (
-          <div className="grid gap-6 2xl:grid-cols-2">
-            <HistoryPanel
-              title="Derniers mouvements"
-              filter={movementFilter}
-              onFilter={setMovementFilter}
-              rows={filteredMovements}
-              items={items}
-            />
-            <DamagePanel rows={damages} items={items} canAccount={canAccountDamage} onAccount={accountDamage} />
-          </div>
-          )}
-          {isAccountingView && (
-            <DamagePanel rows={damages} items={items} canAccount={canAccountDamage} onAccount={accountDamage} />
-          )}
-        </div>
-        )}
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <MovementList title="Dernières entrées" rows={summary?.latest_entries || []} />
+        <MovementList title="Dernières sorties" rows={summary?.latest_outputs || []} />
+        <MovementList title="Derniers transferts" rows={summary?.latest_transfers || []} />
       </div>
     </section>
   );
 }
 
+function MovementList({ title, rows }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <h3 className="font-semibold text-slate-950">{title}</h3>
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 5).map((row) => (
+          <div key={row.id} className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-2 text-sm">
+            <span>{movementLabels[row.movement_type] || row.movement_type}</span>
+            <strong>{qty(row.quantity)}</strong>
+          </div>
+        ))}
+        {!rows.length && <p className="text-sm text-slate-500">Aucun mouvement.</p>}
+      </div>
+    </div>
+  );
+}
+
+function Products({ products, units, query, setQuery, form, setForm, onSubmit }) {
+  return (
+    <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
+      <Panel title="Ajouter un produit">
+        <form onSubmit={onSubmit} className="space-y-3">
+          <Input label="Code" value={form.code} onChange={(code) => setForm({ ...form, code })} />
+          <Input label="Nom" required value={form.name} onChange={(name) => setForm({ ...form, name })} />
+          <Select label="Unité" value={form.unit_id} onChange={(unit_id) => setForm({ ...form, unit_id })} options={units.map((unit) => [unit.id, `${unit.name} (${unit.symbol})`])} />
+          <Select label="Type" value={form.product_type} onChange={(product_type) => setForm({ ...form, product_type })} options={[["INGREDIENT", "Ingrédient"], ["BOISSON", "Boisson"], ["EMBALLAGE", "Emballage"]]} />
+          <Input label="Prix d'achat" type="number" value={form.purchase_price} onChange={(purchase_price) => setForm({ ...form, purchase_price })} />
+          <Input label="Seuil minimum" type="number" value={form.minimum_stock} onChange={(minimum_stock) => setForm({ ...form, minimum_stock })} />
+          <Submit label="Créer" />
+        </form>
+      </Panel>
+      <Panel title="Produits">
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-slate-200 px-3">
+          <Search size={16} className="text-slate-400" />
+          <input className="min-h-10 flex-1 outline-none" placeholder="Rechercher un produit" value={query} onChange={(event) => setQuery(event.target.value)} />
+        </div>
+        <Table
+          columns={["Produit", "Unité", "Stock total", "Seuil", "Valeur", "Stock par dépôt"]}
+          rows={products.map((product) => [
+            <span key="p"><strong>{product.name}</strong><br /><small className="text-slate-500">{product.code || "-"}</small></span>,
+            product.unit_symbol || product.unit_name,
+            qty(product.current_stock),
+            qty(product.minimum_stock),
+            money(product.stock_value),
+            product.stock_by_depot?.map((row) => `${row.depot_name}: ${qty(row.quantity)}`).join(" | ") || "-",
+          ])}
+        />
+      </Panel>
+    </section>
+  );
+}
+
+function Depots({ depots, form, setForm, onSubmit }) {
+  return (
+    <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
+      <Panel title="Créer un dépôt">
+        <form onSubmit={onSubmit} className="space-y-3">
+          <Input label="Nom" required value={form.name} onChange={(name) => setForm({ ...form, name })} />
+          <Input label="Code" required value={form.code} onChange={(code) => setForm({ ...form, code: code.toUpperCase() })} />
+          <Select label="Type" value={form.type} onChange={(type) => setForm({ ...form, type })} options={[["principal", "Principal"], ["cuisine", "Cuisine"], ["boisson", "Boisson"], ["autre", "Autre"]]} />
+          <Input label="Description" value={form.description} onChange={(description) => setForm({ ...form, description })} />
+          <Submit label="Créer" />
+        </form>
+      </Panel>
+      <Panel title="Dépôts">
+        <Table columns={["Nom", "Code", "Type", "Statut"]} rows={depots.map((depot) => [depot.name, depot.code, depotTypeLabels[depot.type], depot.is_active ? "Actif" : "Inactif"])} />
+      </Panel>
+    </section>
+  );
+}
+
+function EntryForm({ form, setForm, products, depots, suppliers, directEntry, setDirectEntry, onSubmit }) {
+  return (
+    <Panel title="Entrée de stock">
+      <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <Input label="Date" type="date" value={form.movement_date} onChange={(movement_date) => setForm({ ...form, movement_date })} />
+        <Select label="Produit" value={form.product_id} onChange={(product_id) => setForm({ ...form, product_id })} options={products.map((p) => [p.id, p.name])} />
+        <Select label="Dépôt destination" value={form.destination_depot_id} onChange={(destination_depot_id) => setForm({ ...form, destination_depot_id })} options={depots.map((d) => [d.id, d.name])} />
+        <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
+        <Input label="Prix unitaire" type="number" value={form.unit_price} onChange={(unit_price) => setForm({ ...form, unit_price })} />
+        <Select label="Fournisseur" value={form.supplier_id} onChange={(supplier_id) => setForm({ ...form, supplier_id })} options={[["", "Non renseigné"], ...suppliers.map((s) => [s.id, s.name])]} />
+        <Input label="Observation" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} />
+        <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={directEntry} onChange={(event) => setDirectEntry(event.target.checked)} /> Entrée directe</label>
+        <Submit label="Valider l'entrée" />
+      </form>
+    </Panel>
+  );
+}
+
+function TransferForm({ form, setForm, products, depots, onSubmit }) {
+  return (
+    <Panel title="Transfert entre dépôts">
+      <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <Input label="Date" type="date" value={form.movement_date} onChange={(movement_date) => setForm({ ...form, movement_date })} />
+        <Select label="Produit" value={form.product_id} onChange={(product_id) => setForm({ ...form, product_id })} options={products.map((p) => [p.id, p.name])} />
+        <Select label="Dépôt source" value={form.source_depot_id} onChange={(source_depot_id) => setForm({ ...form, source_depot_id })} options={depots.map((d) => [d.id, d.name])} />
+        <Select label="Dépôt destination" value={form.destination_depot_id} onChange={(destination_depot_id) => setForm({ ...form, destination_depot_id })} options={depots.map((d) => [d.id, d.name])} />
+        <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
+        <Input label="Motif" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} />
+        <Submit label="Valider le transfert" />
+      </form>
+    </Panel>
+  );
+}
+
+function OutputForm({ form, setForm, products, depots, isLoss, setIsLoss, onSubmit }) {
+  return (
+    <Panel title="Sortie de stock">
+      <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <Input label="Date" type="date" value={form.movement_date} onChange={(movement_date) => setForm({ ...form, movement_date })} />
+        <Select label="Produit" value={form.product_id} onChange={(product_id) => setForm({ ...form, product_id })} options={products.map((p) => [p.id, p.name])} />
+        <Select label="Dépôt source" value={form.source_depot_id} onChange={(source_depot_id) => setForm({ ...form, source_depot_id })} options={depots.map((d) => [d.id, d.name])} />
+        <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
+        <Select label="Motif" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} options={[["consommation", "Consommation"], ["vente", "Vente"], ["perte", "Perte"], ["casse", "Casse"], ["perime", "Périmé"], ["autre", "Autre"]]} />
+        <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={isLoss} onChange={(event) => setIsLoss(event.target.checked)} /> Comptabiliser comme perte</label>
+        <Submit label="Valider la sortie" />
+      </form>
+    </Panel>
+  );
+}
+
+function InventoryForm({ depots, depotId, setDepotId, rows, setRows, onSubmit, inventories }) {
+  return (
+    <section className="space-y-4">
+      <Panel title="Inventaire">
+        <form onSubmit={onSubmit} className="space-y-3">
+          <Select label="Dépôt" value={depotId} onChange={setDepotId} options={depots.map((d) => [d.id, d.name])} />
+          <Table
+            columns={["Produit", "Théorique", "Réel", "Écart"]}
+            rows={rows.map((row, index) => [
+              row.name,
+              qty(row.theoretical_quantity),
+              <input key={row.product_id} className="min-h-9 w-28 rounded-md border border-slate-200 px-2" type="number" value={row.real_quantity} onChange={(event) => {
+                const next = [...rows];
+                next[index] = { ...row, real_quantity: event.target.value };
+                setRows(next);
+              }} />,
+              qty(Number(row.real_quantity || 0) - Number(row.theoretical_quantity || 0)),
+            ])}
+          />
+          <Submit label="Valider l'inventaire" />
+        </form>
+      </Panel>
+      <Panel title="Historique inventaires">
+        <Table columns={["Date", "Dépôt", "Statut", "Lignes"]} rows={inventories.map((inventory) => [new Date(inventory.inventory_date).toLocaleDateString("fr-FR"), inventory.depot_id, inventory.status, inventory.details?.length || 0])} />
+      </Panel>
+    </section>
+  );
+}
+
+function Reports({ filters, setFilters, depots, products, report, movements, onSubmit, productName, depotName }) {
+  const rows = report?.movements || movements;
+  return (
+    <Panel title="Rapports de stock">
+      <form onSubmit={onSubmit} className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <Input label="Début" type="date" value={filters.start_date} onChange={(start_date) => setFilters({ ...filters, start_date })} />
+        <Input label="Fin" type="date" value={filters.end_date} onChange={(end_date) => setFilters({ ...filters, end_date })} />
+        <Select label="Dépôt" value={filters.depot_id} onChange={(depot_id) => setFilters({ ...filters, depot_id })} options={[["", "Tous"], ...depots.map((d) => [d.id, d.name])]} />
+        <Select label="Produit" value={filters.product_id} onChange={(product_id) => setFilters({ ...filters, product_id })} options={[["", "Tous"], ...products.map((p) => [p.id, p.name])]} />
+        <Select label="Type" value={filters.movement_type} onChange={(movement_type) => setFilters({ ...filters, movement_type })} options={[["", "Tous"], ...Object.entries(movementLabels)]} />
+        <Submit label="Filtrer" />
+      </form>
+      <div className="mb-4 grid gap-3 md:grid-cols-4">
+        <MiniStat label="Valeur stock" value={money(report?.stock_value)} />
+        <MiniStat label="Entrées" value={money(report?.entries_value)} />
+        <MiniStat label="Sorties" value={money(report?.outputs_value)} />
+        <MiniStat label="Stock faible" value={report?.low_stock_count || 0} />
+      </div>
+      <Table
+        columns={["Date", "Type", "Produit", "Source", "Destination", "Quantité", "Montant"]}
+        rows={rows.map((movement) => [
+          new Date(movement.movement_date || movement.created_at).toLocaleDateString("fr-FR"),
+          movementLabels[movement.movement_type] || movement.movement_type,
+          productName(movement.product_id),
+          depotName(movement.source_depot_id),
+          depotName(movement.destination_depot_id),
+          qty(movement.quantity),
+          money(movement.total_amount),
+        ])}
+      />
+    </Panel>
+  );
+}
+
+function Alerts({ products }) {
+  return (
+    <Panel title="Produits sous seuil minimum">
+      <Table columns={["Produit", "Stock", "Seuil", "Valeur"]} rows={products.map((product) => [product.name, qty(product.current_stock), qty(product.minimum_stock), money(product.stock_value)])} />
+    </Panel>
+  );
+}
+
+function Panel({ title, children }) {
+  return (
+    <section className="rounded-md border border-slate-200 bg-white p-4">
+      <h3 className="mb-4 text-lg font-semibold text-slate-950">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function MiniStat({ label, value }) {
+  return (
+    <div className="rounded-md bg-slate-50 p-3">
+      <span className="text-xs uppercase tracking-wide text-slate-500">{label}</span>
+      <strong className="mt-1 block text-lg text-slate-950">{value}</strong>
+    </div>
+  );
+}
+
+function Input({ label, value, onChange, type = "text", required = false }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block font-medium text-slate-700">{label}</span>
+      <input
+        required={required}
+        type={type}
+        step={type === "number" ? "0.01" : undefined}
+        className="min-h-10 w-full rounded-md border border-slate-200 px-3 outline-none focus:border-slate-500"
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function Select({ label, value, onChange, options }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block font-medium text-slate-700">{label}</span>
+      <select className="min-h-10 w-full rounded-md border border-slate-200 px-3 outline-none focus:border-slate-500" value={value || ""} onChange={(event) => onChange(event.target.value)}>
+        {options.map(([optionValue, labelText]) => <option key={optionValue || "empty"} value={optionValue}>{labelText}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function Submit({ label }) {
+  return (
+    <button type="submit" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-medium text-white">
+      <Plus size={16} />
+      {label}
+    </button>
+  );
+}
+
+function Table({ columns, rows }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-slate-500">
+            {columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex} className="border-b border-slate-100">
+              {row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-3 align-top text-slate-700">{cell}</td>)}
+            </tr>
+          ))}
+          {!rows.length && (
+            <tr><td className="px-3 py-6 text-center text-slate-500" colSpan={columns.length}>Aucune donnée.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}

@@ -155,6 +155,11 @@ export const APP_MENUS = {
         { key: "activation", label: "Activation / suspension", icon: "Power" },
       ],
     },
+    {
+      key: "instance-requests",
+      label: "Demandes d'instance",
+      icon: "ClipboardList",
+    },
     { key: "owners", label: "Propriétaires", icon: "Users" },
     {
       key: "subscriptions",
@@ -188,7 +193,6 @@ export const APP_MENUS = {
       children: [
         { key: "staff", label: "Liste utilisateurs", icon: "Users" },
         { key: "create-user", label: "Création utilisateur", icon: "UserPlus" },
-        { key: "user-detail", label: "Détail utilisateur", icon: "User" },
       ],
     },
     {
@@ -239,11 +243,28 @@ export const APP_MENUS = {
       children: [
         { key: "stocks", label: "Produits stock", icon: "Box" },
         { key: "movements", label: "Mouvements", icon: "ClipboardList" },
-        { key: "suppliers", label: "Entrées stock", icon: "Truck" },
+
         { key: "inventory", label: "Inventaires", icon: "FileText" },
         { key: "purchases", label: "Achats stock", icon: "ShoppingCart" },
         { key: "accounting", label: "Comptabilité stock", icon: "FileText" },
         { key: "reports", label: "Rapports stock", icon: "BarChart3" },
+      ],
+    },
+    {
+      key: "comptabilite",
+      label: "Comptabilité",
+      icon: "Calculator",
+      children: [
+        {
+          key: "comptabilite",
+          label: "Tableau de bord",
+          icon: "LayoutDashboard",
+        },
+        { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
+        { key: "journals", label: "Journaux", icon: "ReceiptText" },
+        { key: "entries", label: "Écritures", icon: "Calculator" },
+        { key: "revenues", label: "Recettes", icon: "Wallet" },
+        { key: "statements", label: "États financiers", icon: "BarChart3" },
       ],
     },
     {
@@ -311,110 +332,31 @@ export const APP_MENUS = {
       ],
     },
   ],
-  SERVEUR: [
-    { key: "dashboard", label: "Service en salle", icon: "Utensils" },
-  ],
-  CUISINE: [
-    { key: "dashboard", label: "Production cuisine", icon: "ChefHat" },
-  ],
+  SERVEUR: [{ key: "dashboard", label: "Service en salle", icon: "Utensils" }],
+  CUISINE: [{ key: "dashboard", label: "Production cuisine", icon: "ChefHat" }],
   STOCK: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    {
-      key: "stock",
-      label: "Produits stock",
-      icon: "Box",
-      children: [
-        { key: "stock", label: "Liste produits", icon: "Box" },
-        {
-          key: "create-stock-product",
-          label: "Création produit",
-          icon: "Plus",
-        },
-        { key: "thresholds", label: "Seuils d’alerte", icon: "Bell" },
-        {
-          key: "low-stock",
-          label: "Alertes stock faible",
-          icon: "AlertTriangle",
-        },
-      ],
-    },
-    {
-      key: "movements",
-      label: "Mouvements",
-      icon: "ClipboardList",
-      children: [
-        { key: "movements", label: "Mouvements stock", icon: "ClipboardList" },
-        { key: "stock-in", label: "Entrée stock", icon: "Truck" },
-        { key: "stock-out", label: "Sortie stock", icon: "Package" },
-        { key: "transfer", label: "Transfert rayons", icon: "Activity" },
-        { key: "inventory", label: "Ajustement inventaire", icon: "FileText" },
-        { key: "damages", label: "Avaries", icon: "AlertTriangle" },
-      ],
-    },
-    {
-      key: "suppliers",
-      label: "Achats & production",
-      icon: "Truck",
-      children: [
-        { key: "suppliers", label: "Fournisseurs", icon: "Truck" },
-        { key: "stock-purchases", label: "Achats stock", icon: "ShoppingCart" },
-        { key: "production", label: "Fiches production", icon: "FileText" },
-        {
-          key: "ingredients",
-          label: "Ingrédients / plats",
-          icon: "UtensilsCrossed",
-        },
-      ],
-    },
-    {
-      key: "reports",
-      label: "Rapports stock",
-      icon: "BarChart3",
-      children: [
-        { key: "rotation", label: "Rotation stock", icon: "Activity" },
-        { key: "stock-report", label: "Rapport stock", icon: "BarChart3" },
-        {
-          key: "period-summary",
-          label: "Récapitulatif période",
-          icon: "CalendarDays",
-        },
-      ],
-    },
+    { key: "products", label: "Produits", icon: "Box" },
+    { key: "depots", label: "Dépôts", icon: "Building2" },
+    { key: "entries", label: "Entrées", icon: "Truck" },
+    { key: "transfers", label: "Transferts", icon: "Activity" },
+    { key: "outputs", label: "Sorties", icon: "Package" },
+    { key: "inventories", label: "Inventaires", icon: "ClipboardList" },
+    { key: "tables", label: "Tables", icon: "Table2" },
+    { key: "reports", label: "Rapports", icon: "BarChart3" },
+    { key: "alerts", label: "Alertes stock faible", icon: "AlertTriangle" },
   ],
   COMPTABLE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    { key: "revenue", label: "Recettes", icon: "Wallet" },
+    { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
+    { key: "journals", label: "Journaux", icon: "ReceiptText" },
+    { key: "entries", label: "Écritures", icon: "Calculator" },
     { key: "expenses", label: "Dépenses", icon: "TrendingDown" },
-    { key: "margins", label: "Marges par plat", icon: "TrendingUp" },
-    { key: "profits", label: "Bénéfices", icon: "BarChart3" },
-    { key: "received-payments", label: "Paiements reçus", icon: "CreditCard" },
-    {
-      key: "cash-collections",
-      label: "Encaissements caisse",
-      icon: "ReceiptText",
-    },
-    {
-      key: "counted-damages",
-      label: "Avaries comptabilisées",
-      icon: "AlertTriangle",
-    },
-    { key: "stock-valuation", label: "Stock valorisé", icon: "Box" },
-    {
-      key: "financial-report",
-      label: "États financiers",
-      icon: "FileText",
-      children: [
-        { key: "income", label: "Compte de résultat", icon: "FileText" },
-        { key: "cashflow", label: "Flux de trésorerie", icon: "Activity" },
-        { key: "balance", label: "Bilan", icon: "Calculator" },
-        { key: "ledger", label: "Grand livre", icon: "FileText" },
-        {
-          key: "financial-report",
-          label: "Rapport financier",
-          icon: "BarChart3",
-        },
-      ],
-    },
+    { key: "revenues", label: "Recettes", icon: "Wallet" },
+    { key: "payments", label: "Paiements", icon: "CreditCard" },
+    { key: "cash", label: "Caisses", icon: "Wallet" },
+    { key: "banks", label: "Banques", icon: "Building2" },
+    { key: "statements", label: "États financiers", icon: "BarChart3" },
   ],
   CAISSE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
@@ -508,7 +450,8 @@ export const ROLE_DASHBOARDS = {
   },
   SERVEUR: {
     title: "Service en salle",
-    subtitle: "Prenez la commande, servez et demandez le paiement en une seule interface.",
+    subtitle:
+      "Prenez la commande, servez et demandez le paiement en une seule interface.",
     accent: "#ff2c7d",
     cards: [],
   },

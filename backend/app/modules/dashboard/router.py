@@ -128,6 +128,229 @@ def admin_summary(
     )
 
 
+REALTIME_STATUS_KEYS = {
+    "En préparation": "preparing",
+    "Prête": "ready",
+    "Livrée": "delivered",
+    "Payée": "paid",
+    "Payee": "paid",
+    "Annulée": "cancelled",
+    "Nouvelle": "new",
+    "Acceptée": "accepted",
+    "PENDING_PAYMENT": "pending_payment",
+}
+
+
+def _analytics_bounds(start_date, end_date):
+    """Période par défaut = aujourd'hui ; sinon respecte start/end fournis."""
+    now = datetime.utcnow()
+    if not start_date and not end_date:
+        start = datetime.combine(now.date(), datetime.min.time())
+        end = datetime.combine(now.date(), datetime.max.time())
+    else:
+        end = end_date or now
+        start = start_date or datetime.combine(end.date(), datetime.min.time())
+    return start, end
+
+
+def _variation(today_value: float, previous_value: float) -> float | None:
+    """Variation % vs période précédente. None si pas de base de comparaison."""
+    if not previous_value:
+        return None
+    return round((today_value - previous_value) / previous_value * 100, 1)
+
+
+def _channel_set(category: str | None) -> set[str]:
+    if category == "meal":
+        return {"REPAS"}
+    if category == "drink":
+        return {"BOISSON"}
+    return {"REPAS", "BOISSON"}
+
+
+def _paid_orders(db: Session, restaurant_id: str, start: datetime, end: datetime, branch_id: str | None = None):
+    query = (
+        db.query(CustomerOrder)
+        .options(selectinload(CustomerOrder.items))
+        .filter(
+            CustomerOrder.restaurant_id == restaurant_id,
+            CustomerOrder.status.in_(PAID_STATUSES),
+            CustomerOrder.updated_at >= start,
+            CustomerOrder.updated_at <= end,
+        )
+    )
+    if branch_id:
+        query = query.filter(CustomerOrder.branch_id == branch_id)
+    return query.all()
+
+
+def compute_hourly_sales(orders, start_hour: int = 8, end_hour: int = 22) -> list[dict]:
+    buckets = {hour: 0.0 for hour in range(start_hour, end_hour + 1)}
+    for order in orders:
+        hour = (order.updated_at or order.created_at).hour
+        if hour in buckets:
+            buckets[hour] += float(order.total_amount or 0)
+    return [{"hour": f"{hour:02d}h", "revenue": round(value, 2)} for hour, value in buckets.items()]
+
+
+def compute_top_products(orders, menu_ctx, category: str | None, limit: int = 8) -> list[dict]:
+    channels = _channel_set(category)
+    agg: dict[str, dict] = {}
+    for order in orders:
+        for item in order.items:
+            channel = infer_order_item_channel(item, menu_ctx)
+            if channel not in channels:
+                continue
+            row = agg.setdefault(item.name, {"name": item.name, "category": channel, "quantity": 0, "revenue": 0.0})
+            row["quantity"] += int(item.quantity or 0)
+            row["revenue"] += float(item.line_total or 0)
+    return sorted(agg.values(), key=lambda r: r["revenue"], reverse=True)[:limit]
+
+
+def compute_payment_methods(orders) -> list[dict]:
+    agg: dict[str, float] = {}
+    for order in orders:
+        method = (order.payment_method or "Non renseigné").strip() or "Non renseigné"
+        agg[method] = agg.get(method, 0.0) + float(order.total_amount or 0)
+    total = sum(agg.values()) or 0
+    rows = [
+        {"method": method, "amount": round(amount, 2), "share": round(amount / total * 100, 1) if total else 0}
+        for method, amount in agg.items()
+    ]
+    return sorted(rows, key=lambda r: r["amount"], reverse=True)
+
+
+def compute_employee_performance(db: Session, restaurant_id: str, orders, limit: int = 8) -> list[dict]:
+    names = {
+        user.id: f"{user.first_name} {user.last_name}".strip() or user.username
+        for user in db.query(User).filter(User.restaurant_id == restaurant_id).all()
+    }
+    agg: dict[str, dict] = {}
+    for order in orders:
+        if not order.server_id:
+            continue
+        row = agg.setdefault(order.server_id, {"name": names.get(order.server_id, "—"), "revenue": 0.0, "orders": 0})
+        row["revenue"] += float(order.total_amount or 0)
+        row["orders"] += 1
+    for row in agg.values():
+        row["average_ticket"] = round(row["revenue"] / row["orders"], 0) if row["orders"] else 0
+        row["revenue"] = round(row["revenue"], 2)
+    return sorted(agg.values(), key=lambda r: r["revenue"], reverse=True)[:limit]
+
+
+def compute_realtime_orders(db: Session, restaurant_id: str) -> dict:
+    rows = (
+        db.query(CustomerOrder.status, func.count())
+        .filter(CustomerOrder.restaurant_id == restaurant_id)
+        .group_by(CustomerOrder.status)
+        .all()
+    )
+    counts = {key: 0 for key in set(REALTIME_STATUS_KEYS.values())}
+    for status_value, count in rows:
+        key = REALTIME_STATUS_KEYS.get(status_value)
+        if key:
+            counts[key] += int(count)
+    counts["in_progress"] = counts.get("new", 0) + counts.get("accepted", 0) + counts.get("preparing", 0) + counts.get("ready", 0)
+    return counts
+
+
+def compute_stock_alerts(db: Session, restaurant_id: str, limit: int = 10) -> list[dict]:
+    if not stock_low_stock_columns_available(db):
+        return []
+    from app.modules.stock.router import get_current_stock
+
+    items = (
+        db.query(StockItem)
+        .filter(StockItem.restaurant_id == restaurant_id, StockItem.is_active.is_(True))
+        .all()
+    )
+    alerts = []
+    for item in items:
+        current = get_current_stock(db, item.id, restaurant_id=restaurant_id)
+        threshold = float(item.minimum_stock or 0)
+        if threshold > 0 and current <= threshold:
+            alerts.append({
+                "id": item.id,
+                "name": item.name,
+                "current_stock": round(current, 2),
+                "minimum_stock": threshold,
+            })
+    alerts.sort(key=lambda a: a["current_stock"] - a["minimum_stock"])
+    return alerts[:limit]
+
+
+def _scoped_channel_totals(metrics: dict, branch_id: str | None, channels: set[str]):
+    """(revenue, profit, orders_count, meal_revenue, drink_revenue) scopé sur une branche."""
+    if branch_id:
+        branch = metrics["by_branch"].get(branch_id)
+        if not branch:
+            return 0.0, 0.0, 0, 0.0, 0.0
+        by_channel = branch["by_channel"]
+        orders_count = len(branch["orders"])
+    else:
+        by_channel = metrics["by_channel"]
+        orders_count = metrics["orders_count"]
+    revenue = sum(by_channel[ch]["revenue"] for ch in channels)
+    profit = sum(by_channel[ch]["profit"] for ch in channels)
+    return revenue, profit, orders_count, by_channel["REPAS"]["revenue"], by_channel["BOISSON"]["revenue"]
+
+
+@router.get("/analytics")
+def dashboard_analytics(
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Agrégat unique alimentant le dashboard moderne (KPIs, graphes, sections)."""
+    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    restaurant_id = current_user.restaurant_id
+    start, end = _analytics_bounds(start_date, end_date)
+
+    metrics = build_sales_metrics(db, restaurant_id, start, end)
+    channels = _channel_set(category)
+    revenue, profit, orders_count, meal_revenue, drink_revenue = _scoped_channel_totals(metrics, branch_id, channels)
+
+    # Comparaison avec la période équivalente précédente (vs hier par défaut).
+    duration = end - start
+    prev_metrics = build_sales_metrics(db, restaurant_id, start - duration, start)
+    prev_revenue, _prev_profit, prev_orders, _pm, _pd = _scoped_channel_totals(prev_metrics, branch_id, channels)
+
+    orders = _paid_orders(db, restaurant_id, start, end, branch_id)
+    menu_ctx = read_menu_item_context(db, restaurant_id)
+    average_ticket = round(revenue / orders_count, 0) if orders_count else 0
+    prev_ticket = round(prev_revenue / prev_orders, 0) if prev_orders else 0
+
+    return {
+        "period": {"start": start.isoformat(), "end": end.isoformat()},
+        "kpis": {
+            "revenue": round(revenue, 2),
+            "revenue_variation": _variation(revenue, prev_revenue),
+            "profit": round(profit, 2),
+            "orders_count": orders_count,
+            "orders_variation": _variation(orders_count, prev_orders),
+            "average_ticket": average_ticket,
+            "average_ticket_variation": _variation(average_ticket, prev_ticket),
+            "margin_rate": round(profit / revenue * 100, 1) if revenue else 0,
+            "clients_served": orders_count,
+        },
+        "hourly_sales": compute_hourly_sales(orders),
+        "sales_chart": build_weekly_revenue(db, restaurant_id, start, end),
+        "meal_vs_drink": {
+            "meal": round(meal_revenue, 2),
+            "drink": round(drink_revenue, 2),
+        },
+        "top_products": compute_top_products(orders, menu_ctx, category),
+        "payment_methods": compute_payment_methods(orders),
+        "employee_performance": compute_employee_performance(db, restaurant_id, orders),
+        "realtime_orders": compute_realtime_orders(db, restaurant_id),
+        "stock_alerts": compute_stock_alerts(db, restaurant_id),
+        "branches": [point.model_dump() for point in build_branch_points(db, restaurant_id, revenue or 1, metrics)],
+    }
+
+
 def dashboard_period(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime | None, datetime | None]:
     if not start_date and not end_date:
         return None, None
@@ -209,7 +432,7 @@ def read_recipe_costs(db: Session, restaurant_id: str) -> dict[str, float]:
     rows = (
         db.query(
             StockRecipeIngredient.menu_item_id,
-            func.coalesce(func.sum(StockRecipeIngredient.quantity_per_dish * StockItem.cmup_current), 0),
+            func.coalesce(func.sum(StockRecipeIngredient.quantity_per_dish * StockItem.purchase_price), 0),
         )
         .join(StockItem, StockItem.id == StockRecipeIngredient.stock_item_id)
         .filter(StockRecipeIngredient.restaurant_id == restaurant_id)
@@ -429,35 +652,27 @@ def build_recent_activities(db: Session, restaurant_id: str) -> list[AdminDashbo
 def count_low_stock(db: Session, restaurant_id: str) -> int:
     if not stock_low_stock_columns_available(db):
         return 0
+    from app.modules.stock.router import get_current_stock
 
-    return (
-        db.query(StockItem)
-        .filter(StockItem.restaurant_id == restaurant_id)
-        .filter((StockItem.quantity + StockItem.kitchen_quantity + StockItem.drink_quantity) <= StockItem.alert_threshold)
-        .count()
-    )
+    items = db.query(StockItem).filter(StockItem.restaurant_id == restaurant_id, StockItem.is_active.is_(True)).all()
+    return len([item for item in items if get_current_stock(db, item.id, restaurant_id=restaurant_id) <= float(item.minimum_stock or 0)])
 
 
 def latest_low_stock_items(db: Session, restaurant_id: str) -> list[StockItem]:
     if not stock_low_stock_columns_available(db):
         return []
+    from app.modules.stock.router import get_current_stock
 
-    return (
-        db.query(StockItem)
-        .filter(StockItem.restaurant_id == restaurant_id)
-        .filter((StockItem.quantity + StockItem.kitchen_quantity + StockItem.drink_quantity) <= StockItem.alert_threshold)
-        .order_by(StockItem.updated_at.desc())
-        .limit(3)
-        .all()
-    )
+    items = db.query(StockItem).filter(StockItem.restaurant_id == restaurant_id, StockItem.is_active.is_(True)).order_by(StockItem.updated_at.desc()).all()
+    return [item for item in items if get_current_stock(db, item.id, restaurant_id=restaurant_id) <= float(item.minimum_stock or 0)][:3]
 
 
 def stock_low_stock_columns_available(db: Session) -> bool:
     inspector = inspect(db.bind)
-    if "stock_items" not in inspector.get_table_names():
+    if "products" not in inspector.get_table_names():
         return False
-    existing = {column["name"] for column in inspector.get_columns("stock_items")}
-    return {"quantity", "kitchen_quantity", "drink_quantity", "alert_threshold", "updated_at"}.issubset(existing)
+    existing = {column["name"] for column in inspector.get_columns("products")}
+    return {"minimum_stock", "updated_at"}.issubset(existing) and "stock_movements" in inspector.get_table_names()
 
 
 def format_activity_time(value: datetime) -> str:

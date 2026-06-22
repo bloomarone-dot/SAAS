@@ -191,20 +191,8 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
     <section className="space-y-6">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
-          <p className="text-xs font-black uppercase text-[#f04438]">Administrateur / Propriétaire</p>
           <h1 className="mt-2 text-4xl font-black text-[#070528]">Carte</h1>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-            Gérez les plats et produits visibles à la vente. Les ingrédients et marchandises sont suivis dans Stock &gt; Produits stock.
-          </p>
         </div>
-        <button
-          type="button"
-          onClick={loadCatalog}
-          className="lte-btn lte-btn-default"
-        >
-          <DashboardIcon name="Activity" size={17} />
-          Actualiser
-        </button>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">

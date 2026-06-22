@@ -157,6 +157,7 @@ def create_tables() -> None:
     ensure_payment_transactions_table()
     ensure_payment_requests_table()
     ensure_payment_webhook_events_table()
+    ensure_instance_requests_table()
     ensure_performance_indexes()
     ensure_french_status_values()
     seed_superadmin()
@@ -457,6 +458,12 @@ def ensure_payment_webhook_events_table() -> None:
     """Cree la table d'idempotence/audit des webhooks de paiement."""
     from app.modules.payments.models import PaymentWebhookEvent  # noqa: F401
     Base.metadata.create_all(bind=engine, tables=[PaymentWebhookEvent.__table__])
+
+
+def ensure_instance_requests_table() -> None:
+    """Cree la table des demandes publiques de creation d'instance restaurant."""
+    from app.modules.platform.models import InstanceRequest  # noqa: F401
+    Base.metadata.create_all(bind=engine, tables=[InstanceRequest.__table__])
 
 
 def ensure_user_columns() -> None:

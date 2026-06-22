@@ -98,9 +98,6 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
             <option value="ALL">Toutes les salles</option>
             {rooms.map((room) => <option key={room} value={room}>{room}</option>)}
           </select>
-          <button type="button" onClick={loadTables} className="lte-btn lte-btn-default">
-            <DashboardIcon name="Activity" size={15} /> Actualiser
-          </button>
           {!readOnly && (
           <button type="button" onClick={() => setShowForm((value) => !value)} className="lte-btn lte-btn-primary">
             <DashboardIcon name="Plus" size={15} /> Table

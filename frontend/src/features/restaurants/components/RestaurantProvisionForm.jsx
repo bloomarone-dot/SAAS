@@ -25,9 +25,6 @@ export function RestaurantProvisionForm({ value, onChange, onSubmit, isLoading }
           <h2 className="text-2xl font-black text-[var(--dashboard-secondary)]">
             Créer un restaurant
           </h2>
-          <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-500">
-            Renseignez le tenant et le compte administrateur propriétaire.
-          </p>
         </div>
       </div>
 

@@ -1,621 +1,1276 @@
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
 from app.modules.audit.service import log_action
-from app.modules.finance.models import PromotionCode, RestaurantExpense
-from app.modules.finance.schemas import (
-    BalanceSheetOut,
-    DishMarginOut,
-    ExpenseIn,
-    ExpensePublic,
-    ExpenseUpdateIn,
-    CashFlowStatementOut,
-    IncomeStatementOut,
-    LedgerEntryOut,
-    FinanceSummaryOut,
-    FinancialStatementOut,
-    PaymentPublic,
-    PromoQuoteIn,
-    PromoQuoteOut,
-    PromotionCodeIn,
-    PromotionCodePublic,
-    PromotionCodeUpdateIn,
-    ServerRevenueOut,
-    StockRotationOut,
+from app.modules.catalog.models import MenuItem
+from app.modules.finance.models import (
+    AccountType,
+    AccountingAccount,
+    AccountingEntry,
+    AccountingEntryLine,
+    AccountingJournal,
+    AccountingPeriodClose,
+    BankAccount,
+    CashRegister,
+    EntryStatus,
+    Expense,
+    ExpenseCategory,
+    FinancialStatementMapping,
+    JournalType,
+    OperationStatus,
+    Payment,
+    PaymentMethod,
+    PaymentStatus,
+    PaymentType,
+    PromotionCode,
+    Revenue,
+    Tax,
+    TaxType,
 )
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
-from app.modules.catalog.models import MenuItem
 from app.modules.permissions.models import Permission
-from app.modules.stock.models import StockDamage, StockItem, StockRecipeIngredient
+from app.modules.stock.models import StockMovement, StockMovementStatus, StockMovementType
 from app.modules.users.models import User
 
 router = APIRouter(prefix="/finance", tags=["finance"])
 
 
+class OrmModel(BaseModel):
+    class Config:
+        from_attributes = True
+
+
+def money(value) -> Decimal:
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def report_range(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime, datetime]:
     end = end_date or datetime.utcnow()
-    start = start_date or (end - timedelta(days=7))
+    start = start_date or (end - timedelta(days=30))
     return start, end
 
 
-def order_filters(restaurant_id: str, start: datetime, end: datetime):
-    return (
-        CustomerOrder.restaurant_id == restaurant_id,
-        CustomerOrder.created_at >= start,
-        CustomerOrder.created_at <= end,
-        CustomerOrder.status != "Annulée",
-    )
+class AccountIn(BaseModel):
+    code: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=2, max_length=160)
+    type: AccountType
+    parent_id: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool = True
 
 
-def read_summary(db: Session, restaurant_id: str, start: datetime, end: datetime) -> FinanceSummaryOut:
-    orders = db.query(CustomerOrder).filter(*order_filters(restaurant_id, start, end)).all()
-    expenses = (
-        db.query(func.coalesce(func.sum(RestaurantExpense.amount), 0))
-        .filter(
-            RestaurantExpense.restaurant_id == restaurant_id,
-            RestaurantExpense.expense_date >= start,
-            RestaurantExpense.expense_date <= end,
-        )
-        .scalar()
-        or 0
-    )
-    damage_loss = (
-        db.query(func.coalesce(func.sum(StockDamage.estimated_loss), 0))
-        .filter(
-            StockDamage.restaurant_id == restaurant_id,
-            StockDamage.created_at >= start,
-            StockDamage.created_at <= end,
-        )
-        .scalar()
-        or 0
-    )
-    stock_items = db.query(StockItem).filter(StockItem.restaurant_id == restaurant_id).all()
-    stock_value = sum((item.quantity + item.kitchen_quantity + item.drink_quantity) * (item.cmup_current or item.purchase_price) for item in stock_items)
-    revenue = sum(order.total_amount for order in orders)
-    paid_orders = [order for order in orders if order.status in {"Payée", "Payee"}]
-    gross_profit = revenue - float(damage_loss or 0)
-    net_profit = gross_profit - float(expenses or 0)
-    return FinanceSummaryOut(
-        start_date=start,
-        end_date=end,
-        revenue=revenue,
-        expenses=float(expenses or 0),
-        damage_loss=float(damage_loss or 0),
-        stock_value=stock_value,
-        gross_profit=gross_profit,
-        net_profit=net_profit,
-        orders_count=len(orders),
-        paid_orders_count=len(paid_orders),
-        average_order_value=(revenue / len(orders)) if orders else 0,
-    )
+class AccountUpdateIn(BaseModel):
+    code: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    name: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    type: Optional[AccountType] = None
+    parent_id: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
-def normalize_promo_code(code: str) -> str:
-    return code.strip().upper().replace(" ", "")
+class JournalIn(BaseModel):
+    code: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=2, max_length=160)
+    type: JournalType
+    default_debit_account_id: Optional[str] = None
+    default_credit_account_id: Optional[str] = None
+    is_active: bool = True
 
 
-def calculate_promo_discount(promo: PromotionCode, order_amount: float) -> float:
-    if promo.discount_type == "FIXED":
-        amount = promo.discount_value
-    else:
-        amount = order_amount * promo.discount_value / 100
-    if promo.max_discount_amount is not None:
-        amount = min(amount, promo.max_discount_amount)
-    return max(0, min(order_amount, amount))
+class EntryLineIn(BaseModel):
+    account_id: str
+    label: str = Field(min_length=1, max_length=255)
+    debit: Decimal = Decimal("0.00")
+    credit: Decimal = Decimal("0.00")
+    third_party_type: Optional[str] = None
+    third_party_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def check_line_amount(self):
+        self.debit = money(self.debit)
+        self.credit = money(self.credit)
+        if self.debit < 0 or self.credit < 0:
+            raise ValueError("Les montants debit/credit doivent etre positifs")
+        if self.debit and self.credit:
+            raise ValueError("Une ligne ne peut pas porter debit et credit en meme temps")
+        if not self.debit and not self.credit:
+            raise ValueError("Une ligne doit porter un debit ou un credit")
+        return self
 
 
-def assert_promo_usable(promo: PromotionCode, order_amount: float) -> None:
-    now = datetime.utcnow()
-    if not promo.is_active:
-        raise HTTPException(status_code=400, detail="Code promo inactif")
-    if promo.starts_at and promo.starts_at > now:
-        raise HTTPException(status_code=400, detail="Code promo pas encore actif")
-    if promo.ends_at and promo.ends_at < now:
-        raise HTTPException(status_code=400, detail="Code promo expire")
-    if promo.max_uses is not None and promo.used_count >= promo.max_uses:
-        raise HTTPException(status_code=400, detail="Code promo épuisé")
-    if order_amount < promo.min_order_amount:
-        raise HTTPException(status_code=400, detail=f"Montant minimum requis: {promo.min_order_amount}")
+class EntryIn(BaseModel):
+    entry_date: Optional[datetime] = None
+    journal_id: str
+    reference: Optional[str] = None
+    description: str = Field(min_length=2)
+    source_type: Optional[str] = None
+    source_id: Optional[str] = None
+    lines: list[EntryLineIn] = Field(min_length=2)
 
 
-@router.get("/expenses", response_model=list[ExpensePublic])
-def list_expenses(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_READ)
-    start, end = report_range(start_date, end_date)
-    return (
-        db.query(RestaurantExpense)
-        .filter(
-            RestaurantExpense.restaurant_id == current_user.restaurant_id,
-            RestaurantExpense.expense_date >= start,
-            RestaurantExpense.expense_date <= end,
-            RestaurantExpense.is_active.is_(True),
-        )
-        .order_by(RestaurantExpense.expense_date.desc())
-        .all()
-    )
+class ExpenseIn(BaseModel):
+    expense_date: Optional[datetime] = None
+    category_id: Optional[str] = None
+    supplier_id: Optional[str] = None
+    amount: Decimal = Field(gt=0)
+    tax_amount: Decimal = Decimal("0.00")
+    total_amount: Optional[Decimal] = None
+    payment_status: PaymentStatus = PaymentStatus.PAID
+    payment_method: PaymentMethod = PaymentMethod.CASH
+    cash_register_id: Optional[str] = None
+    bank_account_id: Optional[str] = None
+    description: str = Field(min_length=2)
+    reference: Optional[str] = None
+
+    @model_validator(mode="after")
+    def normalize_total(self):
+        self.amount = money(self.amount)
+        self.tax_amount = money(self.tax_amount)
+        self.total_amount = money(self.total_amount if self.total_amount is not None else self.amount + self.tax_amount)
+        return self
 
 
-@router.post("/expenses", response_model=ExpensePublic, status_code=201)
-def create_expense(
-    payload: ExpenseIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    expense = RestaurantExpense(
-        restaurant_id=current_user.restaurant_id,
-        label=payload.label,
-        category=payload.category,
-        amount=payload.amount,
-        payment_method=payload.payment_method,
-        reference=payload.reference,
-        note=payload.note,
-        expense_date=payload.expense_date or datetime.utcnow(),
-        created_by_id=current_user.id,
-    )
-    db.add(expense)
+class RevenueIn(BaseModel):
+    revenue_date: Optional[datetime] = None
+    customer_id: Optional[str] = None
+    amount: Decimal = Field(gt=0)
+    tax_amount: Decimal = Decimal("0.00")
+    total_amount: Optional[Decimal] = None
+    payment_status: PaymentStatus = PaymentStatus.PAID
+    payment_method: PaymentMethod = PaymentMethod.CASH
+    cash_register_id: Optional[str] = None
+    bank_account_id: Optional[str] = None
+    description: str = Field(min_length=2)
+    reference: Optional[str] = None
+
+    @model_validator(mode="after")
+    def normalize_total(self):
+        self.amount = money(self.amount)
+        self.tax_amount = money(self.tax_amount)
+        self.total_amount = money(self.total_amount if self.total_amount is not None else self.amount + self.tax_amount)
+        return self
+
+
+class PaymentIn(BaseModel):
+    payment_date: Optional[datetime] = None
+    payment_type: PaymentType
+    payment_method: PaymentMethod
+    amount: Decimal = Field(gt=0)
+    reference: Optional[str] = None
+    description: Optional[str] = None
+    customer_id: Optional[str] = None
+    supplier_id: Optional[str] = None
+    cash_register_id: Optional[str] = None
+    bank_account_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def normalize_amount(self):
+        self.amount = money(self.amount)
+        return self
+
+
+class CashRegisterIn(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    code: str = Field(min_length=1, max_length=40)
+    account_id: Optional[str] = None
+    responsible_user_id: Optional[str] = None
+    is_active: bool = True
+
+
+class BankAccountIn(BaseModel):
+    bank_name: str = Field(min_length=2, max_length=160)
+    account_name: str = Field(min_length=2, max_length=160)
+    account_number: Optional[str] = Field(default=None, max_length=80)
+    account_id: Optional[str] = None
+    is_active: bool = True
+
+
+class ExpenseCategoryIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    default_account_id: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool = True
+
+
+class TaxIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    rate: Decimal = Field(ge=0)
+    type: TaxType
+    account_id: Optional[str] = None
+    is_active: bool = True
+
+
+class ClosePeriodIn(BaseModel):
+    start_date: datetime
+    end_date: datetime
+    note: Optional[str] = None
+
+
+class PromoQuoteIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40)
+    order_amount: Decimal = Field(ge=0)
+
+
+class PromotionCodeIn(BaseModel):
+    code: str = Field(min_length=2, max_length=40)
+    label: str = Field(min_length=2, max_length=160)
+    discount_type: str = Field(default="PERCENT", pattern="^(PERCENT|FIXED)$")
+    discount_value: Decimal = Field(gt=0)
+    min_order_amount: Decimal = Decimal("0.00")
+    max_discount_amount: Optional[Decimal] = None
+    max_uses: Optional[int] = Field(default=None, gt=0)
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    is_active: bool = True
+
+
+class PromotionCodeUpdateIn(BaseModel):
+    code: Optional[str] = Field(default=None, min_length=2, max_length=40)
+    label: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    discount_type: Optional[str] = Field(default=None, pattern="^(PERCENT|FIXED)$")
+    discount_value: Optional[Decimal] = Field(default=None, gt=0)
+    min_order_amount: Optional[Decimal] = None
+    max_discount_amount: Optional[Decimal] = None
+    max_uses: Optional[int] = Field(default=None, gt=0)
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    is_active: Optional[bool] = None
+
+
+DEFAULT_ACCOUNTS = [
+    ("101", "Capital", AccountType.EQUITY, "capital"),
+    ("120", "Resultat", AccountType.EQUITY, "result"),
+    ("401", "Fournisseurs", AccountType.LIABILITY, "suppliers"),
+    ("411", "Clients", AccountType.ASSET, "customers"),
+    ("4457", "TVA collectee", AccountType.LIABILITY, "vat_collected"),
+    ("4456", "TVA deductible", AccountType.ASSET, "vat_deductible"),
+    ("512", "Banque", AccountType.ASSET, "bank"),
+    ("530", "Caisse", AccountType.ASSET, "cash"),
+    ("607", "Achats marchandises", AccountType.EXPENSE, "purchases"),
+    ("6037", "Variation stock marchandises", AccountType.EXPENSE, "stock_adjustment"),
+    ("37", "Stock marchandises", AccountType.ASSET, "stock"),
+    ("606", "Charges diverses", AccountType.EXPENSE, "misc_expense"),
+    ("701", "Ventes", AccountType.INCOME, "sales"),
+]
+DEFAULT_JOURNALS = [
+    ("CAI", "Journal de caisse", JournalType.CASH),
+    ("BQ", "Journal de banque", JournalType.BANK),
+    ("ACH", "Journal des achats", JournalType.PURCHASE),
+    ("VTE", "Journal des ventes", JournalType.SALE),
+    ("OD", "Journal des operations diverses", JournalType.GENERAL),
+    ("STK", "Journal de stock", JournalType.STOCK),
+]
+DEFAULT_EXPENSE_CATEGORIES = [
+    "Achat marchandises", "Loyer", "Transport", "Electricite", "Eau", "Internet",
+    "Salaires", "Entretien", "Fournitures", "Autres charges",
+]
+
+
+def ensure_default_accounting(db: Session, restaurant_id: str) -> dict[str, AccountingAccount]:
+    accounts_by_code = {
+        account.code: account
+        for account in db.query(AccountingAccount).filter(AccountingAccount.restaurant_id == restaurant_id).all()
+    }
+    semantic: dict[str, AccountingAccount] = {}
+    for code, name, account_type, key in DEFAULT_ACCOUNTS:
+        account = accounts_by_code.get(code)
+        if not account:
+            account = AccountingAccount(restaurant_id=restaurant_id, code=code, name=name, type=account_type)
+            db.add(account)
+            db.flush()
+        semantic[key] = account
+    journals_by_code = {
+        journal.code: journal
+        for journal in db.query(AccountingJournal).filter(AccountingJournal.restaurant_id == restaurant_id).all()
+    }
+    for code, name, journal_type in DEFAULT_JOURNALS:
+        if code not in journals_by_code:
+            db.add(AccountingJournal(restaurant_id=restaurant_id, code=code, name=name, type=journal_type))
+    if not db.query(CashRegister).filter(CashRegister.restaurant_id == restaurant_id).first():
+        db.add(CashRegister(restaurant_id=restaurant_id, name="Caisse principale", code="MAIN", account_id=semantic["cash"].id))
+    existing_categories = {
+        category.name.lower()
+        for category in db.query(ExpenseCategory).filter(ExpenseCategory.restaurant_id == restaurant_id).all()
+    }
+    for name in DEFAULT_EXPENSE_CATEGORIES:
+        if name.lower() not in existing_categories:
+            default_account = semantic["purchases"].id if name == "Achat marchandises" else semantic["misc_expense"].id
+            db.add(ExpenseCategory(restaurant_id=restaurant_id, name=name, default_account_id=default_account))
     db.flush()
-    log_action(
-        db, current_user, "expense.create", "expense", expense.id,
-        f"Dépense créée: {expense.label} ({expense.amount})",
-        {"amount": expense.amount, "category": expense.category, "payment_method": expense.payment_method},
+    return semantic
+
+
+def journal_by_type(db: Session, restaurant_id: str, journal_type: JournalType) -> AccountingJournal:
+    ensure_default_accounting(db, restaurant_id)
+    journal = (
+        db.query(AccountingJournal)
+        .filter(AccountingJournal.restaurant_id == restaurant_id, AccountingJournal.type == journal_type, AccountingJournal.is_active.is_(True))
+        .order_by(AccountingJournal.created_at.asc())
+        .first()
     )
-    db.commit()
-    db.refresh(expense)
-    return expense
+    if not journal:
+        raise HTTPException(status_code=400, detail=f"Journal comptable {journal_type.value} non configure")
+    return journal
 
 
-@router.patch("/expenses/{expense_id}", response_model=ExpensePublic)
-def update_expense(
-    expense_id: str,
-    payload: ExpenseUpdateIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    expense = db.get(RestaurantExpense, expense_id)
-    if not expense or expense.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Depense introuvable")
-    changed = payload.dict(exclude_unset=True)
-    for field, value in changed.items():
-        setattr(expense, field, value)
-    log_action(
-        db, current_user, "expense.update", "expense", expense.id,
-        f"Dépense modifiée: {expense.label}",
-        {"fields": sorted(changed.keys()), "amount": expense.amount},
+def account_or_404(db: Session, account_id: str, restaurant_id: str) -> AccountingAccount:
+    account = db.get(AccountingAccount, account_id)
+    if not account or account.restaurant_id != restaurant_id:
+        raise HTTPException(status_code=404, detail="Compte comptable introuvable")
+    return account
+
+
+def generate_entry_number(db: Session, restaurant_id: str, entry_date: datetime | None = None) -> str:
+    value = entry_date or datetime.utcnow()
+    prefix = value.strftime("EC%Y%m")
+    count = (
+        db.query(func.count(AccountingEntry.id))
+        .filter(AccountingEntry.restaurant_id == restaurant_id, AccountingEntry.entry_number.like(f"{prefix}%"))
+        .scalar()
+        or 0
     )
-    db.commit()
-    db.refresh(expense)
-    return expense
+    return f"{prefix}-{int(count) + 1:05d}"
 
 
-@router.delete("/expenses/{expense_id}", status_code=204)
-def delete_expense(
-    expense_id: str,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    expense = db.get(RestaurantExpense, expense_id)
-    if not expense or expense.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Depense introuvable")
-    expense.is_active = False
-    log_action(
-        db, current_user, "expense.delete", "expense", expense.id,
-        f"Dépense archivée: {expense.label} ({expense.amount})",
-        {"amount": expense.amount},
+def check_entry_balance(lines: list[EntryLineIn] | list[AccountingEntryLine]) -> tuple[Decimal, Decimal]:
+    if len(lines) < 2:
+        raise HTTPException(status_code=400, detail="Une ecriture doit contenir au moins deux lignes")
+    debit = sum(money(line.debit) for line in lines)
+    credit = sum(money(line.credit) for line in lines)
+    if debit != credit:
+        raise HTTPException(status_code=400, detail=f"Ecriture non equilibree: debit {debit}, credit {credit}")
+    if debit <= 0:
+        raise HTTPException(status_code=400, detail="Le total de l'ecriture doit etre superieur a zero")
+    return debit, credit
+
+
+def assert_period_open(db: Session, restaurant_id: str, entry_date: datetime) -> None:
+    closed = (
+        db.query(AccountingPeriodClose)
+        .filter(
+            AccountingPeriodClose.restaurant_id == restaurant_id,
+            AccountingPeriodClose.start_date <= entry_date,
+            AccountingPeriodClose.end_date >= entry_date,
+        )
+        .first()
     )
-    db.commit()
+    if closed:
+        raise HTTPException(status_code=400, detail="La periode comptable est cloturee")
+
+
+def create_accounting_entry(db: Session, restaurant_id: str, user_id: str, payload: EntryIn, *, status: EntryStatus = EntryStatus.DRAFT) -> AccountingEntry:
+    assert_period_open(db, restaurant_id, payload.entry_date or datetime.utcnow())
+    journal = db.get(AccountingJournal, payload.journal_id)
+    if not journal or journal.restaurant_id != restaurant_id or not journal.is_active:
+        raise HTTPException(status_code=404, detail="Journal comptable introuvable ou inactif")
+    for line in payload.lines:
+        account = account_or_404(db, line.account_id, restaurant_id)
+        if not account.is_active:
+            raise HTTPException(status_code=400, detail=f"Compte inactif: {account.code}")
+    if status == EntryStatus.POSTED:
+        check_entry_balance(payload.lines)
+    entry = AccountingEntry(
+        restaurant_id=restaurant_id,
+        entry_number=generate_entry_number(db, restaurant_id, payload.entry_date),
+        entry_date=payload.entry_date or datetime.utcnow(),
+        journal_id=payload.journal_id,
+        reference=payload.reference,
+        description=payload.description,
+        status=status,
+        source_type=payload.source_type,
+        source_id=payload.source_id,
+        created_by=user_id,
+        posted_by=user_id if status == EntryStatus.POSTED else None,
+        posted_at=datetime.utcnow() if status == EntryStatus.POSTED else None,
+    )
+    db.add(entry)
+    db.flush()
+    for line in payload.lines:
+        db.add(
+            AccountingEntryLine(
+                restaurant_id=restaurant_id,
+                accounting_entry_id=entry.id,
+                account_id=line.account_id,
+                label=line.label,
+                debit=money(line.debit),
+                credit=money(line.credit),
+                third_party_type=line.third_party_type,
+                third_party_id=line.third_party_id,
+            )
+        )
+    db.flush()
+    return entry
+
+
+def entry_lines(db: Session, entry_id: str) -> list[AccountingEntryLine]:
+    return db.query(AccountingEntryLine).filter(AccountingEntryLine.accounting_entry_id == entry_id).all()
+
+
+def entry_public(db: Session, entry: AccountingEntry) -> dict:
+    lines = entry_lines(db, entry.id)
+    debit = sum(money(line.debit) for line in lines)
+    credit = sum(money(line.credit) for line in lines)
+    return {**entry.__dict__, "lines": lines, "total_debit": debit, "total_credit": credit, "is_balanced": debit == credit}
+
+
+def validate_accounting_entry(db: Session, entry: AccountingEntry, user: User) -> AccountingEntry:
+    if entry.status != EntryStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Seule une ecriture brouillon peut etre validee")
+    assert_period_open(db, entry.restaurant_id, entry.entry_date)
+    check_entry_balance(entry_lines(db, entry.id))
+    entry.status = EntryStatus.POSTED
+    entry.posted_by = user.id
+    entry.posted_at = datetime.utcnow()
+    return entry
+
+
+def cancel_accounting_entry(db: Session, entry: AccountingEntry, user: User) -> AccountingEntry:
+    if entry.status != EntryStatus.POSTED:
+        raise HTTPException(status_code=400, detail="Seule une ecriture validee peut etre annulee")
+    assert_period_open(db, entry.restaurant_id, entry.entry_date)
+    original_lines = entry_lines(db, entry.id)
+    reverse_payload = EntryIn(
+        entry_date=datetime.utcnow(),
+        journal_id=entry.journal_id,
+        reference=f"ANN-{entry.entry_number}",
+        description=f"Annulation de {entry.entry_number}: {entry.description}",
+        source_type="entry_cancellation",
+        source_id=entry.id,
+        lines=[
+            EntryLineIn(account_id=line.account_id, label=f"Annulation - {line.label}", debit=line.credit, credit=line.debit, third_party_type=line.third_party_type.value if line.third_party_type else None, third_party_id=line.third_party_id)
+            for line in original_lines
+        ],
+    )
+    create_accounting_entry(db, entry.restaurant_id, user.id, reverse_payload, status=EntryStatus.POSTED)
+    entry.status = EntryStatus.CANCELLED
+    entry.cancelled_by = user.id
+    entry.cancelled_at = datetime.utcnow()
+    return entry
+
+
+def account_balance(db: Session, restaurant_id: str, account_id: str, start: datetime | None = None, end: datetime | None = None) -> Decimal:
+    query = (
+        db.query(AccountingEntryLine)
+        .join(AccountingEntry, AccountingEntry.id == AccountingEntryLine.accounting_entry_id)
+        .filter(
+            AccountingEntry.restaurant_id == restaurant_id,
+            AccountingEntry.status == EntryStatus.POSTED,
+            AccountingEntryLine.account_id == account_id,
+        )
+    )
+    if start:
+        query = query.filter(AccountingEntry.entry_date >= start)
+    if end:
+        query = query.filter(AccountingEntry.entry_date <= end)
+    return sum(money(line.debit) - money(line.credit) for line in query.all())
+
+
+def payment_asset_account(db: Session, restaurant_id: str, method: PaymentMethod, cash_register_id: str | None, bank_account_id: str | None) -> str:
+    defaults = ensure_default_accounting(db, restaurant_id)
+    if method == PaymentMethod.CASH:
+        register = db.get(CashRegister, cash_register_id) if cash_register_id else db.query(CashRegister).filter(CashRegister.restaurant_id == restaurant_id, CashRegister.is_active.is_(True)).first()
+        return register.account_id if register else defaults["cash"].id
+    if method in {PaymentMethod.BANK, PaymentMethod.MOBILE_MONEY}:
+        bank = db.get(BankAccount, bank_account_id) if bank_account_id else db.query(BankAccount).filter(BankAccount.restaurant_id == restaurant_id, BankAccount.is_active.is_(True)).first()
+        return bank.account_id if bank else defaults["bank"].id
+    return defaults["bank"].id
+
+
+def create_expense_entry(db: Session, restaurant_id: str, user_id: str, expense: Expense, payment_method: PaymentMethod, cash_register_id: str | None, bank_account_id: str | None) -> AccountingEntry:
+    defaults = ensure_default_accounting(db, restaurant_id)
+    category = db.get(ExpenseCategory, expense.category_id) if expense.category_id else None
+    debit_account_id = category.default_account_id if category and category.default_account_id else defaults["misc_expense"].id
+    credit_account_id = payment_asset_account(db, restaurant_id, payment_method, cash_register_id, bank_account_id) if expense.payment_status == PaymentStatus.PAID else defaults["suppliers"].id
+    journal = journal_by_type(db, restaurant_id, JournalType.CASH if payment_method == PaymentMethod.CASH else JournalType.PURCHASE)
+    payload = EntryIn(
+        entry_date=expense.expense_date,
+        journal_id=journal.id,
+        reference=expense.reference,
+        description=expense.description,
+        source_type="expense",
+        source_id=expense.id,
+        lines=[
+            EntryLineIn(account_id=debit_account_id, label=expense.description, debit=expense.amount, credit=0, third_party_type="supplier" if expense.supplier_id else None, third_party_id=expense.supplier_id),
+            EntryLineIn(account_id=credit_account_id, label=expense.description, debit=0, credit=expense.total_amount, third_party_type="supplier" if expense.supplier_id and expense.payment_status != PaymentStatus.PAID else None, third_party_id=expense.supplier_id if expense.payment_status != PaymentStatus.PAID else None),
+        ],
+    )
+    if expense.tax_amount:
+        payload.lines.insert(1, EntryLineIn(account_id=defaults["vat_deductible"].id, label=f"TVA deductible - {expense.description}", debit=expense.tax_amount, credit=0))
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def create_revenue_entry(db: Session, restaurant_id: str, user_id: str, revenue: Revenue, payment_method: PaymentMethod, cash_register_id: str | None, bank_account_id: str | None) -> AccountingEntry:
+    defaults = ensure_default_accounting(db, restaurant_id)
+    debit_account_id = payment_asset_account(db, restaurant_id, payment_method, cash_register_id, bank_account_id) if revenue.payment_status == PaymentStatus.PAID else defaults["customers"].id
+    journal = journal_by_type(db, restaurant_id, JournalType.CASH if payment_method == PaymentMethod.CASH else JournalType.SALE)
+    payload = EntryIn(
+        entry_date=revenue.revenue_date,
+        journal_id=journal.id,
+        reference=revenue.reference,
+        description=revenue.description,
+        source_type="revenue",
+        source_id=revenue.id,
+        lines=[
+            EntryLineIn(account_id=debit_account_id, label=revenue.description, debit=revenue.total_amount, credit=0, third_party_type="customer" if revenue.customer_id and revenue.payment_status != PaymentStatus.PAID else None, third_party_id=revenue.customer_id if revenue.payment_status != PaymentStatus.PAID else None),
+            EntryLineIn(account_id=defaults["sales"].id, label=revenue.description, debit=0, credit=revenue.amount),
+        ],
+    )
+    if revenue.tax_amount:
+        payload.lines.append(EntryLineIn(account_id=defaults["vat_collected"].id, label=f"TVA collectee - {revenue.description}", debit=0, credit=revenue.tax_amount))
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def create_payment_entry(db: Session, restaurant_id: str, user_id: str, payment: Payment) -> AccountingEntry:
+    defaults = ensure_default_accounting(db, restaurant_id)
+    cash_or_bank = payment_asset_account(db, restaurant_id, payment.payment_method, payment.cash_register_id, payment.bank_account_id)
+    if payment.payment_type == PaymentType.INCOME:
+        debit_account_id = cash_or_bank
+        credit_account_id = defaults["customers"].id if payment.customer_id else defaults["sales"].id
+        journal_type = JournalType.CASH if payment.payment_method == PaymentMethod.CASH else JournalType.BANK
+    else:
+        debit_account_id = defaults["suppliers"].id if payment.supplier_id else defaults["misc_expense"].id
+        credit_account_id = cash_or_bank
+        journal_type = JournalType.CASH if payment.payment_method == PaymentMethod.CASH else JournalType.BANK
+    journal = journal_by_type(db, restaurant_id, journal_type)
+    payload = EntryIn(
+        entry_date=payment.payment_date,
+        journal_id=journal.id,
+        reference=payment.reference,
+        description=payment.description or "Paiement",
+        source_type="payment",
+        source_id=payment.id,
+        lines=[
+            EntryLineIn(account_id=debit_account_id, label=payment.description or "Paiement", debit=payment.amount, credit=0),
+            EntryLineIn(account_id=credit_account_id, label=payment.description or "Paiement", debit=0, credit=payment.amount),
+        ],
+    )
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def posted_lines_query(db: Session, restaurant_id: str, start: datetime | None = None, end: datetime | None = None):
+    query = (
+        db.query(AccountingEntryLine, AccountingEntry, AccountingAccount)
+        .join(AccountingEntry, AccountingEntry.id == AccountingEntryLine.accounting_entry_id)
+        .join(AccountingAccount, AccountingAccount.id == AccountingEntryLine.account_id)
+        .filter(AccountingEntry.restaurant_id == restaurant_id, AccountingEntry.status == EntryStatus.POSTED)
+    )
+    if start:
+        query = query.filter(AccountingEntry.entry_date >= start)
+    if end:
+        query = query.filter(AccountingEntry.entry_date <= end)
+    return query
+
+
+def trial_balance_rows(db: Session, restaurant_id: str, start: datetime | None, end: datetime | None, account_type: AccountType | None = None) -> list[dict]:
+    rows: dict[str, dict] = {}
+    query = posted_lines_query(db, restaurant_id, start, end)
+    if account_type:
+        query = query.filter(AccountingAccount.type == account_type)
+    for line, _entry, account in query.all():
+        row = rows.setdefault(account.id, {"account_id": account.id, "code": account.code, "name": account.name, "type": account.type.value, "debit": Decimal("0.00"), "credit": Decimal("0.00")})
+        row["debit"] += money(line.debit)
+        row["credit"] += money(line.credit)
+    for row in rows.values():
+        balance = row["debit"] - row["credit"]
+        row["debit_balance"] = balance if balance > 0 else Decimal("0.00")
+        row["credit_balance"] = abs(balance) if balance < 0 else Decimal("0.00")
+    return sorted(rows.values(), key=lambda row: row["code"])
+
+
+@router.on_event("startup")
+def _noop() -> None:
     return None
 
 
-@router.get("/promotions", response_model=list[PromotionCodePublic])
-def list_promotions(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.CASHIER_READ)
-    return (
-        db.query(PromotionCode)
-        .filter(PromotionCode.restaurant_id == current_user.restaurant_id)
-        .order_by(PromotionCode.created_at.desc())
+@router.get("/accounts")
+def list_accounts(type: AccountType | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    ensure_default_accounting(db, current_user.restaurant_id)
+    db.commit()
+    query = db.query(AccountingAccount).filter(AccountingAccount.restaurant_id == current_user.restaurant_id)
+    if type:
+        query = query.filter(AccountingAccount.type == type)
+    return query.order_by(AccountingAccount.code.asc()).all()
+
+
+@router.post("/accounts", status_code=201)
+def create_accounting_account(payload: AccountIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    account = AccountingAccount(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@router.patch("/accounts/{account_id}")
+def update_accounting_account(account_id: str, payload: AccountUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    account = account_or_404(db, account_id, current_user.restaurant_id)
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(account, field, value)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@router.delete("/accounts/{account_id}")
+def disable_accounting_account(account_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    account = account_or_404(db, account_id, current_user.restaurant_id)
+    account.is_active = False
+    db.commit()
+    return {"message": "Compte desactive"}
+
+
+@router.get("/accounts/{account_id}")
+def account_detail(account_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    account = account_or_404(db, account_id, current_user.restaurant_id)
+    return {**account.__dict__, "balance": account_balance(db, current_user.restaurant_id, account.id)}
+
+
+@router.get("/journals")
+def list_journals(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    ensure_default_accounting(db, current_user.restaurant_id)
+    db.commit()
+    return db.query(AccountingJournal).filter(AccountingJournal.restaurant_id == current_user.restaurant_id).order_by(AccountingJournal.code.asc()).all()
+
+
+@router.post("/journals", status_code=201)
+def create_accounting_journal(payload: JournalIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    journal = AccountingJournal(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(journal)
+    db.commit()
+    db.refresh(journal)
+    return journal
+
+
+@router.patch("/journals/{journal_id}")
+def update_journal(journal_id: str, payload: JournalIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    journal = db.get(AccountingJournal, journal_id)
+    if not journal or journal.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Journal introuvable")
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(journal, field, value)
+    db.commit()
+    db.refresh(journal)
+    return journal
+
+
+@router.delete("/journals/{journal_id}")
+def disable_journal(journal_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    journal = db.get(AccountingJournal, journal_id)
+    if not journal or journal.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Journal introuvable")
+    journal.is_active = False
+    db.commit()
+    return {"message": "Journal desactive"}
+
+
+@router.get("/entries")
+def list_entries(start_date: datetime | None = None, end_date: datetime | None = None, journal_id: str | None = None, status: EntryStatus | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    query = db.query(AccountingEntry).filter(AccountingEntry.restaurant_id == current_user.restaurant_id)
+    if start_date:
+        query = query.filter(AccountingEntry.entry_date >= start_date)
+    if end_date:
+        query = query.filter(AccountingEntry.entry_date <= end_date)
+    if journal_id:
+        query = query.filter(AccountingEntry.journal_id == journal_id)
+    if status:
+        query = query.filter(AccountingEntry.status == status)
+    entries = query.order_by(AccountingEntry.entry_date.desc(), AccountingEntry.created_at.desc()).limit(500).all()
+    return [entry_public(db, entry) for entry in entries]
+
+
+@router.post("/entries", status_code=201)
+def create_entry(payload: EntryIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    entry = create_accounting_entry(db, current_user.restaurant_id, current_user.id, payload)
+    db.commit()
+    return entry_public(db, entry)
+
+
+@router.get("/entries/{entry_id}")
+def get_entry(entry_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    entry = db.get(AccountingEntry, entry_id)
+    if not entry or entry.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Ecriture introuvable")
+    return entry_public(db, entry)
+
+
+@router.patch("/entries/{entry_id}/validate")
+def validate_entry(entry_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    entry = db.get(AccountingEntry, entry_id)
+    if not entry or entry.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Ecriture introuvable")
+    validate_accounting_entry(db, entry, current_user)
+    db.commit()
+    return entry_public(db, entry)
+
+
+@router.patch("/entries/{entry_id}/cancel")
+def cancel_entry(entry_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    entry = db.get(AccountingEntry, entry_id)
+    if not entry or entry.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Ecriture introuvable")
+    cancel_accounting_entry(db, entry, current_user)
+    db.commit()
+    return entry_public(db, entry)
+
+
+@router.get("/expenses")
+def list_expenses(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    return db.query(Expense).filter(Expense.restaurant_id == current_user.restaurant_id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date.desc()).all()
+
+
+@router.post("/expenses", status_code=201)
+def create_expense(payload: ExpenseIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    expense = Expense(
+        restaurant_id=current_user.restaurant_id,
+        expense_date=payload.expense_date or datetime.utcnow(),
+        category_id=payload.category_id,
+        supplier_id=payload.supplier_id,
+        amount=payload.amount,
+        tax_amount=payload.tax_amount,
+        total_amount=payload.total_amount,
+        payment_status=payload.payment_status,
+        description=payload.description,
+        reference=payload.reference,
+        created_by=current_user.id,
+    )
+    db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
+@router.patch("/expenses/{expense_id}/validate")
+def validate_expense(expense_id: str, payment_method: PaymentMethod = PaymentMethod.CASH, cash_register_id: str | None = None, bank_account_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    expense = db.get(Expense, expense_id)
+    if not expense or expense.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Depense introuvable")
+    if expense.status != OperationStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Depense deja traitee")
+    entry = create_expense_entry(db, current_user.restaurant_id, current_user.id, expense, payment_method, cash_register_id, bank_account_id)
+    expense.accounting_entry_id = entry.id
+    expense.status = OperationStatus.VALIDATED
+    expense.validated_by = current_user.id
+    expense.validated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
+@router.get("/revenues")
+def list_revenues(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    return db.query(Revenue).filter(Revenue.restaurant_id == current_user.restaurant_id, Revenue.revenue_date >= start, Revenue.revenue_date <= end).order_by(Revenue.revenue_date.desc()).all()
+
+
+@router.post("/revenues", status_code=201)
+def create_revenue(payload: RevenueIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    revenue = Revenue(
+        restaurant_id=current_user.restaurant_id,
+        revenue_date=payload.revenue_date or datetime.utcnow(),
+        customer_id=payload.customer_id,
+        amount=payload.amount,
+        tax_amount=payload.tax_amount,
+        total_amount=payload.total_amount,
+        payment_status=payload.payment_status,
+        description=payload.description,
+        reference=payload.reference,
+        created_by=current_user.id,
+    )
+    db.add(revenue)
+    db.commit()
+    db.refresh(revenue)
+    return revenue
+
+
+@router.patch("/revenues/{revenue_id}/validate")
+def validate_revenue(revenue_id: str, payment_method: PaymentMethod = PaymentMethod.CASH, cash_register_id: str | None = None, bank_account_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    revenue = db.get(Revenue, revenue_id)
+    if not revenue or revenue.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Recette introuvable")
+    if revenue.status != OperationStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Recette deja traitee")
+    entry = create_revenue_entry(db, current_user.restaurant_id, current_user.id, revenue, payment_method, cash_register_id, bank_account_id)
+    revenue.accounting_entry_id = entry.id
+    revenue.status = OperationStatus.VALIDATED
+    revenue.validated_by = current_user.id
+    revenue.validated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(revenue)
+    return revenue
+
+
+@router.get("/payments")
+def list_payments(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    return db.query(Payment).filter(Payment.restaurant_id == current_user.restaurant_id, Payment.payment_date >= start, Payment.payment_date <= end).order_by(Payment.payment_date.desc()).all()
+
+
+@router.post("/payments", status_code=201)
+def create_payment(payload: PaymentIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    payment = Payment(restaurant_id=current_user.restaurant_id, created_by=current_user.id, payment_date=payload.payment_date or datetime.utcnow(), **payload.dict(exclude={"payment_date"}))
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+    return payment
+
+
+@router.patch("/payments/{payment_id}/validate")
+def validate_payment(payment_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    payment = db.get(Payment, payment_id)
+    if not payment or payment.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Paiement introuvable")
+    if payment.status != OperationStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Paiement deja traite")
+    entry = create_payment_entry(db, current_user.restaurant_id, current_user.id, payment)
+    payment.accounting_entry_id = entry.id
+    payment.status = OperationStatus.VALIDATED
+    payment.validated_by = current_user.id
+    payment.validated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(payment)
+    return payment
+
+
+@router.get("/cash-registers")
+def list_cash_registers(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    ensure_default_accounting(db, current_user.restaurant_id)
+    db.commit()
+    return db.query(CashRegister).filter(CashRegister.restaurant_id == current_user.restaurant_id).all()
+
+
+@router.post("/cash-registers", status_code=201)
+def create_cash_register(payload: CashRegisterIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    accounts = ensure_default_accounting(db, current_user.restaurant_id)
+    register = CashRegister(restaurant_id=current_user.restaurant_id, account_id=payload.account_id or accounts["cash"].id, name=payload.name, code=payload.code, responsible_user_id=payload.responsible_user_id, is_active=payload.is_active)
+    db.add(register)
+    db.commit()
+    db.refresh(register)
+    return register
+
+
+@router.get("/cash-registers/{cash_register_id}/balance")
+def get_cash_balance(cash_register_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    register = db.get(CashRegister, cash_register_id)
+    if not register or register.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Caisse introuvable")
+    return {"cash_register_id": register.id, "balance": account_balance(db, current_user.restaurant_id, register.account_id)}
+
+
+@router.get("/bank-accounts")
+def list_bank_accounts(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    return db.query(BankAccount).filter(BankAccount.restaurant_id == current_user.restaurant_id).all()
+
+
+@router.post("/bank-accounts", status_code=201)
+def create_bank_account(payload: BankAccountIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    accounts = ensure_default_accounting(db, current_user.restaurant_id)
+    bank = BankAccount(restaurant_id=current_user.restaurant_id, account_id=payload.account_id or accounts["bank"].id, bank_name=payload.bank_name, account_name=payload.account_name, account_number=payload.account_number, is_active=payload.is_active)
+    db.add(bank)
+    db.commit()
+    db.refresh(bank)
+    return bank
+
+
+@router.get("/bank-accounts/{bank_account_id}/balance")
+def get_bank_balance(bank_account_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    bank = db.get(BankAccount, bank_account_id)
+    if not bank or bank.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Compte bancaire introuvable")
+    return {"bank_account_id": bank.id, "balance": account_balance(db, current_user.restaurant_id, bank.account_id)}
+
+
+@router.get("/expense-categories")
+def list_expense_categories(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    ensure_default_accounting(db, current_user.restaurant_id)
+    db.commit()
+    return db.query(ExpenseCategory).filter(ExpenseCategory.restaurant_id == current_user.restaurant_id).order_by(ExpenseCategory.name.asc()).all()
+
+
+@router.post("/expense-categories", status_code=201)
+def create_expense_category(payload: ExpenseCategoryIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    category = ExpenseCategory(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+@router.get("/taxes")
+def list_taxes(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    return db.query(Tax).filter(Tax.restaurant_id == current_user.restaurant_id).all()
+
+
+@router.post("/taxes", status_code=201)
+def create_tax(payload: TaxIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    tax = Tax(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(tax)
+    db.commit()
+    db.refresh(tax)
+    return tax
+
+
+@router.get("/reports/ledger")
+def get_ledger(account_id: str | None = None, start_date: datetime | None = None, end_date: datetime | None = None, journal_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    query = posted_lines_query(db, current_user.restaurant_id, start, end)
+    if account_id:
+        query = query.filter(AccountingEntryLine.account_id == account_id)
+    if journal_id:
+        query = query.filter(AccountingEntry.journal_id == journal_id)
+    rows = []
+    running: dict[str, Decimal] = {}
+    for line, entry, account in query.order_by(AccountingAccount.code.asc(), AccountingEntry.entry_date.asc()).all():
+        running[account.id] = running.get(account.id, Decimal("0.00")) + money(line.debit) - money(line.credit)
+        rows.append({"date": entry.entry_date, "entry_number": entry.entry_number, "journal_id": entry.journal_id, "reference": entry.reference, "account_id": account.id, "account_code": account.code, "account_name": account.name, "label": line.label, "debit": line.debit, "credit": line.credit, "running_balance": running[account.id]})
+    return rows
+
+
+@router.get("/reports/trial-balance")
+def get_trial_balance(start_date: datetime | None = None, end_date: datetime | None = None, type: AccountType | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    rows = trial_balance_rows(db, current_user.restaurant_id, start, end, type)
+    return {"rows": rows, "total_debit": sum(row["debit"] for row in rows), "total_credit": sum(row["credit"] for row in rows)}
+
+
+@router.get("/reports/income-statement")
+def get_income_statement(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    rows = trial_balance_rows(db, current_user.restaurant_id, start, end)
+    income = [row for row in rows if row["type"] == AccountType.INCOME.value]
+    expenses = [row for row in rows if row["type"] == AccountType.EXPENSE.value]
+    total_income = sum(row["credit"] - row["debit"] for row in income)
+    total_expenses = sum(row["debit"] - row["credit"] for row in expenses)
+    return {"products": income, "charges": expenses, "total_products": total_income, "total_charges": total_expenses, "net_result": total_income - total_expenses}
+
+
+@router.get("/reports/balance-sheet")
+def get_balance_sheet(end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    end = end_date or datetime.utcnow()
+    rows = trial_balance_rows(db, current_user.restaurant_id, None, end)
+    assets = [row for row in rows if row["type"] == AccountType.ASSET.value]
+    liabilities = [row for row in rows if row["type"] in {AccountType.LIABILITY.value, AccountType.EQUITY.value}]
+    income_statement = get_income_statement(None, end, current_user, db)
+    total_assets = sum(row["debit_balance"] - row["credit_balance"] for row in assets)
+    total_liabilities = sum(row["credit_balance"] - row["debit_balance"] for row in liabilities) + money(income_statement["net_result"])
+    return {"assets": assets, "liabilities": liabilities, "net_result": income_statement["net_result"], "total_assets": total_assets, "total_liabilities": total_liabilities, "is_balanced": total_assets == total_liabilities}
+
+
+@router.get("/reports/cash-flow")
+def get_cash_report(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    accounts = ensure_default_accounting(db, current_user.restaurant_id)
+    initial = account_balance(db, current_user.restaurant_id, accounts["cash"].id, None, start)
+    rows = get_ledger(accounts["cash"].id, start, end, None, current_user, db)
+    cash_in = sum(money(row["debit"]) for row in rows)
+    cash_out = sum(money(row["credit"]) for row in rows)
+    return {"initial_balance": initial, "cash_in": cash_in, "cash_out": cash_out, "net_cash_flow": cash_in - cash_out, "final_balance": initial + cash_in - cash_out, "movements": rows}
+
+
+@router.get("/reports/bank")
+def get_bank_report(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    accounts = ensure_default_accounting(db, current_user.restaurant_id)
+    initial = account_balance(db, current_user.restaurant_id, accounts["bank"].id, None, start)
+    rows = get_ledger(accounts["bank"].id, start, end, None, current_user, db)
+    cash_in = sum(money(row["debit"]) for row in rows)
+    cash_out = sum(money(row["credit"]) for row in rows)
+    return {"initial_balance": initial, "bank_in": cash_in, "bank_out": cash_out, "net_flow": cash_in - cash_out, "final_balance": initial + cash_in - cash_out, "movements": rows}
+
+
+@router.get("/reports/journal")
+def get_accounting_journal(start_date: datetime | None = None, end_date: datetime | None = None, journal_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    return get_ledger(None, start_date, end_date, journal_id, current_user, db)
+
+
+@router.get("/reports/expenses")
+def get_expense_report(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    statement = get_income_statement(start_date, end_date, current_user, db)
+    total = money(statement["total_charges"])
+    return {"total": total, "rows": [{**row, "percent": float(((row["debit"] - row["credit"]) / total * 100) if total else 0)} for row in statement["charges"]]}
+
+
+@router.get("/reports/revenues")
+def get_revenue_report(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    statement = get_income_statement(start_date, end_date, current_user, db)
+    total = money(statement["total_products"])
+    return {"total": total, "rows": [{**row, "percent": float(((row["credit"] - row["debit"]) / total * 100) if total else 0)} for row in statement["products"]]}
+
+
+@router.get("/reports/monthly-result")
+def monthly_result(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    rows = posted_lines_query(db, current_user.restaurant_id).all()
+    months: dict[str, dict] = {}
+    for line, entry, account in rows:
+        key = entry.entry_date.strftime("%Y-%m")
+        bucket = months.setdefault(key, {"month": key, "revenues": Decimal("0.00"), "expenses": Decimal("0.00"), "net_result": Decimal("0.00")})
+        if account.type == AccountType.INCOME:
+            bucket["revenues"] += money(line.credit) - money(line.debit)
+        if account.type == AccountType.EXPENSE:
+            bucket["expenses"] += money(line.debit) - money(line.credit)
+        bucket["net_result"] = bucket["revenues"] - bucket["expenses"]
+    return list(sorted(months.values(), key=lambda row: row["month"]))
+
+
+@router.get("/reports/payables")
+def supplier_debts(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    accounts = ensure_default_accounting(db, current_user.restaurant_id)
+    return {"account_id": accounts["suppliers"].id, "balance": -account_balance(db, current_user.restaurant_id, accounts["suppliers"].id)}
+
+
+@router.get("/reports/receivables")
+def customer_receivables(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    accounts = ensure_default_accounting(db, current_user.restaurant_id)
+    return {"account_id": accounts["customers"].id, "balance": account_balance(db, current_user.restaurant_id, accounts["customers"].id)}
+
+
+@router.get("/reports/stock-valuation")
+def stock_valuation(depot_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    try:
+        from app.modules.stock.router import get_global_stock
+        return get_global_stock(current_user, db)
+    except Exception as exc:
+        return {"warning": f"Etat de stock valorise indisponible: {exc}"}
+
+
+@router.post("/stock-movements/{movement_id}/generate-entry", status_code=201)
+def generate_stock_accounting_entry(movement_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    movement = db.get(StockMovement, movement_id)
+    if not movement or movement.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Mouvement de stock introuvable")
+    if movement.status != StockMovementStatus.VALIDATED:
+        raise HTTPException(status_code=400, detail="Seuls les mouvements de stock valides peuvent generer une ecriture")
+    accounts = ensure_default_accounting(db, current_user.restaurant_id)
+    amount = money(movement.total_amount or (movement.quantity * (movement.unit_price or 0)))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Le mouvement de stock n'a pas de valeur comptable")
+    journal = journal_by_type(db, current_user.restaurant_id, JournalType.STOCK)
+    if movement.movement_type in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY}:
+        lines = [
+            EntryLineIn(account_id=accounts["stock"].id, label="Entree de stock", debit=amount, credit=0),
+            EntryLineIn(account_id=accounts["suppliers"].id, label="Dette fournisseur stock", debit=0, credit=amount),
+        ]
+    elif movement.movement_type in {StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS}:
+        lines = [
+            EntryLineIn(account_id=accounts["misc_expense"].id, label="Perte ou ajustement de stock", debit=amount, credit=0),
+            EntryLineIn(account_id=accounts["stock"].id, label="Sortie de stock", debit=0, credit=amount),
+        ]
+    else:
+        raise HTTPException(status_code=400, detail="Ce type de mouvement stock ne genere pas d'ecriture automatique")
+    entry = create_accounting_entry(
+        db,
+        current_user.restaurant_id,
+        current_user.id,
+        EntryIn(
+            entry_date=movement.movement_date,
+            journal_id=journal.id,
+            reference=movement.reference or movement.id,
+            description=movement.reason or "Ecriture automatique stock",
+            source_type="stock_movement",
+            source_id=movement.id,
+            lines=lines,
+        ),
+        status=EntryStatus.POSTED,
+    )
+    db.commit()
+    return entry_public(db, entry)
+
+
+@router.post("/period-closes", status_code=201)
+def close_period(payload: ClosePeriodIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    rows = trial_balance_rows(db, current_user.restaurant_id, payload.start_date, payload.end_date)
+    if sum(row["debit"] for row in rows) != sum(row["credit"] for row in rows):
+        raise HTTPException(status_code=400, detail="Balance non equilibree: cloture impossible")
+    close = AccountingPeriodClose(restaurant_id=current_user.restaurant_id, start_date=payload.start_date, end_date=payload.end_date, closed_by=current_user.id, note=payload.note)
+    db.add(close)
+    db.commit()
+    db.refresh(close)
+    return close
+
+
+@router.get("/settings/statement-mappings")
+def list_statement_mappings(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    return db.query(FinancialStatementMapping).filter(FinancialStatementMapping.restaurant_id == current_user.restaurant_id).all()
+
+
+@router.get("/summary")
+def summary(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    statement = get_income_statement(start_date, end_date, current_user, db)
+    cash = get_cash_report(start_date, end_date, current_user, db)
+    bank = get_bank_report(start_date, end_date, current_user, db)
+    return {"start_date": start_date, "end_date": end_date, "revenue": statement["total_products"], "expenses": statement["total_charges"], "net_profit": statement["net_result"], "cash_balance": cash["final_balance"], "bank_balance": bank["final_balance"]}
+
+
+@router.get("/statements")
+def financial_statements(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    return {"income_statement": get_income_statement(start_date, end_date, current_user, db), "cash_flow": get_cash_report(start_date, end_date, current_user, db), "balance_sheet": get_balance_sheet(end_date, current_user, db), "trial_balance": get_trial_balance(start_date, end_date, None, current_user, db)}
+
+
+# Compatibilite: anciennes routes analytiques, maintenant derivees des ecritures ou des commandes.
+@router.get("/dish-margins")
+def dish_margins(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    rows = (
+        db.query(CustomerOrderItem.menu_item_id, CustomerOrderItem.name, func.coalesce(func.sum(CustomerOrderItem.quantity), 0), func.coalesce(func.sum(CustomerOrderItem.line_total), 0))
+        .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.order_id)
+        .filter(CustomerOrder.restaurant_id == current_user.restaurant_id, CustomerOrder.created_at >= start, CustomerOrder.created_at <= end, CustomerOrder.status != "Annulée")
+        .group_by(CustomerOrderItem.menu_item_id, CustomerOrderItem.name)
         .all()
     )
+    return [{"menu_item_id": menu_item_id, "name": name, "quantity_sold": int(quantity or 0), "revenue": float(revenue or 0), "estimated_cost": 0, "estimated_margin": float(revenue or 0), "margin_rate": 100 if revenue else 0} for menu_item_id, name, quantity, revenue in rows]
 
 
-@router.post("/promotions", response_model=PromotionCodePublic, status_code=201)
-def create_promotion(
-    payload: PromotionCodeIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
+@router.get("/stock-rotation")
+def stock_rotation(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    return dish_margins(start_date, end_date, current_user, db)
+
+
+@router.get("/server-revenue")
+def server_revenue(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    return []
+
+
+def calculate_promo_discount(promo: PromotionCode, order_amount: Decimal) -> Decimal:
+    amount = money(order_amount) * money(promo.discount_value) / Decimal("100") if promo.discount_type == "PERCENT" else money(promo.discount_value)
+    if promo.max_discount_amount is not None:
+        amount = min(amount, money(promo.max_discount_amount))
+    return max(Decimal("0.00"), min(money(order_amount), money(amount)))
+
+
+@router.get("/promotions")
+def list_promotions(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.CASHIER_READ)
+    return db.query(PromotionCode).filter(PromotionCode.restaurant_id == current_user.restaurant_id).order_by(PromotionCode.created_at.desc()).all()
+
+
+@router.post("/promotions", status_code=201)
+def create_promotion(payload: PromotionCodeIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.CASHIER_UPDATE)
-    code = normalize_promo_code(payload.code)
-    existing = (
-        db.query(PromotionCode)
-        .filter(PromotionCode.restaurant_id == current_user.restaurant_id, PromotionCode.code == code)
-        .first()
-    )
-    if existing:
-        raise HTTPException(status_code=400, detail="Ce code promo existe déjà")
-    promo = PromotionCode(
-        restaurant_id=current_user.restaurant_id,
-        code=code,
-        label=payload.label,
-        discount_type=payload.discount_type,
-        discount_value=payload.discount_value,
-        min_order_amount=payload.min_order_amount,
-        max_discount_amount=payload.max_discount_amount,
-        max_uses=payload.max_uses,
-        starts_at=payload.starts_at,
-        ends_at=payload.ends_at,
-        is_active=payload.is_active,
-        created_by_id=current_user.id,
-    )
+    promo = PromotionCode(restaurant_id=current_user.restaurant_id, created_by_id=current_user.id, **payload.dict())
     db.add(promo)
-    db.flush()
-    log_action(
-        db, current_user, "promotion.create", "promotion", promo.id,
-        f"Code promo créé: {promo.code}",
-        {"discount_type": promo.discount_type, "discount_value": promo.discount_value},
-    )
     db.commit()
     db.refresh(promo)
     return promo
 
 
-@router.patch("/promotions/{promotion_id}", response_model=PromotionCodePublic)
-def update_promotion(
-    promotion_id: str,
-    payload: PromotionCodeUpdateIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
+@router.patch("/promotions/{promo_id}")
+def update_promotion(promo_id: str, payload: PromotionCodeUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.CASHIER_UPDATE)
-    promo = db.get(PromotionCode, promotion_id)
+    promo = db.get(PromotionCode, promo_id)
     if not promo or promo.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Code promo introuvable")
     for field, value in payload.dict(exclude_unset=True).items():
-        if field == "code" and value:
-            value = normalize_promo_code(value)
-            duplicate = (
-                db.query(PromotionCode)
-                .filter(
-                    PromotionCode.restaurant_id == current_user.restaurant_id,
-                    PromotionCode.code == value,
-                    PromotionCode.id != promo.id,
-                )
-                .first()
-            )
-            if duplicate:
-                raise HTTPException(status_code=400, detail="Ce code promo existe déjà")
         setattr(promo, field, value)
-    log_action(
-        db, current_user, "promotion.update", "promotion", promo.id,
-        f"Code promo modifié: {promo.code}",
-        {"fields": sorted(payload.dict(exclude_unset=True).keys()), "is_active": promo.is_active},
-    )
     db.commit()
     db.refresh(promo)
     return promo
 
 
-@router.delete("/promotions/{promotion_id}", status_code=204)
-def delete_promotion(
-    promotion_id: str,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
+@router.delete("/promotions/{promo_id}", status_code=204)
+def delete_promotion(promo_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.CASHIER_UPDATE)
-    promo = db.get(PromotionCode, promotion_id)
+    promo = db.get(PromotionCode, promo_id)
     if not promo or promo.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Code promo introuvable")
     promo.is_active = False
-    log_action(
-        db, current_user, "promotion.delete", "promotion", promo.id,
-        f"Code promo archivé: {promo.code}",
-        {"code": promo.code},
-    )
     db.commit()
     return None
 
 
-@router.post("/promotions/quote", response_model=PromoQuoteOut)
-def quote_promotion(
-    payload: PromoQuoteIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
+@router.post("/promotions/quote")
+def quote_promotion(payload: PromoQuoteIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.CASHIER_READ)
-    promo = (
-        db.query(PromotionCode)
-        .filter(PromotionCode.restaurant_id == current_user.restaurant_id, PromotionCode.code == normalize_promo_code(payload.code))
-        .first()
-    )
+    promo = db.query(PromotionCode).filter(PromotionCode.restaurant_id == current_user.restaurant_id, PromotionCode.code == payload.code.strip().upper(), PromotionCode.is_active.is_(True)).first()
     if not promo:
         raise HTTPException(status_code=404, detail="Code promo introuvable")
-    assert_promo_usable(promo, payload.order_amount)
     discount = calculate_promo_discount(promo, payload.order_amount)
-    return PromoQuoteOut(
-        code=promo.code,
-        label=promo.label,
-        discount_amount=discount,
-        final_amount=max(0, payload.order_amount - discount),
-    )
+    return {"code": promo.code, "label": promo.label, "discount_amount": discount, "final_amount": money(payload.order_amount) - discount}
 
 
-@router.get("/payments", response_model=list[PaymentPublic])
-def list_payments(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_READ)
-    start, end = report_range(start_date, end_date)
-    orders = (
-        db.query(CustomerOrder)
-        .filter(*order_filters(current_user.restaurant_id, start, end))
-        .order_by(CustomerOrder.created_at.desc())
-        .all()
-    )
-    return [
-        PaymentPublic(
-            id=order.id,
-            order_number=order.order_number,
-            customer_name=order.customer_name,
-            payment_method=order.payment_method,
-            payment_status=getattr(order, "payment_status", "En attente"),
-            transaction_id=getattr(order, "transaction_id", None),
-            amount=order.total_amount,
-            status=order.status,
-            created_at=order.created_at,
+@router.post("/migrate-legacy")
+def migrate_legacy_finance(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    migrated = 0
+    ensure_default_accounting(db, current_user.restaurant_id)
+    inspector = inspect(db.bind)
+    if "restaurant_expenses" not in inspector.get_table_names():
+        return {"migrated": 0, "message": "Aucune ancienne table restaurant_expenses detectee"}
+    existing = db.query(Expense.id).filter(Expense.restaurant_id == current_user.restaurant_id).first()
+    if existing:
+        return {"migrated": 0, "message": "Migration deja effectuee ou nouvelles depenses presentes"}
+    rows = db.execute(text("SELECT id, label, category, amount, payment_method, reference, note, expense_date, created_by_id FROM restaurant_expenses WHERE restaurant_id = :rid AND is_active = TRUE"), {"rid": current_user.restaurant_id}).mappings().all()
+    categories = {category.name.lower(): category for category in db.query(ExpenseCategory).filter(ExpenseCategory.restaurant_id == current_user.restaurant_id).all()}
+    for row in rows:
+        category = categories.get(str(row["category"] or "Autres charges").lower())
+        expense = Expense(
+            id=row["id"],
+            restaurant_id=current_user.restaurant_id,
+            expense_date=row["expense_date"] or datetime.utcnow(),
+            category_id=category.id if category else None,
+            amount=money(row["amount"]),
+            tax_amount=Decimal("0.00"),
+            total_amount=money(row["amount"]),
+            payment_status=PaymentStatus.PAID,
+            description=row["label"],
+            reference=row["reference"],
+            status=OperationStatus.DRAFT,
+            created_by=row["created_by_id"] or current_user.id,
         )
-        for order in orders
-    ]
-
-
-@router.get("/summary", response_model=FinanceSummaryOut)
-def finance_summary(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_READ)
-    start, end = report_range(start_date, end_date)
-    return read_summary(db, current_user.restaurant_id, start, end)
-
-
-@router.get("/dish-margins", response_model=list[DishMarginOut])
-def dish_margins(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_READ)
-    start, end = report_range(start_date, end_date)
-    rows = (
-        db.query(
-            CustomerOrderItem.menu_item_id,
-            CustomerOrderItem.name,
-            func.coalesce(func.sum(CustomerOrderItem.quantity), 0),
-            func.coalesce(func.sum(CustomerOrderItem.line_total), 0),
-        )
-        .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.order_id)
-        .filter(*order_filters(current_user.restaurant_id, start, end))
-        .group_by(CustomerOrderItem.menu_item_id, CustomerOrderItem.name)
-        .all()
-    )
-    manual_costs = {
-        item.id: float(item.cost_per_dish or 0)
-        for item in db.query(MenuItem.id, MenuItem.cost_per_dish)
-        .filter(MenuItem.restaurant_id == current_user.restaurant_id, MenuItem.cost_per_dish > 0)
-        .all()
-    }
-    recipe_links = db.query(StockRecipeIngredient).filter(StockRecipeIngredient.restaurant_id == current_user.restaurant_id).all()
-    stock_items = {item.id: item for item in db.query(StockItem).filter(StockItem.restaurant_id == current_user.restaurant_id).all()}
-    cost_by_dish: dict[str, float] = {}
-    for link in recipe_links:
-        item = stock_items.get(link.stock_item_id)
-        if not item:
-            continue
-        cost_by_dish[link.menu_item_id] = cost_by_dish.get(link.menu_item_id, 0) + link.quantity_per_dish * (item.cmup_current or item.purchase_price)
-    output = []
-    for menu_item_id, name, quantity, revenue in rows:
-        unit_cost = manual_costs.get(menu_item_id or "", cost_by_dish.get(menu_item_id or "", 0))
-        estimated_cost = unit_cost * int(quantity or 0)
-        margin = float(revenue or 0) - estimated_cost
-        output.append(
-            DishMarginOut(
-                menu_item_id=menu_item_id,
-                name=name,
-                quantity_sold=int(quantity or 0),
-                revenue=float(revenue or 0),
-                estimated_cost=estimated_cost,
-                estimated_margin=margin,
-                margin_rate=(margin / float(revenue or 1)) * 100 if revenue else 0,
-            )
-        )
-    return sorted(output, key=lambda item: item.estimated_margin, reverse=True)
-
-
-@router.get("/server-revenue", response_model=list[ServerRevenueOut])
-def server_revenue(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_READ)
-    start, end = report_range(start_date, end_date)
-    orders = (
-        db.query(CustomerOrder)
-        .filter(*order_filters(current_user.restaurant_id, start, end))
-        .all()
-    )
-    users = {
-        user.id: user
-        for user in db.query(User)
-        .filter(User.restaurant_id == current_user.restaurant_id)
-        .all()
-    }
-    grouped: dict[str | None, dict] = {}
-    for order in orders:
-        bucket = grouped.setdefault(
-            order.server_id,
-            {
-                "orders_count": 0,
-                "paid_orders_count": 0,
-                "revenue": 0.0,
-                "discounts": 0.0,
-                "first_order_at": None,
-                "last_order_at": None,
-            },
-        )
-        bucket["orders_count"] += 1
-        if order.status in {"Payée", "Payee"}:
-            bucket["paid_orders_count"] += 1
-            bucket["revenue"] += float(order.total_amount or 0)
-        bucket["discounts"] += float(order.discount_amount or 0)
-        bucket["first_order_at"] = min(filter(None, [bucket["first_order_at"], order.created_at]), default=order.created_at)
-        bucket["last_order_at"] = max(filter(None, [bucket["last_order_at"], order.created_at]), default=order.created_at)
-    output = []
-    for server_id, data in grouped.items():
-        user = users.get(server_id or "")
-        output.append(
-            ServerRevenueOut(
-                server_id=server_id,
-                server_name=f"{user.first_name} {user.last_name}".strip() if user else "Non assigné",
-                orders_count=data["orders_count"],
-                paid_orders_count=data["paid_orders_count"],
-                revenue=data["revenue"],
-                discounts=data["discounts"],
-                average_ticket=(data["revenue"] / data["paid_orders_count"]) if data["paid_orders_count"] else 0,
-                first_order_at=data["first_order_at"],
-                last_order_at=data["last_order_at"],
-            )
-        )
-    return sorted(output, key=lambda row: row.revenue, reverse=True)
-
-
-@router.get("/stock-rotation", response_model=list[StockRotationOut])
-def stock_rotation(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.STOCK_READ)
-    start, end = report_range(start_date, end_date)
-    rows = (
-        db.query(
-            CustomerOrderItem.menu_item_id,
-            CustomerOrderItem.name,
-            func.coalesce(func.sum(CustomerOrderItem.quantity), 0),
-            func.coalesce(func.sum(CustomerOrderItem.line_total), 0),
-            func.max(CustomerOrder.created_at),
-        )
-        .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.order_id)
-        .filter(*order_filters(current_user.restaurant_id, start, end))
-        .group_by(CustomerOrderItem.menu_item_id, CustomerOrderItem.name)
-        .order_by(func.coalesce(func.sum(CustomerOrderItem.quantity), 0).desc())
-        .all()
-    )
-    return [
-        StockRotationOut(
-            menu_item_id=menu_item_id,
-            name=name,
-            quantity_sold=int(quantity or 0),
-            revenue=float(revenue or 0),
-            last_order_at=last_order_at,
-        )
-        for menu_item_id, name, quantity, revenue, last_order_at in rows
-    ]
-
-
-@router.get("/statements", response_model=FinancialStatementOut)
-def financial_statements(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.ACCOUNTING_READ)
-    start, end = report_range(start_date, end_date)
-    report = read_summary(db, current_user.restaurant_id, start, end)
-    payments = list_payments(start, end, current_user, db)
-    expenses = list_expenses(start, end, current_user, db)
-    discounts = (
-        db.query(func.coalesce(func.sum(CustomerOrder.discount_amount), 0))
-        .filter(*order_filters(current_user.restaurant_id, start, end))
-        .scalar()
-        or 0
-    )
-    by_payment_method: dict[str, float] = {}
-    for payment in payments:
-        if payment.status not in {"Payée", "Payee"}:
-            continue
-        by_payment_method[payment.payment_method] = by_payment_method.get(payment.payment_method, 0) + payment.amount
-    cash_in = sum(by_payment_method.values())
-    cash_out = sum(expense.amount for expense in expenses)
-    ledger = [
-        LedgerEntryOut(
-            date=payment.created_at,
-            account="Ventes",
-            label=f"Commande {payment.order_number}",
-            debit=0,
-            credit=payment.amount,
-            reference=payment.id,
-        )
-        for payment in payments
-        if payment.status in {"Payée", "Payee"}
-    ]
-    ledger.extend(
-        LedgerEntryOut(
-            date=expense.expense_date,
-            account=expense.category,
-            label=expense.label,
-            debit=expense.amount,
-            credit=0,
-            reference=expense.reference,
-        )
-        for expense in expenses
-    )
-    ledger.sort(key=lambda entry: entry.date, reverse=True)
-    return FinancialStatementOut(
-        report=report,
-        income_statement=IncomeStatementOut(
-            revenue=report.revenue + float(discounts or 0),
-            discounts=float(discounts or 0),
-            net_revenue=report.revenue,
-            expenses=report.expenses,
-            damage_loss=report.damage_loss,
-            gross_profit=report.gross_profit,
-            net_profit=report.net_profit,
-        ),
-        cash_flow=CashFlowStatementOut(
-            cash_in=cash_in,
-            cash_out=cash_out,
-            net_cash_flow=cash_in - cash_out,
-            by_payment_method=by_payment_method,
-        ),
-        balance_sheet=BalanceSheetOut(
-            assets={"stock": report.stock_value, "cash_period": cash_in},
-            liabilities={"expenses_period": cash_out},
-            equity={"estimated_result": report.net_profit},
-        ),
-        ledger=ledger,
-        margins=dish_margins(start, end, current_user, db),
-        rotation=stock_rotation(start, end, current_user, db),
-        expenses=expenses,
-        payments=payments,
-    )
+        db.add(expense)
+        migrated += 1
+    db.commit()
+    return {"migrated": migrated, "message": "Anciennes depenses migrees en brouillon. Validez-les pour generer les ecritures."}

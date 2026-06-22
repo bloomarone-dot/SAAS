@@ -34,6 +34,30 @@ class RestaurantSubscription(Base):
     restaurant = relationship("Restaurant")
 
 
+class InstanceRequest(Base):
+    """Demande publique de création d'une instance restaurant (depuis la landing SaaS)."""
+
+    __tablename__ = "instance_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_name: Mapped[str] = mapped_column(String(191), nullable=False)
+    owner_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    owner_email: Mapped[str | None] = mapped_column(String(191), nullable=True)
+    owner_phone: Mapped[str] = mapped_column(String(40), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    business_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    employees_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # pending | approved | rejected
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True, nullable=False)
+    created_restaurant_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("restaurants.id"), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class PlatformSetting(Base):
     """Parametre global persiste de la plateforme SaaS."""
 

@@ -20,8 +20,9 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import InstanceRequestForm from "@/features/instances/InstanceRequestForm";
 
-export default function LandingPage() {
+export default function LandingPage({ apiBaseUrl }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState("");
   const [notifyDone, setNotifyDone] = useState(false);
@@ -37,7 +38,11 @@ export default function LandingPage() {
   }
 
   function goToRegister() {
-    window.history.pushState({}, "", "/admin");
+    scrollTo("request-instance");
+  }
+
+  function goToSuperadmin() {
+    window.history.pushState({}, "", "/superadmin/login");
     window.dispatchEvent(new PopStateEvent("popstate"));
   }
 
@@ -364,6 +369,20 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── DEMANDE D'INSTANCE ── */}
+      <section id="request-instance" className="bg-slate-50 px-5 py-20 md:px-8">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-xs font-black uppercase tracking-widest text-emerald-600">DEMANDER UNE INSTANCE</p>
+          <h2 className="mt-3 text-3xl font-black text-slate-900 md:text-4xl">Créez l'espace de votre restaurant</h2>
+          <p className="mt-3 text-sm font-medium leading-7 text-slate-500">
+            Remplissez ce formulaire : notre équipe examine votre demande et active votre instance dédiée.
+          </p>
+        </div>
+        <div className="mt-10">
+          <InstanceRequestForm apiBaseUrl={apiBaseUrl} />
+        </div>
+      </section>
+
       {/* ── CTA BANNER ── */}
       <section className="bg-gradient-to-r from-emerald-600 to-emerald-800 px-5 py-20 md:px-8">
         <div className="mx-auto max-w-3xl text-center text-white">
@@ -421,6 +440,7 @@ export default function LandingPage() {
                 <button onClick={() => scrollTo("testimonials")} className="text-left hover:text-emerald-400 transition">Témoignages</button>
                 <button onClick={goToLogin} className="text-left hover:text-emerald-400 transition">Se Connecter</button>
                 <button onClick={goToRegister} className="text-left hover:text-emerald-400 transition">Créer un compte</button>
+                <button onClick={goToSuperadmin} className="text-left text-slate-500 hover:text-emerald-400 transition">Administration</button>
               </div>
             </div>
           </div>

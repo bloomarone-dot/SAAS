@@ -308,9 +308,6 @@ export function CaisseDashboard({ overrides = {} }) {
             className="min-w-0 flex-1 bg-transparent font-semibold outline-none placeholder:text-slate-400"
           />
         </label>
-        <button type="button" onClick={loadCashierReport} disabled={isLoading} className="h-11 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-700 disabled:opacity-60">
-          Actualiser
-        </button>
       </div>}
 
       {showKpis && <KpiGrid kpis={kpis} />}

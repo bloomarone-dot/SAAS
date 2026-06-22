@@ -8,11 +8,7 @@ export function AdminPage({ eyebrow, title, subtitle, action, children }) {
     <section className="space-y-4">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
-          {eyebrow && (
-            <p className="text-sm font-black text-[var(--dashboard-primary)]">{eyebrow}</p>
-          )}
           <h1 className="mt-1 text-2xl font-bold tracking-normal text-slate-800">{title}</h1>
-          {subtitle && <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">{subtitle}</p>}
         </div>
         {action}
       </div>

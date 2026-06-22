@@ -316,11 +316,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
     <section className="space-y-6">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
-          <p className="text-xs font-black uppercase tracking-normal text-[var(--dashboard-primary)]">Administration restaurant</p>
           <h1 className="mt-2 text-4xl font-black text-[var(--dashboard-secondary)]">Utilisateurs & permissions</h1>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-            Gérez les comptes du personnel, appliquez les rôles métier et contrôlez les accès par module.
-          </p>
         </div>
         <div className="flex flex-wrap gap-3">
           {!showCreateOnMount && (
@@ -333,14 +329,6 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
               {showCreateForm ? "Fermer le formulaire" : "Ajouter un utilisateur"}
             </button>
           )}
-          <button
-            type="button"
-            onClick={loadAccessData}
-            className="lte-btn lte-btn-default"
-          >
-            <DashboardIcon name="Activity" size={17} />
-            Actualiser
-          </button>
         </div>
       </div>
 

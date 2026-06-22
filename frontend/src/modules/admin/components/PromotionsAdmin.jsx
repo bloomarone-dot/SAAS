@@ -125,8 +125,6 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
     <AdminPage
       eyebrow="Caisse"
       title="Codes promo"
-      subtitle="Créez les remises autorisées qui pourront être appliquées au moment de l'encaissement."
-      action={<SecondaryAction icon="Activity" onClick={loadPromotions}>Actualiser</SecondaryAction>}
     >
       <AdminKpis items={[
         { label: "Codes actifs", value: promotions.filter((promo) => promo.is_active).length, icon: "BadgePercent" },

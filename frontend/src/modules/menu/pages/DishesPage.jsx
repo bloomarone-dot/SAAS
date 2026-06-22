@@ -267,7 +267,6 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
               <option value="AVAILABLE">Disponibles</option>
               <option value="UNAVAILABLE">Indisponibles</option>
             </select>
-            <SecondaryAction icon="Activity" onClick={loadMenu}>Actualiser</SecondaryAction>
           </div>
           <DishesTable
             dishes={visibleDishes}

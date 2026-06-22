@@ -12,13 +12,7 @@ export function AdminSurface({ eyebrow, title, description, actionLabel, onActio
     <section className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="mb-2 text-xs font-black uppercase tracking-normal text-[#f04438]">
-            {eyebrow}
-          </p>
           <h1 className="text-4xl font-black text-[#07133d]">{title}</h1>
-          <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#64708b]">
-            {description}
-          </p>
         </div>
         {actions ?? (actionLabel ? (
           <button type="button" onClick={onAction} className="h-11 bg-[#07133d] px-5 text-sm font-black text-white transition-all hover:bg-[#172554]">

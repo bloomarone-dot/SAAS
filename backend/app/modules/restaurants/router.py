@@ -138,6 +138,25 @@ def provision_restaurant(
     return RestaurantProvisionOut(restaurant=restaurant, owner=owner)
 
 
+@router.get("/public/{slug}")
+def get_public_restaurant(slug: str, db: Session = Depends(get_db)):
+    """PUBLIC : infos d'affichage d'un restaurant pour sa landing / page de connexion."""
+    restaurant = db.query(Restaurant).filter(Restaurant.slug == slug).one_or_none()
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+    return {
+        "name": restaurant.name,
+        "slug": restaurant.slug,
+        "logo_url": restaurant.logo_url,
+        "primary_color": restaurant.primary_color,
+        "secondary_color": restaurant.secondary_color,
+        "city": restaurant.city,
+        "address": restaurant.address,
+        "description": restaurant.description,
+        "is_active": restaurant.is_active,
+    }
+
+
 @router.get("/me", response_model=RestaurantPublic)
 def get_my_restaurant(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     """Retourne le restaurant du tenant courant."""

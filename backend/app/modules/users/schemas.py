@@ -23,6 +23,7 @@ class UserPublic(OrmModel):
     phone: Optional[str] = None
     role: Role
     restaurant_id: Optional[str] = None
+    restaurant_slug: Optional[str] = None
     branch_id: Optional[str] = None
     is_owner: bool
     is_active: bool

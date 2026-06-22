@@ -229,7 +229,6 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
               {statuses.map((item) => <option key={item}>{item}</option>)}
             </select>
             <input type="date" className="form-control" />
-            <SecondaryAction icon="Activity" onClick={loadOrders}>Actualiser</SecondaryAction>
           </div>
           <OrdersTable
             orders={visibleOrders}

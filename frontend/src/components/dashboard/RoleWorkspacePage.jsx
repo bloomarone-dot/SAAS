@@ -217,11 +217,11 @@ function PageHero({ role, title, subtitle, action }) {
   return (
     <div className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center">
       <div>
-        <p className="text-xs font-black uppercase tracking-normal text-[var(--dashboard-primary)]">{roleCopy[role]}</p>
         <h1 className="mt-2 text-2xl font-black text-[var(--dashboard-secondary)] md:text-3xl">{title}</h1>
-        <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-500">{subtitle}</p>
       </div>
-      <PrimaryAction icon={action?.includes("Exporter") ? "Download" : "Plus"}>{action}</PrimaryAction>
+      {action && action !== "Actualiser" && (
+        <PrimaryAction icon={action?.includes("Exporter") ? "Download" : "Plus"}>{action}</PrimaryAction>
+      )}
     </div>
   );
 }

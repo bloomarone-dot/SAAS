@@ -62,6 +62,11 @@ class User(Base):
             key=lambda permission: permission.value,
         )
 
+    @property
+    def restaurant_slug(self) -> str | None:
+        """Slug du restaurant rattaché (utilisé pour les URLs /r/:slug/*)."""
+        return self.restaurant.slug if self.restaurant else None
+
 
 class UserPermission(Base):
     """Permission explicite accordee a un utilisateur du restaurant."""

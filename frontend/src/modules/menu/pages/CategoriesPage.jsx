@@ -148,7 +148,6 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
         <AdminCard>
           <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une catégorie..." />
-            <SecondaryAction icon="Activity" onClick={loadCategories}>Actualiser</SecondaryAction>
           </div>
           <CategoriesTable categories={visibleCategories} dishesByCategory={dishesByCategory} onDelete={deleteCategory} role={role} />
         </AdminCard>

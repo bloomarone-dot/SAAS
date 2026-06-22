@@ -179,20 +179,8 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
     <section className="space-y-6">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
-          <p className="text-xs font-black uppercase tracking-normal text-[#f04438]">Administration restaurant</p>
           <h1 className="mt-2 text-4xl font-black text-[#070528]">Paramètres restaurant</h1>
-          <p className="mt-2 max-w-3xl text-sm font-medium text-slate-500">
-            Renseignez l’identité, la localisation, les contacts, le logo, la devise et les couleurs du restaurant.
-          </p>
         </div>
-        <button
-          type="button"
-          onClick={loadSettings}
-          className="lte-btn lte-btn-default"
-        >
-          <DashboardIcon name="Activity" size={17} />
-          Actualiser
-        </button>
       </div>
 
       {!canUpdate && (

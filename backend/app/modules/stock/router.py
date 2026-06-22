@@ -1,190 +1,442 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
 from app.modules.audit.service import log_action
-from app.modules.notifications.service import notify
-from app.modules.permissions.models import Permission
 from app.modules.catalog.models import MenuItem
+from app.modules.notifications.service import notify
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
+from app.modules.permissions.models import Permission
 from app.modules.stock.models import (
-    StockCostCenter,
-    StockCostCenterType,
-    StockDamage,
-    StockInventory,
-    StockInventoryLine,
-    StockInventoryStatus,
-    StockItem,
+    Depot,
+    DepotType,
+    Inventory,
+    InventoryDetail,
+    InventoryStatus,
+    Product,
+    StockCategory,
     StockItemPackaging,
-    StockLot,
     StockLocation,
+    StockLossReason,
     StockMovement,
+    StockMovementStatus,
     StockMovementType,
     StockProductType,
     StockProductionSheet,
     StockRecipeIngredient,
+    Supplier,
+    Unit,
 )
 from app.modules.stock.schemas import (
+    CategoryIn,
+    CategoryPublic,
+    DepotIn,
+    DepotPublic,
+    DepotStockRow,
+    DepotUpdateIn,
     InventoryCreateIn,
-    InventoryLinePublic,
+    InventoryDetailPublic,
     InventoryLineUpdateIn,
     InventoryPublic,
     PackagingLinkIn,
     PackagingLinkPublic,
+    ProductIn,
+    ProductPublic,
+    ProductStockByDepot,
+    ProductUpdateIn,
     ProductionSheetIn,
     ProductionSheetPublic,
     RecipeIngredientIn,
     RecipeIngredientPublic,
-    StockDamageIn,
-    StockDamagePublic,
-    StockItemIn,
-    StockItemPublic,
-    StockItemUpdateIn,
-    StockCostCenterPublic,
-    StockLotPublic,
+    StockEntryIn,
+    StockMenuItemOut,
     StockMovementIn,
     StockMovementPublic,
+    StockOutputIn,
     StockReportOut,
-    StockMenuItemOut,
     StockSummaryOut,
+    StockTransferIn,
+    SupplierIn,
+    SupplierPublic,
+    UnitIn,
+    UnitPublic,
 )
 from app.modules.users.models import User
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
-DEFAULT_COST_CENTERS = {
-    StockLocation.MAGASIN: ("GRAND_MAGASIN", "Grand Magasin / Stock Principal", StockCostCenterType.MAGASIN),
-    StockLocation.CUISINE: ("MAGASIN_CUISINE", "Magasin Cuisine", StockCostCenterType.CUISINE),
-    StockLocation.BOISSON: ("MAGASIN_BOISSON", "Magasin Boisson / Bar", StockCostCenterType.BOISSON),
+DEFAULT_DEPOTS = [
+    ("MAIN", "Magasin principal", DepotType.PRINCIPAL, "Depot principal de reception des achats"),
+    ("DRINK", "Stock boisson", DepotType.BOISSON, "Depot dedie aux boissons"),
+    ("KITCHEN", "Stock cuisine", DepotType.CUISINE, "Depot dedie a la cuisine"),
+]
+DEFAULT_UNITS = [
+    ("piece", "piece"),
+    ("kg", "kg"),
+    ("litre", "L"),
+    ("bouteille", "btle"),
+    ("carton", "ctn"),
+]
+LOCATION_DEPOT_CODE = {
+    StockLocation.MAGASIN: "MAIN",
+    StockLocation.CUISINE: "KITCHEN",
+    StockLocation.BOISSON: "DRINK",
 }
+IN_TYPES = {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS}
+OUT_TYPES = {StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS}
 
 
-def get_item_or_404(
-    db: Session,
-    item_id: str,
-    restaurant_id: str | None,
-    *,
-    for_update: bool = False,
-) -> StockItem:
-    """Charge un produit stock scope tenant.
-
-    `for_update=True` pose un verrou de ligne (SELECT ... FOR UPDATE) pour les
-    chemins de consommation concurrents, evitant la survente (TOCTOU) lorsque
-    plusieurs commandes touchent simultanement le meme article.
-    """
-    if for_update:
-        item = (
-            db.query(StockItem)
-            .filter(StockItem.id == item_id)
-            .with_for_update()
-            .one_or_none()
-        )
-    else:
-        item = db.get(StockItem, item_id)
-    if not item or item.restaurant_id != restaurant_id:
-        raise HTTPException(status_code=404, detail="Produit stock introuvable")
-    return item
-
-
-def total_item_quantity(item: StockItem) -> float:
-    return float(item.quantity or 0) + float(item.kitchen_quantity or 0) + float(item.drink_quantity or 0)
-
-
-def ensure_default_cost_centers(db: Session, restaurant_id: str | None) -> dict[StockLocation, StockCostCenter]:
+def ensure_default_data(db: Session, restaurant_id: str | None) -> None:
     if not restaurant_id:
-        return {}
-    existing = {
-        center.code: center
-        for center in db.query(StockCostCenter).filter(StockCostCenter.restaurant_id == restaurant_id).all()
-    }
-    centers: dict[StockLocation, StockCostCenter] = {}
-    for location, (code, name, center_type) in DEFAULT_COST_CENTERS.items():
-        center = existing.get(code)
-        if not center:
-            center = StockCostCenter(
-                restaurant_id=restaurant_id,
-                code=code,
-                name=name,
-                center_type=center_type,
-                is_active=True,
-            )
-            db.add(center)
-            db.flush()
-        centers[location] = center
-    return centers
-
-
-def center_for_location(db: Session, restaurant_id: str | None, location: StockLocation) -> StockCostCenter:
-    centers = ensure_default_cost_centers(db, restaurant_id)
-    return centers[location]
-
-
-def calculate_cmup(item: StockItem, incoming_quantity: float, incoming_unit_price: float) -> float:
-    current_quantity = total_item_quantity(item)
-    current_cmup = float(item.cmup_current or item.purchase_price or 0)
-    current_value = current_quantity * current_cmup
-    incoming_value = float(incoming_quantity or 0) * float(incoming_unit_price or 0)
-    total_quantity = current_quantity + float(incoming_quantity or 0)
-    if total_quantity <= 0:
-        return float(incoming_unit_price or current_cmup or 0)
-    return (current_value + incoming_value) / total_quantity
-
-
-def create_lot(
-    db: Session,
-    item: StockItem,
-    location: StockLocation,
-    quantity: float,
-    unit_price: float,
-    cmup: float,
-    expiration_date: datetime | None,
-) -> StockLot:
-    center = center_for_location(db, item.restaurant_id, location)
-    lot = StockLot(
-        restaurant_id=item.restaurant_id,
-        item_id=item.id,
-        cost_center_id=center.id,
-        entry_date=datetime.utcnow(),
-        expiration_date=expiration_date,
-        initial_quantity=quantity,
-        available_quantity=quantity,
-        purchase_unit_price=unit_price,
-        cmup_applied=cmup,
-        stock_value=quantity * cmup,
-    )
-    db.add(lot)
+        return
+    existing_depots = {depot.code: depot for depot in db.query(Depot).filter(Depot.restaurant_id == restaurant_id).all()}
+    for code, name, depot_type, description in DEFAULT_DEPOTS:
+        if code not in existing_depots:
+            db.add(Depot(restaurant_id=restaurant_id, code=code, name=name, type=depot_type, description=description))
+    existing_units = {unit.name.lower(): unit for unit in db.query(Unit).filter(Unit.restaurant_id == restaurant_id).all()}
+    for name, symbol in DEFAULT_UNITS:
+        if name.lower() not in existing_units:
+            db.add(Unit(restaurant_id=restaurant_id, name=name, symbol=symbol))
     db.flush()
-    return lot
+    migrate_legacy_stock_items(db, restaurant_id)
 
 
-def ensure_seed_lot(db: Session, item: StockItem, location: StockLocation) -> None:
-    quantity = get_location_quantity(item, location)
-    if quantity <= 0:
+def migrate_legacy_stock_items(db: Session, restaurant_id: str) -> None:
+    """Convertit les anciennes colonnes quantite en mouvements initiaux.
+
+    L'ancien modele stockait les quantites dans `stock_items.quantity`,
+    `kitchen_quantity` et `drink_quantity`. Si la table existe encore, on copie
+    les produits avec le meme id pour preserver les liaisons recettes/commandes,
+    puis on cree des mouvements ENTRY valides dans le depot correspondant.
+    """
+    inspector = inspect(db.bind)
+    if "stock_items" not in inspector.get_table_names():
         return
-    center = center_for_location(db, item.restaurant_id, location)
-    existing = (
-        db.query(StockLot.id)
-        .filter(
-            StockLot.restaurant_id == item.restaurant_id,
-            StockLot.item_id == item.id,
-            StockLot.cost_center_id == center.id,
-            StockLot.available_quantity > 0,
+    if db.query(Product.id).filter(Product.restaurant_id == restaurant_id).first():
+        return
+    columns = {column["name"] for column in inspector.get_columns("stock_items")}
+    required = {"id", "restaurant_id", "name", "unit", "quantity", "kitchen_quantity", "drink_quantity"}
+    if not required.issubset(columns):
+        return
+    rows = db.execute(
+        text(
+            """
+            SELECT id, name, product_type, unit, quantity, kitchen_quantity, drink_quantity,
+                   alert_threshold, purchase_price, packaging_sale_price, sale_margin_rate,
+                   is_active, created_at
+            FROM stock_items
+            WHERE restaurant_id = :restaurant_id
+            """
+        ),
+        {"restaurant_id": restaurant_id},
+    ).mappings().all()
+    if not rows:
+        return
+    depots = depots_by_code(db, restaurant_id)
+    user_id = default_user_id(db, restaurant_id)
+    for row in rows:
+        unit = resolve_unit(db, restaurant_id, row.get("unit") or "piece")
+        product = Product(
+            id=row["id"],
+            restaurant_id=restaurant_id,
+            code=None,
+            name=row["name"],
+            product_type=safe_product_type(row.get("product_type")),
+            unit_id=unit.id,
+            purchase_price=float(row.get("purchase_price") or 0),
+            minimum_stock=float(row.get("alert_threshold") or 0),
+            packaging_sale_price=float(row.get("packaging_sale_price") or 0),
+            sale_margin_rate=float(row.get("sale_margin_rate") or 0),
+            is_active=bool(row.get("is_active", True)),
+            created_at=row.get("created_at") or datetime.utcnow(),
         )
-        .first()
+        db.add(product)
+        for quantity, depot_code in [
+            (row.get("quantity"), "MAIN"),
+            (row.get("kitchen_quantity"), "KITCHEN"),
+            (row.get("drink_quantity"), "DRINK"),
+        ]:
+            if float(quantity or 0) > 0:
+                add_movement(
+                    db,
+                    restaurant_id=restaurant_id,
+                    user_id=user_id,
+                    movement_type=StockMovementType.ENTRY,
+                    product_id=product.id,
+                    quantity=float(quantity or 0),
+                    destination_depot_id=depots[depot_code].id,
+                    unit_price=product.purchase_price,
+                    reason="Migration ancien stock: depot estime depuis les anciennes colonnes",
+                    reference="legacy-stock-migration",
+                    movement_date=datetime.utcnow(),
+                )
+
+
+def safe_product_type(value: str | None) -> StockProductType:
+    try:
+        return StockProductType(value or StockProductType.INGREDIENT.value)
+    except ValueError:
+        return StockProductType.INGREDIENT
+
+
+def default_user_id(db: Session, restaurant_id: str) -> str:
+    user_id = db.query(User.id).filter(User.restaurant_id == restaurant_id).order_by(User.created_at.asc()).scalar()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Aucun utilisateur restaurant disponible pour journaliser le mouvement")
+    return user_id
+
+
+def depots_by_code(db: Session, restaurant_id: str) -> dict[str, Depot]:
+    return {depot.code: depot for depot in db.query(Depot).filter(Depot.restaurant_id == restaurant_id).all()}
+
+
+def depot_for_location(db: Session, restaurant_id: str, location: StockLocation) -> Depot:
+    depots = depots_by_code(db, restaurant_id)
+    return depots[LOCATION_DEPOT_CODE[location]]
+
+
+def resolve_unit(db: Session, restaurant_id: str, value: str | None) -> Unit:
+    if value:
+        unit = db.get(Unit, value)
+        if unit and unit.restaurant_id == restaurant_id:
+            return unit
+        unit = (
+            db.query(Unit)
+            .filter(Unit.restaurant_id == restaurant_id)
+            .filter(Unit.name.ilike(value.strip()))
+            .first()
+        )
+        if unit:
+            return unit
+    unit = db.query(Unit).filter(Unit.restaurant_id == restaurant_id).order_by(Unit.created_at.asc()).first()
+    if not unit:
+        unit = Unit(restaurant_id=restaurant_id, name="piece", symbol="piece")
+        db.add(unit)
+        db.flush()
+    return unit
+
+
+def get_product_or_404(db: Session, product_id: str, restaurant_id: str | None, *, for_update: bool = False) -> Product:
+    query = db.query(Product).filter(Product.id == product_id)
+    if for_update:
+        query = query.with_for_update()
+    product = query.one_or_none()
+    if not product or product.restaurant_id != restaurant_id:
+        raise HTTPException(status_code=404, detail="Produit stock introuvable")
+    return product
+
+
+def normalize_type(value: StockMovementType) -> StockMovementType:
+    if value == StockMovementType.IN:
+        return StockMovementType.ENTRY
+    if value == StockMovementType.OUT:
+        return StockMovementType.OUTPUT
+    if value == StockMovementType.ADJUSTMENT:
+        return StockMovementType.INVENTORY_PLUS
+    return value
+
+
+def signed_quantity(movement: StockMovement, depot_id: str | None = None) -> float:
+    if movement.status != StockMovementStatus.VALIDATED:
+        return 0
+    movement_type = normalize_type(movement.movement_type)
+    if movement_type in IN_TYPES:
+        return movement.quantity if depot_id is None or movement.destination_depot_id == depot_id else 0
+    if movement_type in OUT_TYPES:
+        return -movement.quantity if depot_id is None or movement.source_depot_id == depot_id else 0
+    if movement_type == StockMovementType.TRANSFER:
+        if depot_id is None:
+            return 0
+        if movement.destination_depot_id == depot_id:
+            return movement.quantity
+        if movement.source_depot_id == depot_id:
+            return -movement.quantity
+    return 0
+
+
+def get_current_stock(db: Session, product_id: str, depot_id: str | None = None, restaurant_id: str | None = None) -> float:
+    query = db.query(StockMovement).filter(
+        StockMovement.product_id == product_id,
+        StockMovement.status == StockMovementStatus.VALIDATED,
     )
-    if existing:
+    if restaurant_id:
+        query = query.filter(StockMovement.restaurant_id == restaurant_id)
+    if depot_id:
+        query = query.filter(
+            (StockMovement.source_depot_id == depot_id) | (StockMovement.destination_depot_id == depot_id)
+        )
+    return float(sum(signed_quantity(movement, depot_id) for movement in query.all()))
+
+
+def get_product_stock_by_depot(db: Session, product: Product) -> list[ProductStockByDepot]:
+    rows = []
+    for depot in db.query(Depot).filter(Depot.restaurant_id == product.restaurant_id, Depot.is_active.is_(True)).all():
+        quantity = get_current_stock(db, product.id, depot.id, product.restaurant_id)
+        rows.append(
+            ProductStockByDepot(
+                depot_id=depot.id,
+                depot_name=depot.name,
+                depot_code=depot.code,
+                quantity=quantity,
+                value=quantity * float(product.purchase_price or 0),
+            )
+        )
+    return rows
+
+
+def product_public(db: Session, product: Product) -> dict:
+    unit = db.get(Unit, product.unit_id)
+    stock_by_depot = get_product_stock_by_depot(db, product)
+    current_stock = sum(row.quantity for row in stock_by_depot)
+    return {
+        "id": product.id,
+        "restaurant_id": product.restaurant_id,
+        "code": product.code,
+        "name": product.name,
+        "product_type": product.product_type,
+        "category_id": product.category_id,
+        "unit_id": product.unit_id,
+        "unit_name": unit.name if unit else None,
+        "unit_symbol": unit.symbol if unit else None,
+        "purchase_price": product.purchase_price,
+        "minimum_stock": product.minimum_stock,
+        "packaging_sale_price": product.packaging_sale_price,
+        "sale_margin_rate": product.sale_margin_rate,
+        "is_active": product.is_active,
+        "current_stock": current_stock,
+        "stock_value": current_stock * float(product.purchase_price or 0),
+        "stock_by_depot": stock_by_depot,
+        "created_at": product.created_at,
+    }
+
+
+def validate_movement_payload(
+    db: Session,
+    *,
+    restaurant_id: str,
+    movement_type: StockMovementType,
+    product_id: str,
+    quantity: float,
+    source_depot_id: str | None,
+    destination_depot_id: str | None,
+) -> None:
+    movement_type = normalize_type(movement_type)
+    if quantity <= 0:
+        raise HTTPException(status_code=400, detail="La quantite doit etre superieure a zero")
+    if movement_type in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS}:
+        if not destination_depot_id or source_depot_id:
+            raise HTTPException(status_code=400, detail="Ce mouvement exige un depot destination et aucun depot source")
+    if movement_type in {StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS}:
+        if not source_depot_id or destination_depot_id:
+            raise HTTPException(status_code=400, detail="Ce mouvement exige un depot source et aucun depot destination")
+    if movement_type == StockMovementType.TRANSFER:
+        if not source_depot_id or not destination_depot_id:
+            raise HTTPException(status_code=400, detail="Un transfert exige un depot source et un depot destination")
+        if source_depot_id == destination_depot_id:
+            raise HTTPException(status_code=400, detail="Le depot source et le depot destination doivent etre differents")
+    for depot_id in [source_depot_id, destination_depot_id]:
+        if depot_id:
+            depot = db.get(Depot, depot_id)
+            if not depot or depot.restaurant_id != restaurant_id or not depot.is_active:
+                raise HTTPException(status_code=404, detail="Depot introuvable ou inactif")
+    if movement_type in {StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS, StockMovementType.TRANSFER}:
+        available = get_current_stock(db, product_id, source_depot_id, restaurant_id)
+        if available < quantity:
+            raise HTTPException(status_code=400, detail=f"Stock insuffisant: disponible {available:g}, demande {quantity:g}")
+
+
+def add_movement(
+    db: Session,
+    *,
+    restaurant_id: str,
+    user_id: str,
+    movement_type: StockMovementType,
+    product_id: str,
+    quantity: float,
+    source_depot_id: str | None = None,
+    destination_depot_id: str | None = None,
+    unit_price: float | None = None,
+    supplier_id: str | None = None,
+    reason: str | None = None,
+    reference: str | None = None,
+    movement_date: datetime | None = None,
+    status: StockMovementStatus = StockMovementStatus.VALIDATED,
+) -> StockMovement:
+    product = get_product_or_404(db, product_id, restaurant_id, for_update=True)
+    movement_type = normalize_type(movement_type)
+    if status == StockMovementStatus.VALIDATED:
+        validate_movement_payload(
+            db,
+            restaurant_id=restaurant_id,
+            movement_type=movement_type,
+            product_id=product.id,
+            quantity=quantity,
+            source_depot_id=source_depot_id,
+            destination_depot_id=destination_depot_id,
+        )
+    price = float(unit_price if unit_price is not None else product.purchase_price or 0)
+    movement = StockMovement(
+        restaurant_id=restaurant_id,
+        movement_date=movement_date or datetime.utcnow(),
+        movement_type=movement_type,
+        product_id=product.id,
+        source_depot_id=source_depot_id,
+        destination_depot_id=destination_depot_id,
+        quantity=float(quantity),
+        unit_price=price,
+        total_amount=float(quantity) * price,
+        supplier_id=supplier_id,
+        reason=reason,
+        reference=reference,
+        status=status,
+        created_by=user_id,
+        validated_by=user_id if status == StockMovementStatus.VALIDATED else None,
+        validated_at=datetime.utcnow() if status == StockMovementStatus.VALIDATED else None,
+    )
+    db.add(movement)
+    db.flush()
+    if movement_type in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY} and unit_price is not None:
+        product.purchase_price = float(unit_price)
+    return movement
+
+
+def notify_if_low_stock(db: Session, product: Product, previous_total: float) -> None:
+    threshold = float(product.minimum_stock or 0)
+    if threshold <= 0:
         return
-    cmup = float(item.cmup_current or item.purchase_price or 0)
-    create_lot(db, item, location, quantity, float(item.purchase_price or cmup), cmup, None)
+    new_total = get_current_stock(db, product.id, restaurant_id=product.restaurant_id)
+    if not (new_total <= threshold < previous_total):
+        return
+    message = f"{product.name} est sous le seuil minimum ({new_total:g} restant, seuil {threshold:g})."
+    for target_role in ("STOCK", "ADMIN"):
+        notify(db, title="Stock bas", message=message, restaurant_id=product.restaurant_id, role=target_role, category="stock", link="low-stock")
+
+
+def get_item_or_404(db: Session, item_id: str, restaurant_id: str | None, *, for_update: bool = False) -> Product:
+    product = get_product_or_404(db, item_id, restaurant_id, for_update=for_update)
+    product._stock_by_location = {
+        location: get_current_stock(db, product.id, depot_for_location(db, product.restaurant_id, location).id, product.restaurant_id)
+        for location in StockLocation
+    }
+    return product
+
+
+def get_location_quantity(item: Product, location: StockLocation) -> float:
+    return float(getattr(item, "_stock_by_location", {}).get(location, 0))
+
+
+def set_location_quantity(_item: Product, _location: StockLocation, _value: float) -> None:
+    # Ancien helper conserve pour compatibilite. Le nouveau stock est derive des mouvements.
+    return None
 
 
 def consume_fifo(
     db: Session,
-    item: StockItem,
+    item: Product,
     location: StockLocation,
     quantity: float,
     movement_type: StockMovementType,
@@ -192,468 +444,585 @@ def consume_fifo(
     destination: str | None = None,
     note: str | None = None,
     reference: str | None = None,
-) -> tuple[float, list[StockMovement], str | None]:
-    source_quantity = get_location_quantity(item, location)
-    if source_quantity < quantity:
-        raise HTTPException(status_code=400, detail="Stock insuffisant")
-    ensure_seed_lot(db, item, location)
-    center = center_for_location(db, item.restaurant_id, location)
-    lots = (
-        db.query(StockLot)
-        .filter(
-            StockLot.restaurant_id == item.restaurant_id,
-            StockLot.item_id == item.id,
-            StockLot.cost_center_id == center.id,
-            StockLot.available_quantity > 0,
-        )
-        .order_by(StockLot.entry_date.asc(), StockLot.created_at.asc())
-        .all()
+):
+    source = depot_for_location(db, item.restaurant_id, location)
+    movement = add_movement(
+        db,
+        restaurant_id=item.restaurant_id,
+        user_id=created_by_id or default_user_id(db, item.restaurant_id),
+        movement_type=StockMovementType.LOSS if movement_type == StockMovementType.LOSS else StockMovementType.OUTPUT,
+        product_id=item.id,
+        source_depot_id=source.id,
+        quantity=float(quantity),
+        unit_price=float(item.purchase_price or 0),
+        reason=note or destination,
+        reference=reference,
     )
-    remaining = float(quantity)
-    total_value = 0.0
-    movements: list[StockMovement] = []
-    first_lot_id: str | None = None
-    for lot in lots:
-        if remaining <= 0:
-            break
-        consumed = min(remaining, float(lot.available_quantity or 0))
-        if consumed <= 0:
-            continue
-        lot.available_quantity -= consumed
-        lot.stock_value = max(0, lot.available_quantity * float(lot.cmup_applied or 0))
-        value = consumed * float(lot.cmup_applied or item.cmup_current or item.purchase_price or 0)
-        total_value += value
-        first_lot_id = first_lot_id or lot.id
-        movement = StockMovement(
-            restaurant_id=item.restaurant_id,
-            item_id=item.id,
-            cost_center_id=center.id,
-            lot_id=lot.id,
-            movement_type=movement_type,
-            source_location=location,
-            destination_location=None,
-            quantity=consumed,
-            unit_price=float(lot.cmup_applied or 0),
-            value=value,
-            destination=destination,
-            note=note,
-            reference=reference,
-            created_by_id=created_by_id,
-        )
-        db.add(movement)
-        movements.append(movement)
-        remaining -= consumed
-    if remaining > 0.000001:
-        raise HTTPException(status_code=400, detail="Lots FIFO insuffisants pour cette sortie")
-    set_location_quantity(item, location, source_quantity - quantity)
-    return total_value, movements, first_lot_id
-
-
-def move_fifo_between_locations(
-    db: Session,
-    item: StockItem,
-    source: StockLocation,
-    destination: StockLocation,
-    quantity: float,
-    created_by_id: str | None,
-    note: str | None = None,
-) -> tuple[float, list[StockMovement]]:
-    source_quantity = get_location_quantity(item, source)
-    if source_quantity < quantity:
-        raise HTTPException(status_code=400, detail="Stock insuffisant")
-    ensure_seed_lot(db, item, source)
-    source_center = center_for_location(db, item.restaurant_id, source)
-    destination_center = center_for_location(db, item.restaurant_id, destination)
-    lots = (
-        db.query(StockLot)
-        .filter(
-            StockLot.restaurant_id == item.restaurant_id,
-            StockLot.item_id == item.id,
-            StockLot.cost_center_id == source_center.id,
-            StockLot.available_quantity > 0,
-        )
-        .order_by(StockLot.entry_date.asc(), StockLot.created_at.asc())
-        .all()
-    )
-    remaining = float(quantity)
-    total_value = 0.0
-    movements: list[StockMovement] = []
-    for lot in lots:
-        if remaining <= 0:
-            break
-        moved = min(remaining, float(lot.available_quantity or 0))
-        if moved <= 0:
-            continue
-        lot.available_quantity -= moved
-        lot.stock_value = max(0, lot.available_quantity * float(lot.cmup_applied or 0))
-        moved_value = moved * float(lot.cmup_applied or item.cmup_current or item.purchase_price or 0)
-        total_value += moved_value
-        destination_lot = StockLot(
-            restaurant_id=item.restaurant_id,
-            item_id=item.id,
-            cost_center_id=destination_center.id,
-            entry_date=lot.entry_date,
-            expiration_date=lot.expiration_date,
-            initial_quantity=moved,
-            available_quantity=moved,
-            purchase_unit_price=lot.purchase_unit_price,
-            cmup_applied=lot.cmup_applied,
-            stock_value=moved_value,
-        )
-        db.add(destination_lot)
-        db.flush()
-        movement = StockMovement(
-            restaurant_id=item.restaurant_id,
-            item_id=item.id,
-            cost_center_id=source_center.id,
-            lot_id=lot.id,
-            movement_type=StockMovementType.TRANSFER,
-            source_location=source,
-            destination_location=destination,
-            quantity=moved,
-            unit_price=float(lot.cmup_applied or 0),
-            value=moved_value,
-            destination=f"{DEFAULT_COST_CENTERS[destination][1]}",
-            note=note,
-            reference=destination_lot.id,
-            created_by_id=created_by_id,
-        )
-        db.add(movement)
-        movements.append(movement)
-        remaining -= moved
-    if remaining > 0.000001:
-        raise HTTPException(status_code=400, detail="Lots FIFO insuffisants pour ce transfert")
-    set_location_quantity(item, source, source_quantity - quantity)
-    set_location_quantity(item, destination, get_location_quantity(item, destination) + quantity)
-    return total_value, movements
-
-
-def get_location_quantity(item: StockItem, location: StockLocation) -> float:
-    if location == StockLocation.CUISINE:
-        return item.kitchen_quantity
-    if location == StockLocation.BOISSON:
-        return item.drink_quantity
-    return item.quantity
-
-
-def set_location_quantity(item: StockItem, location: StockLocation, value: float) -> None:
-    if location == StockLocation.CUISINE:
-        item.kitchen_quantity = value
-    elif location == StockLocation.BOISSON:
-        item.drink_quantity = value
-    else:
-        item.quantity = value
-
-
-def infer_transfer_destination(item: StockItem) -> StockLocation:
-    if item.product_type.value == "BOISSON":
-        return StockLocation.BOISSON
-    return StockLocation.CUISINE
-
-
-def normalize_movement_locations(
-    item: StockItem,
-    movement_type: StockMovementType,
-    source_location: StockLocation | None,
-    destination_location: StockLocation | None,
-) -> tuple[StockLocation | None, StockLocation | None]:
-    if movement_type == StockMovementType.IN:
-        return None, StockLocation.MAGASIN
-    if movement_type == StockMovementType.TRANSFER:
-        return StockLocation.MAGASIN, destination_location or infer_transfer_destination(item)
-    if movement_type == StockMovementType.OUT:
-        return source_location or infer_transfer_destination(item), None
-    if movement_type == StockMovementType.ADJUSTMENT:
-        return source_location or StockLocation.MAGASIN, None
-    return source_location, destination_location
-
-
-def apply_movement(
-    item: StockItem,
-    movement_type: StockMovementType,
-    quantity: float,
-    source_location: StockLocation | None,
-    destination_location: StockLocation | None,
-) -> None:
-    if movement_type == StockMovementType.IN:
-        current = get_location_quantity(item, StockLocation.MAGASIN)
-        set_location_quantity(item, StockLocation.MAGASIN, current + quantity)
-    elif movement_type == StockMovementType.TRANSFER:
-        source = source_location or StockLocation.MAGASIN
-        destination = destination_location or infer_transfer_destination(item)
-        source_quantity = get_location_quantity(item, source)
-        if source_quantity < quantity:
-            raise HTTPException(status_code=400, detail="Stock insuffisant")
-        set_location_quantity(item, source, source_quantity - quantity)
-        set_location_quantity(item, destination, get_location_quantity(item, destination) + quantity)
-    elif movement_type == StockMovementType.OUT:
-        source = source_location or infer_transfer_destination(item)
-        source_quantity = get_location_quantity(item, source)
-        if source_quantity < quantity:
-            raise HTTPException(status_code=400, detail="Stock insuffisant")
-        set_location_quantity(item, source, source_quantity - quantity)
-    elif movement_type == StockMovementType.ADJUSTMENT:
-        location = source_location or StockLocation.MAGASIN
-        set_location_quantity(item, location, quantity)
+    return float(movement.total_amount or 0), [movement], movement.id
 
 
 @router.get("/summary", response_model=StockSummaryOut)
 def stock_summary(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_READ)
-    total_quantity = StockItem.quantity + StockItem.kitchen_quantity + StockItem.drink_quantity
-    unit_cost = func.coalesce(StockItem.cmup_current, StockItem.purchase_price, 0)
-    item_totals = (
-        db.query(
-            func.count(StockItem.id),
-            func.coalesce(func.sum(total_quantity * unit_cost), 0),
-            func.coalesce(func.sum(StockItem.quantity * unit_cost), 0),
-            func.coalesce(func.sum(StockItem.kitchen_quantity * unit_cost), 0),
-            func.coalesce(func.sum(StockItem.drink_quantity * unit_cost), 0),
-        )
-        .filter(StockItem.restaurant_id == current_user.restaurant_id)
-        .one()
-    )
-    low_stock_count = (
-        db.query(func.count(StockItem.id))
-        .filter(StockItem.restaurant_id == current_user.restaurant_id)
-        .filter(total_quantity <= StockItem.alert_threshold)
-        .scalar()
-        or 0
-    )
-    total_entries_value = (
-        db.query(func.coalesce(func.sum(StockMovement.quantity * StockMovement.unit_price), 0))
-        .filter(StockMovement.restaurant_id == current_user.restaurant_id)
-        .filter(StockMovement.movement_type == StockMovementType.IN)
-        .scalar()
-        or 0
-    )
-    total_outputs_value = (
-        db.query(func.coalesce(func.sum(StockMovement.quantity * StockMovement.unit_price), 0))
-        .filter(StockMovement.restaurant_id == current_user.restaurant_id)
-        .filter(StockMovement.movement_type.in_([StockMovementType.OUT, StockMovementType.TRANSFER]))
-        .scalar()
-        or 0
-    )
-    damage_loss = (
-        db.query(func.coalesce(func.sum(StockDamage.estimated_loss), 0))
-        .filter(StockDamage.restaurant_id == current_user.restaurant_id)
-        .scalar()
-    )
-    loss_by_reason = {
-        reason: float(value or 0)
-        for reason, value in (
-            db.query(StockDamage.reason, func.coalesce(func.sum(StockDamage.estimated_loss), 0))
-            .filter(StockDamage.restaurant_id == current_user.restaurant_id)
-            .group_by(StockDamage.reason)
-            .all()
-        )
-    }
-    center_rows = (
-        db.query(StockCostCenter.name, func.coalesce(func.sum(StockLot.available_quantity * StockLot.cmup_applied), 0))
-        .join(StockLot, StockLot.cost_center_id == StockCostCenter.id)
-        .filter(StockCostCenter.restaurant_id == current_user.restaurant_id)
-        .group_by(StockCostCenter.name)
+    ensure_default_data(db, current_user.restaurant_id)
+    db.commit()
+    products = db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id).all()
+    depots = depots_by_code(db, current_user.restaurant_id)
+    public_products = [product_public(db, product) for product in products]
+    stock_value = sum(row["stock_value"] for row in public_products)
+    main_value = sum(next((s.value for s in row["stock_by_depot"] if s.depot_code == "MAIN"), 0) for row in public_products)
+    kitchen_value = sum(next((s.value for s in row["stock_by_depot"] if s.depot_code == "KITCHEN"), 0) for row in public_products)
+    drink_value = sum(next((s.value for s in row["stock_by_depot"] if s.depot_code == "DRINK"), 0) for row in public_products)
+    movements = db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id).order_by(StockMovement.created_at.desc()).all()
+    entries = [m for m in movements if normalize_type(m.movement_type) in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY}]
+    outputs = [m for m in movements if normalize_type(m.movement_type) in {StockMovementType.OUTPUT, StockMovementType.LOSS}]
+    transfers = [m for m in movements if normalize_type(m.movement_type) == StockMovementType.TRANSFER]
+    gaps = (
+        db.query(InventoryDetail)
+        .filter(InventoryDetail.restaurant_id == current_user.restaurant_id, InventoryDetail.gap_quantity != 0)
+        .order_by(InventoryDetail.created_at.desc())
+        .limit(5)
         .all()
     )
-    stock_value_by_center = {name: float(value or 0) for name, value in center_rows}
-    expiring_lots_count = (
-        db.query(func.count(StockLot.id))
-        .filter(
-            StockLot.restaurant_id == current_user.restaurant_id,
-            StockLot.available_quantity > 0,
-            StockLot.expiration_date.isnot(None),
-            StockLot.expiration_date <= datetime.utcnow() + timedelta(days=14),
-        )
-        .scalar()
-        or 0
-    )
-    consumed_value = (
-        db.query(func.coalesce(func.sum(StockMovement.value), 0))
-        .filter(
-            StockMovement.restaurant_id == current_user.restaurant_id,
-            StockMovement.movement_type == StockMovementType.OUT,
-        )
-        .scalar()
-        or 0
-    )
-    revenue = (
-        db.query(func.coalesce(func.sum(CustomerOrder.total_amount), 0))
-        .filter(CustomerOrder.restaurant_id == current_user.restaurant_id)
-        .filter(CustomerOrder.status.in_(["Payée", "Payee", "Livrée", "Livree"]))
-        .scalar()
-        or 0
-    )
-    manual_food_cost = (
-        db.query(func.coalesce(func.sum(CustomerOrderItem.quantity * MenuItem.cost_per_dish), 0))
-        .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.order_id)
-        .join(MenuItem, MenuItem.id == CustomerOrderItem.menu_item_id)
-        .filter(CustomerOrder.restaurant_id == current_user.restaurant_id)
-        .filter(CustomerOrder.status.in_(["Payée", "Payee", "Livrée", "Livree"]))
-        .filter(CustomerOrderItem.sale_channel != "EMBALLAGE")
-        .scalar()
-        or 0
-    )
-    packaging_consumed_value = (
-        db.query(func.coalesce(func.sum(StockMovement.value), 0))
-        .join(StockItem, StockItem.id == StockMovement.item_id)
-        .filter(
-            StockMovement.restaurant_id == current_user.restaurant_id,
-            StockMovement.movement_type == StockMovementType.OUT,
-            StockItem.product_type == StockProductType.EMBALLAGE,
-        )
-        .scalar()
-        or 0
-    )
+    loss_by_reason: dict[str, float] = {}
+    for movement in outputs:
+        if normalize_type(movement.movement_type) == StockMovementType.LOSS:
+            key = movement.reason or "perte"
+            loss_by_reason[key] = loss_by_reason.get(key, 0) + float(movement.total_amount or 0)
     return StockSummaryOut(
-        product_count=int(item_totals[0] or 0),
-        low_stock_count=int(low_stock_count),
-        stock_value=float(item_totals[1] or 0),
-        main_stock_value=float(item_totals[2] or 0),
-        kitchen_stock_value=float(item_totals[3] or 0),
-        drink_stock_value=float(item_totals[4] or 0),
-        total_entries_value=float(total_entries_value),
-        total_outputs_value=float(total_outputs_value),
-        total_damage_loss=float(damage_loss or 0),
-        food_cost_percent=float((float(manual_food_cost or consumed_value or 0) / float(revenue or 1)) * 100) if revenue else 0,
-        packaging_consumed_value=float(packaging_consumed_value or 0),
-        expiring_lots_count=int(expiring_lots_count),
+        product_count=len(products),
+        low_stock_count=len([p for p in public_products if p["current_stock"] <= p["minimum_stock"]]),
+        out_of_stock_count=len([p for p in public_products if p["current_stock"] <= 0]),
+        stock_value=stock_value,
+        main_stock_value=main_value,
+        kitchen_stock_value=kitchen_value,
+        drink_stock_value=drink_value,
+        total_entries_value=sum(float(m.total_amount or 0) for m in entries),
+        total_outputs_value=sum(float(m.total_amount or 0) for m in outputs),
+        total_damage_loss=sum(float(m.total_amount or 0) for m in outputs if normalize_type(m.movement_type) == StockMovementType.LOSS),
+        latest_entries=entries[:5],
+        latest_outputs=outputs[:5],
+        latest_transfers=transfers[:5],
+        latest_inventory_gaps=gaps,
         loss_by_reason=loss_by_reason,
-        stock_value_by_center=stock_value_by_center,
+        stock_value_by_center={depot.name: sum(s.value for row in public_products for s in row["stock_by_depot"] if s.depot_id == depot.id) for depot in depots.values()},
+    )
+
+
+@router.get("/products", response_model=list[ProductPublic])
+@router.get("/items", response_model=list[ProductPublic])
+def list_products(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    ensure_default_data(db, current_user.restaurant_id)
+    db.commit()
+    products = db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id).order_by(Product.created_at.desc()).all()
+    return [product_public(db, product) for product in products]
+
+
+@router.post("/products", response_model=ProductPublic, status_code=201)
+@router.post("/items", response_model=ProductPublic, status_code=201)
+def create_product(payload: ProductIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    ensure_default_data(db, current_user.restaurant_id)
+    unit = resolve_unit(db, current_user.restaurant_id, payload.unit_id or payload.unit)
+    product = Product(
+        restaurant_id=current_user.restaurant_id,
+        code=payload.code,
+        name=payload.name,
+        product_type=payload.product_type,
+        category_id=payload.category_id,
+        unit_id=unit.id,
+        purchase_price=payload.purchase_price,
+        minimum_stock=payload.minimum_stock,
+        packaging_sale_price=payload.packaging_sale_price,
+        sale_margin_rate=payload.sale_margin_rate,
+        is_active=payload.is_active,
+    )
+    db.add(product)
+    db.flush()
+    log_action(db, current_user, "stock.product_create", "product", product.id, f"Creation produit stock {product.name}")
+    db.commit()
+    db.refresh(product)
+    return product_public(db, product)
+
+
+@router.get("/products/{product_id}", response_model=ProductPublic)
+def product_detail(product_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    return product_public(db, get_product_or_404(db, product_id, current_user.restaurant_id))
+
+
+@router.patch("/products/{product_id}", response_model=ProductPublic)
+@router.patch("/items/{product_id}", response_model=ProductPublic)
+def update_product(product_id: str, payload: ProductUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    product = get_product_or_404(db, product_id, current_user.restaurant_id)
+    data = payload.dict(exclude_unset=True)
+    if "alert_threshold" in data and data["alert_threshold"] is not None:
+        data["minimum_stock"] = data.pop("alert_threshold")
+    if "unit" in data:
+        unit_value = data.pop("unit")
+        if unit_value:
+            data["unit_id"] = resolve_unit(db, current_user.restaurant_id, unit_value).id
+    if data.get("unit_id"):
+        data["unit_id"] = resolve_unit(db, current_user.restaurant_id, data["unit_id"]).id
+    for field, value in data.items():
+        setattr(product, field, value)
+    log_action(db, current_user, "stock.product_update", "product", product.id, f"Modification produit stock {product.name}")
+    db.commit()
+    db.refresh(product)
+    return product_public(db, product)
+
+
+@router.delete("/products/{product_id}", status_code=200)
+def deactivate_product(product_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    product = get_product_or_404(db, product_id, current_user.restaurant_id)
+    product.is_active = False
+    db.commit()
+    return {"message": "Produit desactive"}
+
+
+@router.get("/depots", response_model=list[DepotPublic])
+@router.get("/cost-centers", response_model=list[DepotPublic])
+def list_depots(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    ensure_default_data(db, current_user.restaurant_id)
+    db.commit()
+    return db.query(Depot).filter(Depot.restaurant_id == current_user.restaurant_id).order_by(Depot.created_at.asc()).all()
+
+
+@router.post("/depots", response_model=DepotPublic, status_code=201)
+def create_depot(payload: DepotIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    depot = Depot(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(depot)
+    db.commit()
+    db.refresh(depot)
+    return depot
+
+
+@router.patch("/depots/{depot_id}", response_model=DepotPublic)
+def update_depot(depot_id: str, payload: DepotUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    depot = db.get(Depot, depot_id)
+    if not depot or depot.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Depot introuvable")
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(depot, field, value)
+    db.commit()
+    db.refresh(depot)
+    return depot
+
+
+@router.delete("/depots/{depot_id}", status_code=200)
+def deactivate_depot(depot_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    depot = db.get(Depot, depot_id)
+    if not depot or depot.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Depot introuvable")
+    depot.is_active = False
+    db.commit()
+    return {"message": "Depot desactive"}
+
+
+@router.get("/units", response_model=list[UnitPublic])
+def list_units(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    ensure_default_data(db, current_user.restaurant_id)
+    db.commit()
+    return db.query(Unit).filter(Unit.restaurant_id == current_user.restaurant_id).order_by(Unit.name.asc()).all()
+
+
+@router.post("/units", response_model=UnitPublic, status_code=201)
+def create_unit(payload: UnitIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    unit = Unit(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(unit)
+    db.commit()
+    db.refresh(unit)
+    return unit
+
+
+@router.get("/categories", response_model=list[CategoryPublic])
+def list_categories(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    return db.query(StockCategory).filter(StockCategory.restaurant_id == current_user.restaurant_id).order_by(StockCategory.name.asc()).all()
+
+
+@router.post("/categories", response_model=CategoryPublic, status_code=201)
+def create_category(payload: CategoryIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    category = StockCategory(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+@router.get("/suppliers", response_model=list[SupplierPublic])
+def list_suppliers(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    return db.query(Supplier).filter(Supplier.restaurant_id == current_user.restaurant_id).order_by(Supplier.name.asc()).all()
+
+
+@router.post("/suppliers", response_model=SupplierPublic, status_code=201)
+def create_supplier(payload: SupplierIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    supplier = Supplier(restaurant_id=current_user.restaurant_id, **payload.dict())
+    db.add(supplier)
+    db.commit()
+    db.refresh(supplier)
+    return supplier
+
+
+def create_stock_entry(payload: StockEntryIn, current_user: User, db: Session, movement_type: StockMovementType) -> StockMovement:
+    previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
+    movement = add_movement(
+        db,
+        restaurant_id=current_user.restaurant_id,
+        user_id=current_user.id,
+        movement_type=movement_type,
+        product_id=payload.product_id,
+        destination_depot_id=payload.destination_depot_id,
+        quantity=payload.quantity,
+        unit_price=payload.unit_price,
+        supplier_id=payload.supplier_id,
+        reason=payload.reason,
+        reference=payload.reference,
+        movement_date=payload.movement_date,
+    )
+    notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+@router.post("/entries", response_model=StockMovementPublic, status_code=201)
+def create_entry(payload: StockEntryIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    return create_stock_entry(payload, current_user, db, StockMovementType.ENTRY)
+
+
+@router.post("/direct-entries", response_model=StockMovementPublic, status_code=201)
+def create_direct_entry(payload: StockEntryIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    return create_stock_entry(payload, current_user, db, StockMovementType.DIRECT_ENTRY)
+
+
+@router.post("/transfers", response_model=StockMovementPublic, status_code=201)
+def create_transfer(payload: StockTransferIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.TRANSFER, **payload.dict())
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+@router.post("/outputs", response_model=StockMovementPublic, status_code=201)
+def create_output(payload: StockOutputIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
+    movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.OUTPUT, unit_price=None, **payload.dict())
+    notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+@router.post("/losses", response_model=StockMovementPublic, status_code=201)
+@router.post("/damages", response_model=StockMovementPublic, status_code=201)
+def create_loss(payload: StockOutputIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
+    movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.LOSS, **payload.dict())
+    notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+@router.post("/movements", response_model=StockMovementPublic, status_code=201)
+def create_movement(payload: StockMovementIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    if not payload.product_id:
+        raise HTTPException(status_code=400, detail="Produit obligatoire")
+    source_depot_id = payload.source_depot_id
+    destination_depot_id = payload.destination_depot_id
+    if payload.source_location and not source_depot_id:
+        source_depot_id = depot_for_location(db, current_user.restaurant_id, payload.source_location).id
+    if payload.destination_location and not destination_depot_id:
+        destination_depot_id = depot_for_location(db, current_user.restaurant_id, payload.destination_location).id
+    if payload.movement_type == StockMovementType.IN and not destination_depot_id:
+        destination_depot_id = depot_for_location(db, current_user.restaurant_id, StockLocation.MAGASIN).id
+    if payload.movement_type == StockMovementType.OUT and not source_depot_id:
+        source_depot_id = depot_for_location(db, current_user.restaurant_id, StockLocation.MAGASIN).id
+    movement = add_movement(
+        db,
+        restaurant_id=current_user.restaurant_id,
+        user_id=current_user.id,
+        movement_type=payload.movement_type,
+        product_id=payload.product_id,
+        quantity=payload.quantity,
+        source_depot_id=source_depot_id,
+        destination_depot_id=destination_depot_id,
+        unit_price=payload.unit_price,
+        supplier_id=payload.supplier_id,
+        reason=payload.reason,
+        reference=payload.reference,
+        movement_date=payload.movement_date,
+        status=payload.status,
+    )
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+@router.get("/movements", response_model=list[StockMovementPublic])
+def list_movements(
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    depot_id: str | None = Query(default=None),
+    product_id: str | None = Query(default=None),
+    movement_type: StockMovementType | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_permission(current_user, Permission.STOCK_READ)
+    query = db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id)
+    if start_date:
+        query = query.filter(StockMovement.movement_date >= start_date)
+    if end_date:
+        query = query.filter(StockMovement.movement_date <= end_date)
+    if depot_id:
+        query = query.filter((StockMovement.source_depot_id == depot_id) | (StockMovement.destination_depot_id == depot_id))
+    if product_id:
+        query = query.filter(StockMovement.product_id == product_id)
+    if movement_type:
+        query = query.filter(StockMovement.movement_type == movement_type)
+    return query.order_by(StockMovement.movement_date.desc(), StockMovement.created_at.desc()).limit(500).all()
+
+
+@router.get("/entries", response_model=list[StockMovementPublic])
+def list_entries(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    return db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id, StockMovement.movement_type.in_([StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY])).order_by(StockMovement.created_at.desc()).all()
+
+
+@router.get("/transfers", response_model=list[StockMovementPublic])
+def list_transfers(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    return db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id, StockMovement.movement_type == StockMovementType.TRANSFER).order_by(StockMovement.created_at.desc()).all()
+
+
+@router.get("/outputs", response_model=list[StockMovementPublic])
+@router.get("/damages", response_model=list[StockMovementPublic])
+def list_outputs(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    return db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id, StockMovement.movement_type.in_([StockMovementType.OUTPUT, StockMovementType.LOSS])).order_by(StockMovement.created_at.desc()).all()
+
+
+@router.patch("/movements/{movement_id}/cancel", response_model=StockMovementPublic)
+def cancel_stock_movement(movement_id: str, reason: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    movement = db.get(StockMovement, movement_id)
+    if not movement or movement.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Mouvement introuvable")
+    if movement.status != StockMovementStatus.VALIDATED:
+        raise HTTPException(status_code=400, detail="Seul un mouvement valide peut etre annule")
+    movement.status = StockMovementStatus.CANCELLED
+    movement.reason = f"{movement.reason or ''}\nAnnulation controlee: {reason or 'sans motif'}".strip()
+    movement.validated_by = current_user.id
+    movement.validated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+@router.get("/global-stock", response_model=list[ProductPublic])
+def get_global_stock(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    return list_products(current_user, db)
+
+
+@router.get("/depots/{depot_id}/stock", response_model=list[DepotStockRow])
+def get_depot_stock(depot_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    depot = db.get(Depot, depot_id)
+    if not depot or depot.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Depot introuvable")
+    products = db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()
+    rows = []
+    for product in products:
+        unit = db.get(Unit, product.unit_id)
+        quantity = get_current_stock(db, product.id, depot.id, current_user.restaurant_id)
+        rows.append(DepotStockRow(product_id=product.id, product_name=product.name, unit=unit.symbol if unit else "", quantity=quantity, value=quantity * product.purchase_price, minimum_stock=product.minimum_stock))
+    return rows
+
+
+@router.get("/low-stock", response_model=list[ProductPublic])
+def get_low_stock_products(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    products = [product_public(db, p) for p in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()]
+    return [product for product in products if product["current_stock"] <= product["minimum_stock"]]
+
+
+@router.post("/inventories", response_model=InventoryPublic, status_code=201)
+def create_inventory(payload: InventoryCreateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    ensure_default_data(db, current_user.restaurant_id)
+    depot_id = payload.depot_id or depot_for_location(db, current_user.restaurant_id, StockLocation.MAGASIN).id
+    depot = db.get(Depot, depot_id)
+    if not depot or depot.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Depot introuvable")
+    inventory = Inventory(
+        restaurant_id=current_user.restaurant_id,
+        inventory_date=payload.inventory_date or datetime.utcnow(),
+        depot_id=depot.id,
+        observation=payload.observation or payload.period,
+        created_by=current_user.id,
+    )
+    db.add(inventory)
+    db.flush()
+    details = payload.details
+    if not details:
+        details = [
+            type("Detail", (), {"product_id": product.id, "real_quantity": get_current_stock(db, product.id, depot.id, current_user.restaurant_id)})
+            for product in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()
+        ]
+    for detail in details:
+        theoretical = get_current_stock(db, detail.product_id, depot.id, current_user.restaurant_id)
+        real = float(detail.real_quantity)
+        db.add(InventoryDetail(restaurant_id=current_user.restaurant_id, inventory_id=inventory.id, product_id=detail.product_id, theoretical_quantity=theoretical, real_quantity=real, gap_quantity=real - theoretical))
+    db.commit()
+    db.refresh(inventory)
+    return inventory_public(db, inventory)
+
+
+def inventory_public(db: Session, inventory: Inventory) -> dict:
+    details = db.query(InventoryDetail).filter(InventoryDetail.inventory_id == inventory.id).all()
+    return {
+        "id": inventory.id,
+        "restaurant_id": inventory.restaurant_id,
+        "inventory_date": inventory.inventory_date,
+        "depot_id": inventory.depot_id,
+        "status": inventory.status,
+        "observation": inventory.observation,
+        "created_by": inventory.created_by,
+        "validated_by": inventory.validated_by,
+        "validated_at": inventory.validated_at,
+        "created_at": inventory.created_at,
+        "details": details,
+        "lines": details,
+    }
+
+
+@router.get("/inventories", response_model=list[InventoryPublic])
+def list_inventories(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    inventories = db.query(Inventory).filter(Inventory.restaurant_id == current_user.restaurant_id).order_by(Inventory.inventory_date.desc()).all()
+    return [inventory_public(db, inventory) for inventory in inventories]
+
+
+@router.patch("/inventories/{inventory_id}/lines/{line_id}", response_model=InventoryDetailPublic)
+def update_inventory_line(inventory_id: str, line_id: str, payload: InventoryLineUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    inventory = db.get(Inventory, inventory_id)
+    if not inventory or inventory.restaurant_id != current_user.restaurant_id or inventory.status != InventoryStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Inventaire introuvable ou non modifiable")
+    line = db.get(InventoryDetail, line_id)
+    if not line or line.inventory_id != inventory.id:
+        raise HTTPException(status_code=404, detail="Ligne inventaire introuvable")
+    line.real_quantity = payload.real_stock
+    line.gap_quantity = payload.real_stock - float(line.theoretical_quantity or 0)
+    db.commit()
+    db.refresh(line)
+    return line
+
+
+@router.patch("/inventories/{inventory_id}/validate", response_model=InventoryPublic)
+@router.patch("/inventories/{inventory_id}/close", response_model=InventoryPublic)
+def validate_inventory(inventory_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    inventory = db.get(Inventory, inventory_id)
+    if not inventory or inventory.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Inventaire introuvable")
+    if inventory.status != InventoryStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Inventaire deja traite")
+    details = db.query(InventoryDetail).filter(InventoryDetail.inventory_id == inventory.id).all()
+    for detail in details:
+        if detail.gap_quantity > 0:
+            add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.INVENTORY_PLUS, product_id=detail.product_id, destination_depot_id=inventory.depot_id, quantity=detail.gap_quantity, reason=f"Ajustement inventaire {inventory.id}", reference=inventory.id)
+        elif detail.gap_quantity < 0:
+            add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.INVENTORY_MINUS, product_id=detail.product_id, source_depot_id=inventory.depot_id, quantity=abs(detail.gap_quantity), reason=f"Ajustement inventaire {inventory.id}", reference=inventory.id)
+    inventory.status = InventoryStatus.VALIDATED
+    inventory.validated_by = current_user.id
+    inventory.validated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(inventory)
+    return inventory_public(db, inventory)
+
+
+@router.get("/reports", response_model=StockReportOut)
+def get_stock_movements_report(
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    depot_id: str | None = Query(default=None),
+    product_id: str | None = Query(default=None),
+    category_id: str | None = Query(default=None),
+    movement_type: StockMovementType | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_permission(current_user, Permission.STOCK_READ)
+    end = end_date or datetime.utcnow()
+    start = start_date or (end - timedelta(days=7))
+    query = db.query(StockMovement).join(Product, Product.id == StockMovement.product_id).filter(StockMovement.restaurant_id == current_user.restaurant_id, StockMovement.movement_date >= start, StockMovement.movement_date <= end)
+    if depot_id:
+        query = query.filter((StockMovement.source_depot_id == depot_id) | (StockMovement.destination_depot_id == depot_id))
+    if product_id:
+        query = query.filter(StockMovement.product_id == product_id)
+    if category_id:
+        query = query.filter(Product.category_id == category_id)
+    if movement_type:
+        query = query.filter(StockMovement.movement_type == movement_type)
+    movements = query.order_by(StockMovement.movement_date.desc()).all()
+    products = [product_public(db, p) for p in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id).all()]
+    stock_value = sum(product["stock_value"] for product in products)
+    entries = sum(float(m.total_amount or 0) for m in movements if normalize_type(m.movement_type) in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS})
+    outputs = sum(float(m.total_amount or 0) for m in movements if normalize_type(m.movement_type) in OUT_TYPES)
+    return StockReportOut(
+        start_date=start,
+        end_date=end,
+        entries_value=entries,
+        outputs_value=outputs,
+        damage_loss=sum(float(m.total_amount or 0) for m in movements if normalize_type(m.movement_type) == StockMovementType.LOSS),
+        stock_value=stock_value,
+        estimated_sales_value=sum(product["stock_value"] * (1 + float(product["sale_margin_rate"] or 0) / 100) for product in products),
+        estimated_profit=max(0, sum(product["stock_value"] * (float(product["sale_margin_rate"] or 0) / 100) for product in products)),
+        low_stock_count=len([product for product in products if product["current_stock"] <= product["minimum_stock"]]),
+        movement_count=len(movements),
+        movements=movements,
     )
 
 
 @router.get("/menu-items", response_model=list[StockMenuItemOut])
 def list_menu_items_for_stock(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(MenuItem)
-        .filter(MenuItem.restaurant_id == current_user.restaurant_id)
-        .order_by(MenuItem.name.asc())
-        .all()
-    )
-
-
-@router.get("/items", response_model=list[StockItemPublic])
-def list_items(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(StockItem)
-        .filter(StockItem.restaurant_id == current_user.restaurant_id)
-        .order_by(StockItem.created_at.desc())
-        .all()
-    )
-
-
-@router.post("/items", response_model=StockItemPublic, status_code=201)
-def create_item(payload: StockItemIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_UPDATE)
-    payload_data = payload.dict()
-    if not payload_data.get("cmup_current"):
-        payload_data["cmup_current"] = payload_data.get("purchase_price", 0)
-    item = StockItem(restaurant_id=current_user.restaurant_id, **payload_data)
-    db.add(item)
-    db.flush()
-    for location, quantity in [
-        (StockLocation.MAGASIN, item.quantity),
-        (StockLocation.CUISINE, item.kitchen_quantity),
-        (StockLocation.BOISSON, item.drink_quantity),
-    ]:
-        if quantity > 0:
-            create_lot(db, item, location, quantity, item.purchase_price, item.cmup_current, None)
-    log_action(db, current_user, "stock.item_create", "stock_item", item.id, f"Création produit stock {item.name}")
-    db.commit()
-    db.refresh(item)
-    return item
-
-
-@router.patch("/items/{item_id}", response_model=StockItemPublic)
-def update_item(
-    item_id: str,
-    payload: StockItemUpdateIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.STOCK_UPDATE)
-    item = get_item_or_404(db, item_id, current_user.restaurant_id)
-    for field, value in payload.dict(exclude_unset=True).items():
-        setattr(item, field, value)
-    log_action(db, current_user, "stock.item_update", "stock_item", item.id, f"Modification produit stock {item.name}")
-    db.commit()
-    db.refresh(item)
-    return item
-
-
-@router.get("/low-stock", response_model=list[StockItemPublic])
-def list_low_stock(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(StockItem)
-        .filter(StockItem.restaurant_id == current_user.restaurant_id)
-        .filter((StockItem.quantity + StockItem.kitchen_quantity + StockItem.drink_quantity) <= StockItem.alert_threshold)
-        .order_by((StockItem.quantity + StockItem.kitchen_quantity + StockItem.drink_quantity).asc())
-        .all()
-    )
-
-
-@router.get("/cost-centers", response_model=list[StockCostCenterPublic])
-def list_cost_centers(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_READ)
-    ensure_default_cost_centers(db, current_user.restaurant_id)
-    db.commit()
-    return (
-        db.query(StockCostCenter)
-        .filter(StockCostCenter.restaurant_id == current_user.restaurant_id, StockCostCenter.is_active.is_(True))
-        .order_by(StockCostCenter.created_at.asc())
-        .all()
-    )
-
-
-@router.get("/lots", response_model=list[StockLotPublic])
-def list_lots(
-    item_id: str | None = Query(default=None),
-    center_id: str | None = Query(default=None),
-    expiring_days: int | None = Query(default=None, ge=1, le=365),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.STOCK_READ)
-    query = db.query(StockLot).filter(StockLot.restaurant_id == current_user.restaurant_id)
-    if item_id:
-        query = query.filter(StockLot.item_id == item_id)
-    if center_id:
-        query = query.filter(StockLot.cost_center_id == center_id)
-    if expiring_days:
-        query = query.filter(
-            StockLot.expiration_date.isnot(None),
-            StockLot.expiration_date <= datetime.utcnow() + timedelta(days=expiring_days),
-            StockLot.available_quantity > 0,
-        )
-    return query.order_by(StockLot.entry_date.asc(), StockLot.created_at.asc()).all()
+    return db.query(MenuItem).filter(MenuItem.restaurant_id == current_user.restaurant_id).order_by(MenuItem.name.asc()).all()
 
 
 @router.get("/packaging-links", response_model=list[PackagingLinkPublic])
 def list_packaging_links(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(StockItemPackaging)
-        .filter(StockItemPackaging.restaurant_id == current_user.restaurant_id, StockItemPackaging.is_active.is_(True))
-        .order_by(StockItemPackaging.created_at.desc())
-        .all()
-    )
+    return db.query(StockItemPackaging).filter(StockItemPackaging.restaurant_id == current_user.restaurant_id, StockItemPackaging.is_active.is_(True)).order_by(StockItemPackaging.created_at.desc()).all()
 
 
 @router.post("/packaging-links", response_model=PackagingLinkPublic, status_code=201)
 def create_packaging_link(payload: PackagingLinkIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    dish = db.get(MenuItem, payload.menu_item_id)
-    if not dish or dish.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Plat introuvable")
-    packaging = get_item_or_404(db, payload.packaging_item_id, current_user.restaurant_id)
-    if packaging.product_type != StockProductType.EMBALLAGE:
-        raise HTTPException(status_code=400, detail="L'article lié doit être un emballage")
+    get_product_or_404(db, payload.packaging_item_id, current_user.restaurant_id)
     link = StockItemPackaging(restaurant_id=current_user.restaurant_id, **payload.dict())
     db.add(link)
-    log_action(db, current_user, "stock.packaging_link_create", "stock_packaging", link.id, f"Liaison emballage {packaging.name} au plat {dish.name}")
     db.commit()
     db.refresh(link)
     return link
@@ -666,229 +1035,22 @@ def archive_packaging_link(link_id: str, current_user: User = Depends(require_te
     if not link or link.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Liaison introuvable")
     link.is_active = False
-    log_action(db, current_user, "stock.packaging_link_archive", "stock_packaging", link.id, "Archivage liaison emballage")
     db.commit()
-    return {"message": "Liaison archivée"}
-
-
-@router.get("/movements", response_model=list[StockMovementPublic])
-def list_movements(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(StockMovement)
-        .filter(StockMovement.restaurant_id == current_user.restaurant_id)
-        .order_by(StockMovement.created_at.desc())
-        .all()
-    )
-
-
-def _item_total_quantity(item) -> float:
-    return float(item.quantity or 0) + float(item.kitchen_quantity or 0) + float(item.drink_quantity or 0)
-
-
-def notify_if_low_stock(db: Session, item, previous_total: float) -> None:
-    """Alerte STOCK + ADMIN quand un produit franchit son seuil d'alerte (à la baisse)."""
-    threshold = float(item.alert_threshold or 0)
-    if threshold <= 0:
-        return
-    new_total = _item_total_quantity(item)
-    # Seulement au franchissement (au-dessus -> au niveau/sous le seuil) pour éviter le spam.
-    if not (new_total <= threshold < previous_total):
-        return
-    message = f"{item.name} est sous le seuil d'alerte ({new_total:g} {item.unit or ''} restant, seuil {threshold:g})."
-    for target_role in ("STOCK", "ADMIN"):
-        notify(
-            db,
-            title="Stock bas",
-            message=message,
-            restaurant_id=item.restaurant_id,
-            role=target_role,
-            category="stock",
-            link="low-stock",
-        )
-
-
-@router.post("/movements", response_model=StockMovementPublic, status_code=201)
-def create_movement(
-    payload: StockMovementIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.STOCK_UPDATE)
-    item = get_item_or_404(db, payload.item_id, current_user.restaurant_id)
-    previous_total = _item_total_quantity(item)
-    source_location, destination_location = normalize_movement_locations(
-        item,
-        payload.movement_type,
-        payload.source_location,
-        payload.destination_location,
-    )
-    movement_value = 0.0
-    valuation_delta = 0.0
-    lot_id = None
-    movements: list[StockMovement] = []
-    if payload.movement_type == StockMovementType.IN:
-        previous_cmup = float(item.cmup_current or item.purchase_price or 0)
-        valuation_delta = payload.quantity * (float(payload.unit_price or previous_cmup) - previous_cmup)
-        cmup = calculate_cmup(item, payload.quantity, payload.unit_price)
-        apply_movement(item, payload.movement_type, payload.quantity, source_location, destination_location)
-        item.purchase_price = payload.unit_price or item.purchase_price
-        item.cmup_current = cmup
-        lot = create_lot(db, item, StockLocation.MAGASIN, payload.quantity, payload.unit_price, cmup, payload.expiration_date)
-        lot_id = lot.id
-        movement_value = payload.quantity * cmup
-    elif payload.movement_type == StockMovementType.TRANSFER:
-        movement_value, movements = move_fifo_between_locations(
-            db,
-            item,
-            source_location or StockLocation.MAGASIN,
-            destination_location or infer_transfer_destination(item),
-            payload.quantity,
-            current_user.id,
-            payload.note,
-        )
-    elif payload.movement_type == StockMovementType.OUT:
-        movement_value, movements, lot_id = consume_fifo(
-            db,
-            item,
-            source_location or infer_transfer_destination(item),
-            payload.quantity,
-            StockMovementType.OUT,
-            current_user.id,
-            payload.destination,
-            payload.note,
-        )
-    elif payload.movement_type == StockMovementType.ADJUSTMENT:
-        apply_movement(item, payload.movement_type, payload.quantity, source_location, destination_location)
-        movement_value = payload.quantity * float(item.cmup_current or item.purchase_price or 0)
-    payload_data = payload.dict()
-    payload_data["source_location"] = source_location
-    payload_data["destination_location"] = destination_location
-    payload_data.pop("expiration_date", None)
-    movement = None
-    if not movements:
-        center_location = destination_location if payload.movement_type == StockMovementType.IN else source_location
-        center = center_for_location(db, current_user.restaurant_id, center_location or StockLocation.MAGASIN)
-        movement = StockMovement(
-            restaurant_id=current_user.restaurant_id,
-            created_by_id=current_user.id,
-            cost_center_id=center.id,
-            lot_id=lot_id,
-            value=movement_value,
-            valuation_delta=valuation_delta,
-            **payload_data,
-        )
-        db.add(movement)
-    else:
-        movement = movements[0]
-    log_action(
-        db,
-        current_user,
-        "stock.movement_create",
-        "stock_movement",
-        movement.id,
-        f"Mouvement stock {payload.movement_type.value} sur {item.name}",
-        {"item_id": item.id, "quantity": payload.quantity, "valuation_delta": valuation_delta},
-    )
-    notify_if_low_stock(db, item, previous_total)
-    db.commit()
-    db.refresh(movement)
-    return movement
-
-
-@router.get("/damages", response_model=list[StockDamagePublic])
-def list_damages(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(StockDamage)
-        .filter(StockDamage.restaurant_id == current_user.restaurant_id)
-        .order_by(StockDamage.created_at.desc())
-        .all()
-    )
-
-
-@router.post("/damages", response_model=StockDamagePublic, status_code=201)
-def create_damage(payload: StockDamageIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_UPDATE)
-    item = get_item_or_404(db, payload.item_id, current_user.restaurant_id)
-    value, movements, first_lot_id = consume_fifo(
-        db,
-        item,
-        payload.location,
-        payload.quantity,
-        StockMovementType.OUT,
-        current_user.id,
-        "Avarie / perte",
-        payload.reason,
-    )
-    center = center_for_location(db, current_user.restaurant_id, payload.location)
-    cmup_applied = float(item.cmup_current or item.purchase_price or 0)
-    damage_data = payload.dict()
-    damage_data["estimated_loss"] = value or (payload.quantity * cmup_applied)
-    damage = StockDamage(
-        restaurant_id=current_user.restaurant_id,
-        cost_center_id=center.id,
-        lot_id=first_lot_id,
-        cmup_applied=cmup_applied,
-        created_by_id=current_user.id,
-        **damage_data,
-    )
-    db.add(damage)
-    log_action(
-        db,
-        current_user,
-        "stock.damage_create",
-        "stock_damage",
-        damage.id,
-        f"Avarie stock {item.name}",
-        {"item_id": item.id, "quantity": payload.quantity, "estimated_loss": damage.estimated_loss, "reason": payload.reason},
-    )
-    db.commit()
-    db.refresh(damage)
-    return damage
-
-
-@router.patch("/damages/{damage_id}/account", response_model=StockDamagePublic)
-def account_damage(damage_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    damage = db.get(StockDamage, damage_id)
-    if not damage or damage.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Avarie introuvable")
-    damage.accounted_at = datetime.utcnow()
-    log_action(db, current_user, "stock.damage_account", "stock_damage", damage.id, "Comptabilisation avarie stock")
-    db.commit()
-    db.refresh(damage)
-    return damage
+    return {"message": "Liaison archivee"}
 
 
 @router.get("/recipes", response_model=list[RecipeIngredientPublic])
 def list_recipe_links(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(StockRecipeIngredient)
-        .filter(
-            StockRecipeIngredient.restaurant_id == current_user.restaurant_id,
-            StockRecipeIngredient.is_active.is_(True),
-        )
-        .order_by(StockRecipeIngredient.created_at.desc())
-        .all()
-    )
+    return db.query(StockRecipeIngredient).filter(StockRecipeIngredient.restaurant_id == current_user.restaurant_id, StockRecipeIngredient.is_active.is_(True)).order_by(StockRecipeIngredient.created_at.desc()).all()
 
 
 @router.post("/recipes", response_model=RecipeIngredientPublic, status_code=201)
-def create_recipe_link(
-    payload: RecipeIngredientIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
+def create_recipe_link(payload: RecipeIngredientIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    dish = db.get(MenuItem, payload.menu_item_id)
-    if not dish or dish.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Plat introuvable")
-    get_item_or_404(db, payload.stock_item_id, current_user.restaurant_id)
+    get_product_or_404(db, payload.stock_item_id, current_user.restaurant_id)
     link = StockRecipeIngredient(restaurant_id=current_user.restaurant_id, **payload.dict())
     db.add(link)
-    log_action(db, current_user, "stock.recipe_link_create", "stock_recipe", link.id, "Liaison ingrédient stock à un plat")
     db.commit()
     db.refresh(link)
     return link
@@ -901,290 +1063,35 @@ def delete_recipe_link(link_id: str, current_user: User = Depends(require_tenant
     if not link or link.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Liaison introuvable")
     link.is_active = False
-    log_action(db, current_user, "stock.recipe_link_archive", "stock_recipe", link_id, "Archivage liaison ingrédient stock")
     db.commit()
-    return {"message": "Liaison archivée"}
+    return {"message": "Liaison archivee"}
 
 
 @router.get("/production-sheets", response_model=list[ProductionSheetPublic])
 def list_production_sheets(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_READ)
-    return (
-        db.query(StockProductionSheet)
-        .filter(StockProductionSheet.restaurant_id == current_user.restaurant_id)
-        .order_by(StockProductionSheet.created_at.desc())
-        .all()
-    )
+    return db.query(StockProductionSheet).filter(StockProductionSheet.restaurant_id == current_user.restaurant_id).order_by(StockProductionSheet.created_at.desc()).all()
 
 
 @router.post("/production-sheets", response_model=ProductionSheetPublic, status_code=201)
-def create_production_sheet(
-    payload: ProductionSheetIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
+def create_production_sheet(payload: ProductionSheetIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
     dish = db.get(MenuItem, payload.menu_item_id)
     if not dish or dish.restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=404, detail="Plat introuvable")
-
-    links = (
-        db.query(StockRecipeIngredient)
-        .filter(
-            StockRecipeIngredient.restaurant_id == current_user.restaurant_id,
-            StockRecipeIngredient.menu_item_id == payload.menu_item_id,
-        )
-        .all()
-    )
+    links = db.query(StockRecipeIngredient).filter(StockRecipeIngredient.restaurant_id == current_user.restaurant_id, StockRecipeIngredient.menu_item_id == payload.menu_item_id, StockRecipeIngredient.is_active.is_(True)).all()
     if not links:
-        raise HTTPException(status_code=400, detail="Aucun ingrédient lié à ce plat")
-
+        raise HTTPException(status_code=400, detail="Aucun ingredient lie a ce plat")
     for link in links:
-        item = get_item_or_404(db, link.stock_item_id, current_user.restaurant_id)
-        consumed = link.quantity_per_dish * payload.quantity
-        consume_fifo(
-            db,
-            item,
-            link.location,
-            consumed,
-            StockMovementType.OUT,
-            current_user.id,
-            "Production cuisine",
-            f"Fiche production: {payload.quantity} x {dish.name}",
-        )
-
-    sheet = StockProductionSheet(
-        restaurant_id=current_user.restaurant_id,
-        menu_item_id=payload.menu_item_id,
-        quantity=payload.quantity,
-        note=payload.note,
-        created_by_id=current_user.id,
-    )
+        product = get_item_or_404(db, link.stock_item_id, current_user.restaurant_id, for_update=True)
+        consume_fifo(db, product, link.location, link.quantity_per_dish * payload.quantity, StockMovementType.OUTPUT, current_user.id, "Production cuisine", f"Fiche production: {payload.quantity} x {dish.name}")
+    sheet = StockProductionSheet(restaurant_id=current_user.restaurant_id, menu_item_id=payload.menu_item_id, quantity=payload.quantity, note=payload.note, created_by_id=current_user.id)
     db.add(sheet)
-    log_action(
-        db,
-        current_user,
-        "stock.production_sheet_create",
-        "production_sheet",
-        sheet.id,
-        f"Fiche production {payload.quantity} x {dish.name}",
-        {"menu_item_id": dish.id, "quantity": payload.quantity},
-    )
     db.commit()
     db.refresh(sheet)
     return sheet
 
 
-@router.get("/inventories", response_model=list[InventoryPublic])
-def list_inventories(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_READ)
-    inventories = (
-        db.query(StockInventory)
-        .filter(StockInventory.restaurant_id == current_user.restaurant_id)
-        .order_by(StockInventory.opened_at.desc())
-        .all()
-    )
-    inventory_ids = [inventory.id for inventory in inventories]
-    lines_by_inventory: dict[str, list[StockInventoryLine]] = {inventory.id: [] for inventory in inventories}
-    if inventory_ids:
-        for line in db.query(StockInventoryLine).filter(StockInventoryLine.inventory_id.in_(inventory_ids)).all():
-            lines_by_inventory.setdefault(line.inventory_id, []).append(line)
-    for inventory in inventories:
-        inventory.lines = lines_by_inventory.get(inventory.id, [])
-    return inventories
-
-
-@router.post("/inventories", response_model=InventoryPublic, status_code=201)
-def open_inventory(payload: InventoryCreateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_UPDATE)
-    existing = (
-        db.query(StockInventory)
-        .filter(StockInventory.restaurant_id == current_user.restaurant_id, StockInventory.status == StockInventoryStatus.OPEN)
-        .first()
-    )
-    if existing:
-        raise HTTPException(status_code=400, detail="Un inventaire est déjà ouvert")
-    centers = ensure_default_cost_centers(db, current_user.restaurant_id)
-    items = db.query(StockItem).filter(StockItem.restaurant_id == current_user.restaurant_id, StockItem.is_active.is_(True)).all()
-    inventory = StockInventory(
-        restaurant_id=current_user.restaurant_id,
-        period=payload.period,
-        tolerance_rate=payload.tolerance_rate,
-        opened_by_id=current_user.id,
-    )
-    db.add(inventory)
-    db.flush()
-    for item in items:
-        for location, center in centers.items():
-            theoretical = get_location_quantity(item, location)
-            db.add(
-                StockInventoryLine(
-                    restaurant_id=current_user.restaurant_id,
-                    inventory_id=inventory.id,
-                    item_id=item.id,
-                    cost_center_id=center.id,
-                    theoretical_stock=theoretical,
-                    real_stock=None,
-                )
-            )
-    log_action(db, current_user, "stock.inventory_open", "stock_inventory", inventory.id, f"Ouverture inventaire {payload.period}")
-    db.commit()
-    db.refresh(inventory)
-    inventory.lines = db.query(StockInventoryLine).filter(StockInventoryLine.inventory_id == inventory.id).all()
-    return inventory
-
-
-@router.patch("/inventories/{inventory_id}/lines/{line_id}", response_model=InventoryLinePublic)
-def update_inventory_line(
-    inventory_id: str,
-    line_id: str,
-    payload: InventoryLineUpdateIn,
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.STOCK_UPDATE)
-    inventory = db.get(StockInventory, inventory_id)
-    if not inventory or inventory.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Inventaire introuvable")
-    if inventory.status != StockInventoryStatus.OPEN:
-        raise HTTPException(status_code=400, detail="Inventaire déjà clôturé")
-    line = db.get(StockInventoryLine, line_id)
-    if not line or line.inventory_id != inventory.id:
-        raise HTTPException(status_code=404, detail="Ligne inventaire introuvable")
-    item = get_item_or_404(db, line.item_id, current_user.restaurant_id)
-    line.real_stock = payload.real_stock
-    line.variance = float(line.theoretical_stock or 0) - payload.real_stock
-    line.variance_value = abs(line.variance) * float(item.cmup_current or item.purchase_price or 0)
-    tolerance_quantity = abs(float(line.theoretical_stock or 0)) * (float(inventory.tolerance_rate or 0) / 100)
-    line.exceeds_threshold = abs(line.variance) > tolerance_quantity
-    log_action(
-        db,
-        current_user,
-        "stock.inventory_line_update",
-        "stock_inventory_line",
-        line.id,
-        f"Comptage inventaire {item.name}: théorique {line.theoretical_stock} / réel {line.real_stock}",
-        {
-            "item_id": item.id,
-            "theoretical_stock": line.theoretical_stock,
-            "real_stock": line.real_stock,
-            "variance": line.variance,
-            "variance_value": line.variance_value,
-        },
-    )
-    db.commit()
-    db.refresh(line)
-    return line
-
-
-@router.patch("/inventories/{inventory_id}/close", response_model=InventoryPublic)
-def close_inventory(inventory_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
-    assert_permission(current_user, Permission.STOCK_UPDATE)
-    inventory = db.get(StockInventory, inventory_id)
-    if not inventory or inventory.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Inventaire introuvable")
-    if inventory.status != StockInventoryStatus.OPEN:
-        raise HTTPException(status_code=400, detail="Inventaire déjà clôturé")
-    lines = db.query(StockInventoryLine).filter(StockInventoryLine.inventory_id == inventory.id).all()
-    missing = [line for line in lines if line.real_stock is None]
-    if missing:
-        raise HTTPException(status_code=400, detail="Toutes les lignes doivent être saisies avant clôture")
-    centers = ensure_default_cost_centers(db, current_user.restaurant_id)
-    center_to_location = {center.id: location for location, center in centers.items()}
-    for line in lines:
-        item = get_item_or_404(db, line.item_id, current_user.restaurant_id)
-        location = center_to_location.get(line.cost_center_id, StockLocation.MAGASIN)
-        current_quantity = get_location_quantity(item, location)
-        real_stock = float(line.real_stock or 0)
-        delta = real_stock - current_quantity
-        if delta > 0:
-            create_lot(db, item, location, delta, float(item.purchase_price or item.cmup_current or 0), float(item.cmup_current or item.purchase_price or 0), None)
-            set_location_quantity(item, location, real_stock)
-        elif delta < 0:
-            loss_value, _movements, first_lot_id = consume_fifo(
-                db,
-                item,
-                location,
-                abs(delta),
-                StockMovementType.ADJUSTMENT,
-                current_user.id,
-                "Écart inventaire",
-                f"Clôture inventaire {inventory.period}",
-                inventory.id,
-            )
-            db.add(
-                StockDamage(
-                    restaurant_id=current_user.restaurant_id,
-                    item_id=item.id,
-                    cost_center_id=line.cost_center_id,
-                    lot_id=first_lot_id,
-                    location=location,
-                    quantity=abs(delta),
-                    cmup_applied=float(item.cmup_current or item.purchase_price or 0),
-                    estimated_loss=loss_value,
-                    reason="ECART_INVENTAIRE",
-                    created_by_id=current_user.id,
-                )
-            )
-        line.variance = float(line.theoretical_stock or 0) - real_stock
-        line.variance_value = abs(line.variance) * float(item.cmup_current or item.purchase_price or 0)
-    inventory.status = StockInventoryStatus.CLOSED
-    inventory.closed_at = datetime.utcnow()
-    inventory.closed_by_id = current_user.id
-    log_action(db, current_user, "stock.inventory_close", "stock_inventory", inventory.id, f"Clôture inventaire {inventory.period}")
-    db.commit()
-    db.refresh(inventory)
-    inventory.lines = db.query(StockInventoryLine).filter(StockInventoryLine.inventory_id == inventory.id).all()
-    return inventory
-
-
-@router.get("/reports", response_model=StockReportOut)
-def stock_report(
-    start_date: datetime | None = Query(default=None),
-    end_date: datetime | None = Query(default=None),
-    current_user: User = Depends(require_tenant_user),
-    db: Session = Depends(get_db),
-):
-    assert_permission(current_user, Permission.STOCK_READ)
-    end = end_date or datetime.utcnow()
-    start = start_date or (end - timedelta(days=7))
-    items = db.query(StockItem).filter(StockItem.restaurant_id == current_user.restaurant_id).all()
-    movements = (
-        db.query(StockMovement)
-        .filter(
-            StockMovement.restaurant_id == current_user.restaurant_id,
-            StockMovement.created_at >= start,
-            StockMovement.created_at <= end,
-        )
-        .all()
-    )
-    damages = (
-        db.query(StockDamage)
-        .filter(
-            StockDamage.restaurant_id == current_user.restaurant_id,
-            StockDamage.created_at >= start,
-            StockDamage.created_at <= end,
-        )
-        .all()
-    )
-    entries = sum(m.quantity * m.unit_price for m in movements if m.movement_type == StockMovementType.IN)
-    outputs = sum(m.quantity * m.unit_price for m in movements if m.movement_type in {StockMovementType.OUT, StockMovementType.TRANSFER})
-    stock_value = sum((item.quantity + item.kitchen_quantity + item.drink_quantity) * item.purchase_price for item in items)
-    estimated_sales_value = sum(
-        (item.quantity + item.kitchen_quantity + item.drink_quantity)
-        * item.purchase_price
-        * (1 + item.sale_margin_rate / 100)
-        for item in items
-    )
-    return StockReportOut(
-        start_date=start,
-        end_date=end,
-        entries_value=entries,
-        outputs_value=outputs,
-        damage_loss=sum(d.estimated_loss for d in damages),
-        stock_value=stock_value,
-        estimated_sales_value=estimated_sales_value,
-        estimated_profit=max(0, estimated_sales_value - stock_value),
-        low_stock_count=len([item for item in items if (item.quantity + item.kitchen_quantity + item.drink_quantity) <= item.alert_threshold]),
-        movement_count=len(movements),
-    )
+@router.get("/lots", response_model=list)
+def list_lots():
+    return []

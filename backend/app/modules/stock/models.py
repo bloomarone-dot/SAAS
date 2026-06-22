@@ -8,11 +8,11 @@ from app.database import Base
 from app.modules.shared.models import new_id
 
 
-class StockMovementType(str, enum.Enum):
-    IN = "IN"
-    OUT = "OUT"
-    TRANSFER = "TRANSFER"
-    ADJUSTMENT = "ADJUSTMENT"
+class DepotType(str, enum.Enum):
+    PRINCIPAL = "principal"
+    CUISINE = "cuisine"
+    BOISSON = "boisson"
+    AUTRE = "autre"
 
 
 class StockLocation(str, enum.Enum):
@@ -27,49 +27,146 @@ class StockProductType(str, enum.Enum):
     EMBALLAGE = "EMBALLAGE"
 
 
-class StockCostCenterType(str, enum.Enum):
-    MAGASIN = "MAGASIN"
-    CUISINE = "CUISINE"
-    BOISSON = "BOISSON"
+class StockMovementType(str, enum.Enum):
+    ENTRY = "ENTRY"
+    DIRECT_ENTRY = "DIRECT_ENTRY"
+    TRANSFER = "TRANSFER"
+    OUTPUT = "OUTPUT"
+    LOSS = "LOSS"
+    INVENTORY_PLUS = "INVENTORY_PLUS"
+    INVENTORY_MINUS = "INVENTORY_MINUS"
+    CANCELLATION = "CANCELLATION"
+    # Compatibilite d'entree API uniquement: ces valeurs sont normalisees dans le service.
+    IN = "IN"
+    OUT = "OUT"
+    ADJUSTMENT = "ADJUSTMENT"
+
+
+class StockMovementStatus(str, enum.Enum):
+    DRAFT = "draft"
+    VALIDATED = "validated"
+    CANCELLED = "cancelled"
+
+
+class InventoryStatus(str, enum.Enum):
+    DRAFT = "draft"
+    VALIDATED = "validated"
+    CANCELLED = "cancelled"
 
 
 class StockLossReason(str, enum.Enum):
-    PERIME = "PERIME"
-    VOL_COULAGE = "VOL_COULAGE"
-    CASSE_PREPARATION = "CASSE_PREPARATION"
-    OFFERT_GESTE = "OFFERT_GESTE"
-    ECART_INVENTAIRE = "ECART_INVENTAIRE"
+    CONSOMMATION = "consommation"
+    VENTE = "vente"
+    PERTE = "perte"
+    CASSE = "casse"
+    PERIME = "perime"
+    AUTRE = "autre"
+    ECART_INVENTAIRE = "ecart_inventaire"
 
 
-class StockInventoryStatus(str, enum.Enum):
-    OPEN = "OPEN"
-    CLOSED = "CLOSED"
-
-
-class StockItem(Base):
-    __tablename__ = "stock_items"
+class Depot(Base):
+    __tablename__ = "depots"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
-    product_type: Mapped[StockProductType] = mapped_column(
-        Enum(StockProductType), default=StockProductType.INGREDIENT, nullable=False
-    )
-    unit: Mapped[str] = mapped_column(String(30), default="Unité", nullable=False)
-    # `quantity` represente le stock magasin principal.
-    quantity: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    kitchen_quantity: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    drink_quantity: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    alert_threshold: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    purchase_price: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    cmup_current: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    packaging_sale_price: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    code: Mapped[str] = mapped_column(String(40), index=True, nullable=False)
+    type: Mapped[DepotType] = mapped_column(Enum(DepotType), default=DepotType.AUTRE, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    sale_margin_rate: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class StockCategory(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class Unit(Base):
+    __tablename__ = "units"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    code: Mapped[str | None] = mapped_column(String(60), index=True, nullable=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    product_type: Mapped[StockProductType] = mapped_column(Enum(StockProductType), default=StockProductType.INGREDIENT, nullable=False)
+    category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("categories.id"), nullable=True)
+    unit_id: Mapped[str] = mapped_column(String(36), ForeignKey("units.id"), nullable=False)
+    purchase_price: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    minimum_stock: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    packaging_sale_price: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    sale_margin_rate: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    @property
+    def unit(self) -> str:
+        return ""
+
+    @property
+    def alert_threshold(self) -> float:
+        return float(self.minimum_stock or 0)
+
+    @property
+    def cmup_current(self) -> float:
+        return float(self.purchase_price or 0)
+
+    @property
+    def quantity(self) -> float:
+        return 0
+
+    @quantity.setter
+    def quantity(self, _value: float) -> None:
+        return None
+
+    @property
+    def kitchen_quantity(self) -> float:
+        return 0
+
+    @kitchen_quantity.setter
+    def kitchen_quantity(self, _value: float) -> None:
+        return None
+
+    @property
+    def drink_quantity(self) -> float:
+        return 0
+
+    @drink_quantity.setter
+    def drink_quantity(self, _value: float) -> None:
+        return None
 
 
 class StockMovement(Base):
@@ -77,39 +174,94 @@ class StockMovement(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    item_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_items.id"), index=True, nullable=False)
-    cost_center_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("stock_cost_centers.id"), index=True, nullable=True)
-    lot_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("stock_lots.id"), index=True, nullable=True)
-    movement_type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType), nullable=False)
-    source_location: Mapped[StockLocation | None] = mapped_column(Enum(StockLocation), nullable=True)
-    destination_location: Mapped[StockLocation | None] = mapped_column(Enum(StockLocation), nullable=True)
+    movement_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    movement_type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType), index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
+    item_id_legacy: Mapped[str | None] = mapped_column("item_id", String(36), index=True, nullable=True)
+    cost_center_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    lot_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    source_depot_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("depots.id"), index=True, nullable=True)
+    destination_depot_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("depots.id"), index=True, nullable=True)
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
-    unit_price: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    value: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value_legacy: Mapped[float] = mapped_column("value", Float, default=0, nullable=False)
     valuation_delta: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    destination: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    supplier_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("suppliers.id"), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    status: Mapped[StockMovementStatus] = mapped_column(Enum(StockMovementStatus), default=StockMovementStatus.VALIDATED, index=True, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_movement_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("stock_movements.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def __init__(self, **kwargs):
+        legacy_item_id = kwargs.pop("item_id", None)
+        legacy_value = kwargs.pop("value", None)
+        legacy_note = kwargs.pop("note", None)
+        legacy_destination = kwargs.pop("destination", None)
+        legacy_created_by = kwargs.pop("created_by_id", None)
+        kwargs.pop("cost_center_id", None)
+        kwargs.pop("lot_id", None)
+        kwargs.pop("source_location", None)
+        kwargs.pop("destination_location", None)
+        kwargs.pop("valuation_delta", None)
+        if legacy_item_id and "product_id" not in kwargs:
+            kwargs["product_id"] = legacy_item_id
+        if legacy_value is not None and "total_amount" not in kwargs:
+            kwargs["total_amount"] = legacy_value
+        if legacy_created_by and "created_by" not in kwargs:
+            kwargs["created_by"] = legacy_created_by
+        if (legacy_note or legacy_destination) and "reason" not in kwargs:
+            kwargs["reason"] = legacy_note or legacy_destination
+        if "movement_date" not in kwargs:
+            kwargs["movement_date"] = datetime.utcnow()
+        if "status" not in kwargs:
+            kwargs["status"] = StockMovementStatus.VALIDATED
+        if kwargs.get("status") == StockMovementStatus.VALIDATED and "validated_at" not in kwargs:
+            kwargs["validated_at"] = datetime.utcnow()
+        super().__init__(**kwargs)
+
+    @property
+    def item_id(self) -> str:
+        return self.product_id
+
+    @property
+    def value(self) -> float:
+        return float(self.total_amount or 0)
 
 
-class StockDamage(Base):
-    __tablename__ = "stock_damages"
+class Inventory(Base):
+    __tablename__ = "inventories"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    item_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_items.id"), index=True, nullable=False)
-    cost_center_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("stock_cost_centers.id"), index=True, nullable=True)
-    lot_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("stock_lots.id"), index=True, nullable=True)
-    location: Mapped[StockLocation] = mapped_column(Enum(StockLocation), default=StockLocation.MAGASIN, nullable=False)
-    quantity: Mapped[float] = mapped_column(Float, nullable=False)
-    cmup_applied: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    estimated_loss: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    reason: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
-    accounted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    inventory_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    depot_id: Mapped[str] = mapped_column(String(36), ForeignKey("depots.id"), index=True, nullable=False)
+    status: Mapped[InventoryStatus] = mapped_column(Enum(InventoryStatus), default=InventoryStatus.DRAFT, index=True, nullable=False)
+    observation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class InventoryDetail(Base):
+    __tablename__ = "inventory_details"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    inventory_id: Mapped[str] = mapped_column(String(36), ForeignKey("inventories.id"), index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
+    theoretical_quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    real_quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    gap_quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class StockRecipeIngredient(Base):
@@ -118,42 +270,11 @@ class StockRecipeIngredient(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
     menu_item_id: Mapped[str] = mapped_column(String(36), ForeignKey("menu_items.id"), index=True, nullable=False)
-    stock_item_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_items.id"), index=True, nullable=False)
+    stock_item_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
     quantity_per_dish: Mapped[float] = mapped_column(Float, nullable=False)
     location: Mapped[StockLocation] = mapped_column(Enum(StockLocation), default=StockLocation.CUISINE, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class StockCostCenter(Base):
-    __tablename__ = "stock_cost_centers"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(160), nullable=False)
-    code: Mapped[str] = mapped_column(String(40), index=True, nullable=False)
-    center_type: Mapped[StockCostCenterType] = mapped_column(Enum(StockCostCenterType), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-
-class StockLot(Base):
-    __tablename__ = "stock_lots"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    item_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_items.id"), index=True, nullable=False)
-    cost_center_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_cost_centers.id"), index=True, nullable=False)
-    entry_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
-    expiration_date: Mapped[datetime | None] = mapped_column(DateTime, index=True, nullable=True)
-    initial_quantity: Mapped[float] = mapped_column(Float, nullable=False)
-    available_quantity: Mapped[float] = mapped_column(Float, index=True, nullable=False)
-    purchase_unit_price: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    cmup_applied: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    stock_value: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class StockItemPackaging(Base):
@@ -162,42 +283,9 @@ class StockItemPackaging(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
     menu_item_id: Mapped[str] = mapped_column(String(36), ForeignKey("menu_items.id"), index=True, nullable=False)
-    packaging_item_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_items.id"), index=True, nullable=False)
+    packaging_item_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
     required_quantity: Mapped[float] = mapped_column(Float, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-
-class StockInventory(Base):
-    __tablename__ = "stock_inventories"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    period: Mapped[str] = mapped_column(String(80), nullable=False)
-    status: Mapped[StockInventoryStatus] = mapped_column(Enum(StockInventoryStatus), default=StockInventoryStatus.OPEN, index=True, nullable=False)
-    tolerance_rate: Mapped[float] = mapped_column(Float, default=2, nullable=False)
-    opened_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
-    closed_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
-    opened_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-
-class StockInventoryLine(Base):
-    __tablename__ = "stock_inventory_lines"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    inventory_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_inventories.id"), index=True, nullable=False)
-    item_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_items.id"), index=True, nullable=False)
-    cost_center_id: Mapped[str] = mapped_column(String(36), ForeignKey("stock_cost_centers.id"), index=True, nullable=False)
-    theoretical_stock: Mapped[float] = mapped_column(Float, nullable=False)
-    real_stock: Mapped[float | None] = mapped_column(Float, nullable=True)
-    variance: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    variance_value: Mapped[float] = mapped_column(Float, default=0, nullable=False)
-    exceeds_threshold: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -212,3 +300,17 @@ class StockProductionSheet(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# Compatibilite imports historiques.
+StockItem = Product
+StockInventory = Inventory
+StockInventoryLine = InventoryDetail
+StockInventoryStatus = InventoryStatus
+StockDamage = StockMovement
+StockCostCenter = Depot
+StockCostCenterType = DepotType
+
+
+class StockLot:
+    pass

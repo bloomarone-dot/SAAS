@@ -87,13 +87,9 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
       <header className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-[var(--dashboard-primary)]">Cuisine</p>
             <h1 className="mt-1 text-2xl font-black text-slate-950">
               {screen === "production" ? "Production du jour" : "Carte & plats"}
             </h1>
-            <p className="mt-1 text-sm font-semibold text-slate-500">
-              Bonjour {currentUser?.first_name ?? "équipe"} — recevez, préparez, signalez « prêt à servir ».
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <TabButton active={screen === "production"} onClick={() => setScreen("production")} icon="ChefHat">

@@ -10,6 +10,7 @@ from app.email import is_email_configured, send_password_reset_email
 from app.ratelimit import enforce_rate_limit
 from app.modules.audit.service import log_action
 from app.modules.auth.schemas import ChangePasswordIn, ForgotPasswordIn, ForgotPasswordOut, LoginIn, ResetPasswordIn, TokenOut
+from app.modules.permissions.models import Role
 from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
 from app.modules.users.schemas import UserPublic
@@ -84,6 +85,45 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
 def _build_reset_link(token: str) -> str:
     base = os.getenv("APP_PUBLIC_URL", "").rstrip("/") or "http://localhost:5177"
     return f"{base}/reset-password?token={token}"
+
+
+@router.post("/superadmin/login", response_model=TokenOut)
+def superadmin_login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
+    """Connexion réservée au super administrateur (espace plateforme séparé)."""
+    enforce_rate_limit(request, scope="login", limit=10, window_seconds=300)
+    user = find_user_by_login(db, payload.login)
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Identifiants invalides")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Compte desactive")
+    if user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cet espace est réservé à l'administration de la plateforme.")
+    log_action(db, user, "auth.login", "user", user.id, f"Connexion superadmin {user.username}")
+    db.commit()
+    token = create_access_token(user.id, getattr(user, "token_version", 0) or 0)
+    return TokenOut(access_token=token, user=user)
+
+
+@router.post("/restaurants/{slug}/login", response_model=TokenOut)
+def restaurant_login(slug: str, payload: LoginIn, request: Request, db: Session = Depends(get_db)):
+    """Connexion dédiée à un restaurant : l'utilisateur doit appartenir à ce restaurant."""
+    enforce_rate_limit(request, scope="login", limit=10, window_seconds=300)
+    restaurant = db.query(Restaurant).filter(Restaurant.slug == slug).one_or_none()
+    if not restaurant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant introuvable")
+    if not restaurant.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cet espace est temporairement indisponible (restaurant suspendu).")
+    user = find_user_by_login(db, payload.login)
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Identifiants invalides")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Compte desactive")
+    if user.role == Role.SUPERADMIN or user.restaurant_id != restaurant.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ce compte n'appartient pas à ce restaurant.")
+    log_action(db, user, "auth.login", "user", user.id, f"Connexion {user.username} ({restaurant.slug})")
+    db.commit()
+    token = create_access_token(user.id, getattr(user, "token_version", 0) or 0)
+    return TokenOut(access_token=token, user=user)
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordOut)

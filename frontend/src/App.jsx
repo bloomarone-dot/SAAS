@@ -8,6 +8,7 @@ import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
 import { LoginPanel } from "@/features/auth/components/LoginPanel";
 import { PasswordRecovery } from "@/features/auth/components/PasswordRecovery";
+import { SuperAdminLoginPage, RestaurantLandingPage, RestaurantLoginPage } from "@/features/auth/PublicAuthPages";
 const SuperadminRestaurants = lazy(() =>
   import("@/features/restaurants/components/SuperadminRestaurants").then((m) => ({
     default: m.SuperadminRestaurants,
@@ -38,9 +39,14 @@ const SuperadminPlatformActivity = lazyNamed(loadSuperadminSections, "Superadmin
 const SuperadminSettings = lazyNamed(loadSuperadminSections, "SuperadminSettings");
 const SuperadminSubscriptions = lazyNamed(loadSuperadminSections, "SuperadminSubscriptions");
 const SuperadminRestaurantDetail = lazyNamed(loadSuperadminSections, "SuperadminRestaurantDetail");
+const SuperadminInstanceRequests = lazyNamed(loadSuperadminSections, "SuperadminInstanceRequests");
 const StockOperations = lazyNamed(
   () => import("@/modules/stock/components/StockOperations"),
   "StockOperations",
+);
+const AccountingOperations = lazyNamed(
+  () => import("@/modules/finance/components/AccountingOperations"),
+  "AccountingOperations",
 );
 import { clearOfflineQueue, flushOfflineQueue, formatApiError, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
@@ -86,33 +92,40 @@ const viewPathSegments = {
   "menu-dishes": "dishes",
 };
 
-function pathForView(role, view) {
-  const base = rolePaths[role] ?? "dashboard";
-  const segment = viewPathSegments[view] ?? view;
-  return view === "dashboard" ? `/${base}` : `/${base}/${segment}`;
+// Préfixe d'URL du tenant : /superadmin pour la plateforme, /r/:slug pour un restaurant.
+function routePrefix(user) {
+  if (!user) return "";
+  if (user.role === "SUPERADMIN") return "/superadmin";
+  if (user.restaurant_slug) return `/r/${user.restaurant_slug}`;
+  return `/${rolePaths[user.role] ?? "app"}`;
 }
 
-function viewFromPath(role, path = window.location.pathname) {
-  const base = rolePaths[role];
-  if (!base) return "dashboard";
+function pathForView(user, view) {
+  const prefix = routePrefix(user);
+  const segment = viewPathSegments[view] ?? view;
+  return view === "dashboard" ? prefix || "/" : `${prefix}/${segment}`;
+}
+
+function viewFromPath(user, path = window.location.pathname) {
+  const prefix = routePrefix(user);
+  if (!prefix) return "dashboard";
   const cleanPath = path.replace(/\/+$/, "") || "/";
-  if (cleanPath === `/${base}`) return "dashboard";
-  if (!cleanPath.startsWith(`/${base}/`)) return "dashboard";
-  const view = cleanPath.slice(base.length + 2).split("/")[0];
+  if (cleanPath === prefix) return "dashboard";
+  if (!cleanPath.startsWith(`${prefix}/`)) return "dashboard";
+  const view = cleanPath.slice(prefix.length + 1).split("/")[0];
   return routeAliases[view] ?? view ?? "dashboard";
 }
 
-function pushAppRoute(role, view, replace = false) {
-  const path = pathForView(role, view);
+function pushAppRoute(user, view, replace = false) {
+  const path = pathForView(user, view);
   if (window.location.pathname === path) return;
   window.history[replace ? "replaceState" : "pushState"]({}, "", path);
 }
 
+// Sans session : /login affiche le login générique (repli). Les espaces /superadmin* et
+// /r/:slug* sont interceptés en amont par les pages publiques dédiées.
 function shouldShowLoginForPath(path = window.location.pathname) {
-  const firstSegment = path.split("/").filter(Boolean)[0];
-  if (!firstSegment) return false;
-  if (firstSegment === "login") return true;
-  return Object.values(rolePaths).includes(firstSegment);
+  return path.split("/").filter(Boolean)[0] === "login";
 }
 
 export default function App() {
@@ -143,10 +156,10 @@ export default function App() {
       .then(async (response) => {
         if (!response.ok) throw new Error("invalid-session");
         const user = await response.json();
-        const routeView = viewFromPath(user.role);
+        const routeView = viewFromPath(user);
         setSession(user);
         setActiveView(routeView);
-        pushAppRoute(user.role, routeView, true);
+        pushAppRoute(user, routeView, true);
         if (user.role === "SUPERADMIN") fetchRestaurants();
         if (user.role === "ADMIN") fetchAdminSummary();
         if (user.restaurant_id) fetchRestaurantTheme();
@@ -194,7 +207,13 @@ export default function App() {
   useEffect(() => {
     function handlePopState() {
       if (session) {
-        setActiveView(viewFromPath(session.role));
+        const prefix = routePrefix(session);
+        if (prefix && !window.location.pathname.startsWith(prefix)) {
+          pushAppRoute(session, "dashboard", true);
+          setActiveView("dashboard");
+          return;
+        }
+        setActiveView(viewFromPath(session));
         return;
       }
       setShowLogin(shouldShowLoginForPath());
@@ -286,6 +305,19 @@ export default function App() {
     }));
   }
 
+  function handleAuthenticated(data) {
+    // Post-connexion commun aux pages publiques (superadmin / restaurant par slug).
+    localStorage.setItem("access_token", data.access_token);
+    setSession(data.user);
+    setActiveView("dashboard");
+    setShowLogin(false);
+    setRecoveryMode(false);
+    pushAppRoute(data.user, "dashboard", true);
+    if (data.user.role === "SUPERADMIN") fetchRestaurants();
+    if (data.user.role === "ADMIN") fetchAdminSummary();
+    if (data.user.restaurant_id) fetchRestaurantTheme();
+  }
+
   async function submitLogin(event) {
     event.preventDefault();
     setIsLoading(true);
@@ -307,7 +339,7 @@ export default function App() {
       localStorage.setItem("access_token", data.access_token);
       setSession(data.user);
       setActiveView("dashboard");
-      pushAppRoute(data.user.role, "dashboard", true);
+      pushAppRoute(data.user, "dashboard", true);
       if (data.user.role === "SUPERADMIN") fetchRestaurants();
       if (data.user.role === "ADMIN") fetchAdminSummary();
       if (data.user.restaurant_id) fetchRestaurantTheme();
@@ -392,6 +424,22 @@ export default function App() {
     );
   }
 
+  if (!session) {
+    const publicPath = window.location.pathname.replace(/\/+$/, "") || "/";
+    // Toute URL de l'espace plateforme sans session -> page de connexion superadmin.
+    if (publicPath === "/superadmin" || publicPath.startsWith("/superadmin/")) {
+      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
+    }
+    // /r/:slug -> landing du restaurant ; /r/:slug/* -> page de connexion du restaurant.
+    const restaurantMatch = publicPath.match(/^\/r\/([^/]+)(\/.*)?$/);
+    if (restaurantMatch) {
+      const slug = restaurantMatch[1];
+      return (restaurantMatch[2] || "") === ""
+        ? <RestaurantLandingPage apiBaseUrl={apiBaseUrl} slug={slug} />
+        : <RestaurantLoginPage apiBaseUrl={apiBaseUrl} slug={slug} onAuthenticated={handleAuthenticated} />;
+    }
+  }
+
   if (!session && !showLogin) {
     return <LandingPage apiBaseUrl={apiBaseUrl} />;
   }
@@ -453,7 +501,7 @@ export default function App() {
       onNavigate={(view) => {
         setActiveView(view);
         setMessage("");
-        pushAppRoute(session.role, view);
+        pushAppRoute(session, view);
         if (view === "restaurants") {
           setShowRestaurantForm(false);
           fetchRestaurants();
@@ -504,7 +552,18 @@ export default function App() {
         return <RoleDashboard role="CUISINE" overrides={{ ...overrides, __currentUser: session }} />;
       }
 
-      const stockViews = ["stocks", "stock", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
+      // Comptabilité (partie double) : le rôle COMPTABLE utilise le nouveau module dédié.
+      if (session.role === "COMPTABLE") {
+        return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
+      }
+
+      // Accès comptabilité pour l'ADMIN (vues dédiées sans collision avec le stock).
+      const accountingViews = ["comptabilite", "accounts", "journals", "entries", "revenues", "cash", "banks", "statements"];
+      if (accountingViews.includes(activeView) && session.role === "ADMIN") {
+        return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
+      }
+
+      const stockViews = ["stocks", "stock", "products", "depots", "entries", "transfers", "outputs", "inventories", "alerts", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
 
       if (["staff", "create-user", "user-detail"].includes(activeView) && session.role === "ADMIN") {
         return (
@@ -534,7 +593,7 @@ export default function App() {
         return <ServerOrderWorkspace restaurantId={session.restaurant_id} role={session.role} view={activeView} />;
       }
 
-      if (["tables", "table-assignment"].includes(activeView) && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+      if (["tables", "table-assignment"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK"].includes(session.role)) {
         return <POSPage restaurantId={session.restaurant_id} role={session.role} currentUser={session} />;
       }
 
@@ -605,7 +664,7 @@ export default function App() {
       if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
         return <StockDashboard variant="stock" overrides={overrides} onNavigate={(view) => {
           setActiveView(view);
-          pushAppRoute(session.role, view);
+          pushAppRoute(session, view);
         }} />;
       }
 
@@ -651,7 +710,7 @@ export default function App() {
           onToggleForm={() => {
             if (activeView === "create-restaurant") {
               setActiveView("restaurants");
-              pushAppRoute(session.role, "restaurants");
+              pushAppRoute(session, "restaurants");
               setShowRestaurantForm(false);
               return;
             }
@@ -660,7 +719,7 @@ export default function App() {
           onViewRestaurant={(restaurant) => {
             setSelectedRestaurantId(restaurant.id);
             setActiveView("restaurant-detail");
-            pushAppRoute(session.role, "restaurant-detail");
+            pushAppRoute(session, "restaurant-detail");
           }}
         />
       );
@@ -711,6 +770,16 @@ export default function App() {
 
     if (activeView === "payments") {
       return <SuperadminPayments apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+    }
+
+    if (activeView === "instance-requests") {
+      return (
+        <SuperadminInstanceRequests
+          apiBaseUrl={apiBaseUrl}
+          onMessage={setMessage}
+          onRefreshRestaurants={fetchRestaurants}
+        />
+      );
     }
 
     if (activeView === "platform") {

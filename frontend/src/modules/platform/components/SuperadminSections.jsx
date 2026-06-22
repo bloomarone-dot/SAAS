@@ -403,11 +403,7 @@ export function SuperadminGlobalStats({ apiBaseUrl, restaurants, onMessage }) {
 
   return (
     <AdminSurface
-      eyebrow="Statistiques"
       title="Statistiques globales"
-      description="Indicateurs consolidés de la plateforme SaaS et des restaurants."
-      actionLabel={isLoading ? "Actualisation..." : "Actualiser"}
-      onAction={loadOverview}
     >
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard icon="Store" label="Restaurants" value={total} />
@@ -466,11 +462,7 @@ export function SuperadminPlatformActivity({ apiBaseUrl, onMessage }) {
 
   return (
     <AdminSurface
-      eyebrow="Audit"
       title="Journal plateforme"
-      description="Consultez les dernières actions enregistrées sur l’ensemble des restaurants."
-      actionLabel={isLoading ? "Chargement..." : "Actualiser"}
-      onAction={loadActivity}
     >
       {isLoading ? (
         <LoadingState label="Chargement du journal plateforme..." />
@@ -1041,3 +1033,126 @@ import {
   subscriptionExportColumns,
   platformApi,
 } from "./superadminPrimitives";
+
+
+const REQUEST_FILTERS = [
+  ["pending", "En attente"],
+  ["approved", "Approuvées"],
+  ["rejected", "Rejetées"],
+  ["all", "Toutes"],
+];
+
+const REQUEST_STATUS_LABELS = { pending: "En attente", approved: "Approuvée", rejected: "Rejetée" };
+
+export function SuperadminInstanceRequests({ apiBaseUrl, onMessage, onRefreshRestaurants }) {
+  const [requests, setRequests] = useState([]);
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [busyId, setBusyId] = useState(null);
+  const [credentials, setCredentials] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const suffix = statusFilter === "all" ? "" : `?status=${statusFilter}`;
+        const data = await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests${suffix}`);
+        if (active) setRequests(data);
+      } catch (error) {
+        onMessage(error.message);
+      }
+    })();
+    return () => { active = false; };
+  }, [apiBaseUrl, statusFilter, onMessage]);
+
+  async function reload() {
+    const suffix = statusFilter === "all" ? "" : `?status=${statusFilter}`;
+    setRequests(await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests${suffix}`));
+  }
+
+  async function approve(request) {
+    if (!window.confirm(`Approuver et créer l'instance « ${request.restaurant_name} » ?`)) return;
+    setBusyId(request.id);
+    try {
+      const result = await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests/${request.id}/approve`, { method: "POST" });
+      setCredentials(result);
+      onMessage(`Instance « ${request.restaurant_name} » créée.`);
+      await onRefreshRestaurants?.();
+      await reload();
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function reject(request) {
+    if (!window.confirm(`Rejeter la demande de « ${request.restaurant_name} » ?`)) return;
+    setBusyId(request.id);
+    try {
+      await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests/${request.id}/reject`, { method: "POST" });
+      onMessage("Demande rejetée.");
+      await reload();
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <AdminSurface
+      eyebrow="Plateforme"
+      title="Demandes d'instance"
+      description="Examinez les demandes de création d'instance soumises depuis la landing publique."
+    >
+      <div className="mb-4 flex flex-wrap gap-2">
+        {REQUEST_FILTERS.map(([key, label]) => (
+          <button key={key} type="button" onClick={() => setStatusFilter(key)}
+            className={`rounded px-3 py-1.5 text-xs font-bold transition ${statusFilter === key ? "bg-[#07133d] text-white" : "bg-white text-[#64708b] hover:bg-slate-100"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {credentials && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm">
+          <p className="font-black text-emerald-800">Instance créée ✓ — transmettez ces identifiants à l'administrateur :</p>
+          <div className="mt-2 grid gap-1 font-mono text-emerald-900">
+            <span>Landing : {credentials.landing_url}</span>
+            <span>Login : {credentials.login_url}</span>
+            <span>Identifiant : <strong>{credentials.admin_username}</strong></span>
+            <span>Mot de passe temporaire : <strong>{credentials.admin_temporary_password}</strong></span>
+          </div>
+          <button type="button" onClick={() => setCredentials(null)} className="mt-3 text-xs font-bold text-emerald-700 underline">Fermer</button>
+        </div>
+      )}
+
+      <DataTable
+        columns={["Restaurant", "Propriétaire", "Contact", "Ville", "Statut", "Action"]}
+        emptyTitle="Aucune demande"
+        emptyText="Aucune demande d'instance pour ce filtre."
+      >
+        {requests.map((request) => (
+          <tr key={request.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+            <td className="px-5 py-4 font-black text-[#07133d]">{request.restaurant_name}<p className="text-xs font-semibold text-[#64708b]">{request.business_type || "—"}</p></td>
+            <td className="px-5 py-4 font-semibold text-[#64708b]">{request.owner_name}</td>
+            <td className="px-5 py-4 font-semibold text-[#64708b]">{request.owner_phone}<p className="text-xs">{request.owner_email || ""}</p></td>
+            <td className="px-5 py-4 font-semibold text-[#64708b]">{request.city || "—"}</td>
+            <td className="px-5 py-4"><StatusBadge status={REQUEST_STATUS_LABELS[request.status] || request.status} /></td>
+            <td className="px-5 py-4 text-right">
+              {request.status === "pending" ? (
+                <div className="flex justify-end gap-2">
+                  <TableAction label={busyId === request.id ? "..." : "Approuver"} onClick={() => approve(request)} />
+                  <button type="button" onClick={() => reject(request)} disabled={busyId === request.id}
+                    className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-600 hover:bg-red-50">Rejeter</button>
+                </div>
+              ) : (
+                <span className="text-xs font-semibold text-[#64708b]">{formatDate(request.reviewed_at)}</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </DataTable>
+    </AdminSurface>
+  );
+}
