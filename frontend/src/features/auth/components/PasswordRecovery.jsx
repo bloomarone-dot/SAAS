@@ -1,5 +1,8 @@
 import { useState } from "react";
 
+import { DashboardIcon } from "@/components/dashboard/icons";
+import { formatApiError } from "@/utils/network";
+
 const logoImage = "/logo.jpeg";
 
 async function postJson(apiBaseUrl, path, body) {
@@ -10,8 +13,7 @@ async function postJson(apiBaseUrl, path, body) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const detail = typeof data?.detail === "string" ? data.detail : "Action impossible. Réessayez.";
-    throw new Error(detail);
+    throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, "Récupération du mot de passe impossible."));
   }
   return data;
 }
@@ -42,6 +44,8 @@ export function PasswordRecovery({ apiBaseUrl, mode = "forgot", token = "", onBa
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
@@ -104,11 +108,11 @@ export function PasswordRecovery({ apiBaseUrl, mode = "forgot", token = "", onBa
           <>
             <label className="block">
               <span className="mb-2 block text-xs font-black text-slate-700">Nouveau mot de passe <span className="text-red-500">*</span></span>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={10} placeholder="Au moins 10 caractères" className={inputClass} autoFocus />
+              <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} show={showPassword} onToggle={() => setShowPassword((value) => !value)} required minLength={10} placeholder="Au moins 10 caractères" autoFocus />
             </label>
             <label className="block">
               <span className="mb-2 block text-xs font-black text-slate-700">Confirmer le mot de passe <span className="text-red-500">*</span></span>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required placeholder="Confirmer" className={inputClass} />
+              <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} show={showConfirm} onToggle={() => setShowConfirm((value) => !value)} required placeholder="Confirmer" />
             </label>
             <p className="text-xs text-slate-400">Minuscule, majuscule, chiffre et symbole requis.</p>
           </>
@@ -129,5 +133,21 @@ export function PasswordRecovery({ apiBaseUrl, mode = "forgot", token = "", onBa
         </button>
       </form>
     </Shell>
+  );
+}
+
+function PasswordInput({ show, onToggle, ...props }) {
+  return (
+    <div className="relative">
+      <input type={show ? "text" : "password"} className={`${inputClass} pr-12`} {...props} />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={show ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+        className="absolute inset-y-0 right-0 flex w-12 items-center justify-center text-slate-400 hover:text-[#078d50]"
+      >
+        <DashboardIcon name={show ? "EyeOff" : "Eye"} size={18} />
+      </button>
+    </div>
   );
 }

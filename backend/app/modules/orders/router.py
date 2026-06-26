@@ -1,30 +1,34 @@
 from datetime import datetime
 from datetime import time
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
 from app.modules.audit.service import log_action
 from app.modules.catalog.classification import classify_menu_item, requires_kitchen_preparation
 from app.modules.catalog.models import MenuCategory, MenuItem
-from app.modules.finance.models import PromotionCode
+from app.modules.branches.models import DeliveryArea
+from app.modules.finance.models import CashRegister, PromotionCode
 from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
-from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
+from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderCashAssignmentIn, OrderDeleteIn, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
 from app.modules.permissions.models import Permission, Role
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockMovement, StockMovementType, StockRecipeIngredient
 from app.modules.stock.models import StockItem, StockItemPackaging, StockLocation
-from app.modules.stock.router import consume_fifo, get_item_or_404, get_location_quantity, set_location_quantity
+from app.modules.stock.router import consume_fifo, dec, get_item_or_404, get_location_quantity, set_location_quantity
 from app.modules.tables.models import TableModel, TableStatus
 from app.modules.users.models import User
 
 
 router = APIRouter(prefix="/orders", tags=["orders"])
-ALLOWED_STATUSES = {"Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée", "PENDING_PAYMENT"}
+ALLOWED_STATUSES = {"Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée", "Archivée", "PENDING_PAYMENT"}
 PAID_STATUSES = {"Payée", "Payee"}
+EXCLUDED_ACTIVE_STATUSES = {"Annulée", "Annulee", "Archivée", "Archivee"}
 PAYABLE_STATUSES = {"Prête", "Livrée"}
 CASHIER_PENDING_STATUSES = PAYABLE_STATUSES | {"PENDING_PAYMENT"}
 
@@ -55,6 +59,12 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
     if len(dishes) != len(quantities):
         raise HTTPException(status_code=400, detail="Un ou plusieurs plats ne sont plus disponibles")
 
+    delivery_area = None
+    delivery_fee = 0
+    if payload.fulfillment_type == "Livraison":
+        delivery_area = resolve_delivery_area(db, restaurant.id, payload.delivery_area_id)
+        delivery_fee = float(delivery_area.delivery_fee if delivery_area else restaurant.delivery_fee or 0)
+
     order = CustomerOrder(
         restaurant_id=restaurant.id,
         branch_id=None,
@@ -65,7 +75,8 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
         notes=payload.notes,
         fulfillment_type=payload.fulfillment_type,
         payment_method=payload.payment_method,
-        delivery_fee=restaurant.delivery_fee if payload.fulfillment_type == "Livraison" else 0,
+        delivery_area_id=delivery_area.id if delivery_area else None,
+        delivery_fee=delivery_fee,
     )
     total = 0.0
     for dish in dishes:
@@ -85,6 +96,7 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
         consume_recipe_stock(db, restaurant.id, dish, quantity)
     recalculate_order_total(order)
     db.add(order)
+    assign_order_to_cash_register(db, order, rule="AUTO")
     db.commit()
     db.refresh(order)
     return get_order_or_404(db, order.id, restaurant.id)
@@ -103,7 +115,10 @@ def list_orders(
         db.query(CustomerOrder)
         .options(selectinload(CustomerOrder.items))
         .filter(CustomerOrder.restaurant_id == current_user.restaurant_id)
+        .filter(CustomerOrder.deleted_at.is_(None))
     )
+    if not status_filter:
+        query = query.filter(~CustomerOrder.status.in_(EXCLUDED_ACTIVE_STATUSES))
     if status_filter:
         query = query.filter(CustomerOrder.status == status_filter)
     if server_id:
@@ -126,6 +141,8 @@ def cashier_report(
         db.query(CustomerOrder)
         .options(selectinload(CustomerOrder.items))
         .filter(CustomerOrder.restaurant_id == current_user.restaurant_id)
+        .filter(CustomerOrder.deleted_at.is_(None))
+        .filter(~CustomerOrder.status.in_(EXCLUDED_ACTIVE_STATUSES))
     )
     pending_orders = (
         base_query.filter(CustomerOrder.status.in_(CASHIER_PENDING_STATUSES))
@@ -134,8 +151,8 @@ def cashier_report(
     )
     receipts = (
         base_query.filter(CustomerOrder.status.in_(PAID_STATUSES))
-        .filter(CustomerOrder.updated_at >= start, CustomerOrder.updated_at <= end)
-        .order_by(CustomerOrder.updated_at.desc())
+        .filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start, func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end)
+        .order_by(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at).desc())
         .all()
     )
     total_collected = sum(float(order.total_amount or 0) for order in receipts)
@@ -156,6 +173,41 @@ def cashier_report(
         pending_orders=pending_orders,
         receipts=receipts,
     )
+
+
+@router.get("/payments/completed", response_model=list[OrderPublic])
+def completed_payments(
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    payment_method: str | None = Query(default=None),
+    cashier_id: str | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_can_read_cashier(current_user)
+    start, end = cashier_period(start_date, end_date)
+    query = (
+        db.query(CustomerOrder)
+        .options(selectinload(CustomerOrder.items))
+        .filter(
+            CustomerOrder.restaurant_id == current_user.restaurant_id,
+            CustomerOrder.deleted_at.is_(None),
+            CustomerOrder.status.in_(PAID_STATUSES),
+            CustomerOrder.payment_status == "SUCCESS",
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start,
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end,
+        )
+    )
+    if payment_method:
+        query = query.filter(CustomerOrder.payment_method == payment_method)
+    if cashier_id:
+        query = query.filter(CustomerOrder.cashier_id == cashier_id)
+    if branch_id:
+        query = query.filter(CustomerOrder.branch_id == branch_id)
+    orders = query.order_by(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at).desc()).all()
+    enrich_orders(db, orders)
+    return orders
 
 
 @router.get("/{order_id}", response_model=OrderPublic)
@@ -189,6 +241,7 @@ def validate_cashier_payment(
         current_user,
         payload.payment_method,
         payload.discount_amount,
+        payload.cash_register_id,
     )
     db.commit()
     db.refresh(order)
@@ -249,6 +302,10 @@ def cancel_cashier_payment(
     if order.status not in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Seule une commande payée peut être annulée côté caisse")
     order.status = "Livrée"
+    order.payment_status = "CANCELLED"
+    order.paid_at = None
+    order.cash_register_id = None
+    order.assignment_status = "UNASSIGNED"
     sync_table_status(db, order)
     log_action(
         db,
@@ -385,6 +442,13 @@ def update_order_status(
     previous_status = order.status
     order.status = payload.status
     sync_table_status(db, order)
+    if payload.status == "Payée" and previous_status not in PAID_STATUSES:
+        order.payment_status = "SUCCESS"
+        order.cashier_id = current_user.id
+        order.paid_at = datetime.utcnow()
+        from app.modules.finance.router import post_order_sale_entry_safe
+
+        post_order_sale_entry_safe(db, order, current_user.id)
     if payload.status in {"Prête", "Servie"}:
         notify(
             db,
@@ -431,11 +495,18 @@ def update_order(
         "payment_method",
         "discount_amount",
         "delivery_fee",
+        "delivery_area_id",
     ):
         if field in fields_set:
             value = getattr(payload, field)
             if field in {"customer_name", "customer_phone"} and isinstance(value, str):
                 value = value.strip()
+            if field == "delivery_area_id":
+                area = resolve_delivery_area(db, current_user.restaurant_id, value)
+                order.delivery_area_id = area.id if area else None
+                if area:
+                    order.delivery_fee = float(area.delivery_fee or 0)
+                continue
             setattr(order, field, value)
     if payload.status is not None:
         if payload.status not in ALLOWED_STATUSES:
@@ -554,9 +625,93 @@ def reopen_order(
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
 
+@router.post("/{order_id}/assign-cash-register", response_model=OrderPublic)
+def assign_cash_register(
+    order_id: str,
+    payload: OrderCashAssignmentIn,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in {Role.ADMIN, Role.MANAGER} and not has_permission(current_user, Permission.CASHIER_UPDATE):
+        raise HTTPException(status_code=403, detail="Permission d'affectation caisse requise")
+    order = get_order_or_404(db, order_id, current_user.restaurant_id)
+    cash_register = get_cash_register_or_404(db, current_user.restaurant_id, payload.cash_register_id)
+    assigned_cashier_id = payload.assigned_cashier_id or cash_register.responsible_user_id
+    if assigned_cashier_id:
+        cashier = db.query(User).filter(User.id == assigned_cashier_id, User.restaurant_id == current_user.restaurant_id).first()
+        if not cashier:
+            raise HTTPException(status_code=404, detail="Caissier introuvable")
+    order.cash_register_id = cash_register.id
+    order.assigned_cashier_id = assigned_cashier_id
+    order.assignment_status = "ASSIGNED"
+    order.assigned_at = datetime.utcnow()
+    log_action(
+        db,
+        current_user,
+        "order.cash_register_assign",
+        "order",
+        order.id,
+        f"Affectation commande {order.order_number} à {cash_register.name}",
+        {"cash_register_id": cash_register.id, "assigned_cashier_id": assigned_cashier_id},
+    )
+    if assigned_cashier_id:
+        notify(
+            db,
+            restaurant_id=current_user.restaurant_id,
+            user_id=assigned_cashier_id,
+            title="Commande en ligne affectée",
+            message=f"{order.order_number} est affectée à votre caisse.",
+            category="cashier",
+            link="cashier",
+        )
+    db.commit()
+    db.refresh(order)
+    return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+
+@router.get("/dispatch/online-unassigned", response_model=list[OrderPublic])
+def list_unassigned_online_orders(
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in {Role.ADMIN, Role.MANAGER, Role.CAISSE} and not has_permission(current_user, Permission.CASHIER_READ):
+        raise HTTPException(status_code=403, detail="Permission caisse requise")
+    orders = (
+        db.query(CustomerOrder)
+        .options(selectinload(CustomerOrder.items))
+        .filter(
+            CustomerOrder.restaurant_id == current_user.restaurant_id,
+            CustomerOrder.deleted_at.is_(None),
+            ~CustomerOrder.status.in_(EXCLUDED_ACTIVE_STATUSES),
+            CustomerOrder.table_id.is_(None),
+            CustomerOrder.assignment_status != "ASSIGNED",
+        )
+        .order_by(CustomerOrder.created_at.asc())
+        .all()
+    )
+    enrich_orders(db, orders)
+    return orders
+
+
+@router.get("/dispatch/cash-registers")
+def list_dispatch_cash_registers(
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in {Role.ADMIN, Role.MANAGER, Role.CAISSE} and not has_permission(current_user, Permission.CASHIER_READ):
+        raise HTTPException(status_code=403, detail="Permission caisse requise")
+    return (
+        db.query(CashRegister)
+        .filter(CashRegister.restaurant_id == current_user.restaurant_id, CashRegister.is_active.is_(True))
+        .order_by(CashRegister.name.asc())
+        .all()
+    )
+
+
 @router.delete("/{order_id}", status_code=204)
 def delete_order(
     order_id: str,
+    payload: OrderDeleteIn | None = None,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
@@ -566,6 +721,9 @@ def delete_order(
     table_id = order.table_id
     order.status = "Archivée"
     order.cancelled_at = datetime.utcnow()
+    order.deleted_at = order.cancelled_at
+    order.deleted_by = current_user.id
+    order.delete_reason = payload.reason.strip() if payload and payload.reason else None
     log_action(
         db,
         current_user,
@@ -573,7 +731,7 @@ def delete_order(
         "order",
         order.id,
         f"Archivage commande {order.order_number}",
-        {"status": order.status, "total_amount": order.total_amount},
+        {"status": order.status, "total_amount": order.total_amount, "reason": order.delete_reason},
     )
     if table_id:
         sync_table_status_by_id(db, table_id, current_user.restaurant_id)
@@ -589,6 +747,8 @@ def log_receipt_print(
 ):
     assert_can_read_orders(current_user)
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
+    order.printed_at = datetime.utcnow()
+    order.print_count = int(order.print_count or 0) + 1
     log_action(
         db,
         current_user,
@@ -596,7 +756,7 @@ def log_receipt_print(
         "order",
         order.id,
         f"Impression recu commande {order.order_number}",
-        {"status": order.status, "total_amount": order.total_amount, "payment_method": order.payment_method},
+        {"status": order.status, "total_amount": order.total_amount, "payment_method": order.payment_method, "printed_at": order.printed_at.isoformat(), "print_count": order.print_count},
     )
     db.commit()
     return get_order_or_404(db, order.id, current_user.restaurant_id)
@@ -642,6 +802,7 @@ def settle_cash_payment(
     user: User,
     payment_method: str,
     discount_amount: float | None = None,
+    cash_register_id: str | None = None,
 ) -> None:
     """Encaisse une commande (espèces / règlement direct) : commande -> Payée/SUCCESS.
 
@@ -655,9 +816,19 @@ def settle_cash_payment(
     recalculate_order_total(order)
     deduct_order_packaging_stock(db, order, user.id)
     order.cashier_id = user.id
+    order.assigned_cashier_id = user.id
+    if cash_register_id:
+        get_cash_register_or_404(db, order.restaurant_id, cash_register_id)
+        order.cash_register_id = cash_register_id
+        order.assignment_status = "ASSIGNED"
+        order.assigned_at = order.assigned_at or datetime.utcnow()
     order.status = "Payée"
     order.payment_status = "SUCCESS"
+    order.paid_at = datetime.utcnow()
     sync_table_status(db, order)
+    from app.modules.finance.router import post_order_sale_entry_safe
+
+    post_order_sale_entry_safe(db, order, user.id)
     log_action(
         db,
         user,
@@ -702,6 +873,76 @@ def cashier_period(start_date: datetime | None, end_date: datetime | None) -> tu
         return start_date, end_date
     today = datetime.utcnow().date()
     return datetime.combine(today, time.min), datetime.combine(today, time.max)
+
+
+def resolve_delivery_area(db: Session, restaurant_id: str, delivery_area_id: str | None) -> DeliveryArea | None:
+    if not delivery_area_id:
+        return None
+    area = (
+        db.query(DeliveryArea)
+        .filter(
+            DeliveryArea.id == delivery_area_id,
+            DeliveryArea.restaurant_id == restaurant_id,
+            DeliveryArea.is_active.is_(True),
+        )
+        .first()
+    )
+    if not area:
+        raise HTTPException(status_code=404, detail="Quartier de livraison introuvable")
+    return area
+
+
+def get_cash_register_or_404(db: Session, restaurant_id: str, cash_register_id: str) -> CashRegister:
+    register = (
+        db.query(CashRegister)
+        .filter(
+            CashRegister.id == cash_register_id,
+            CashRegister.restaurant_id == restaurant_id,
+            CashRegister.is_active.is_(True),
+        )
+        .first()
+    )
+    if not register:
+        raise HTTPException(status_code=404, detail="Caisse introuvable")
+    return register
+
+
+def assign_order_to_cash_register(db: Session, order: CustomerOrder, rule: str = "AUTO") -> None:
+    registers = (
+        db.query(CashRegister)
+        .filter(CashRegister.restaurant_id == order.restaurant_id, CashRegister.is_active.is_(True))
+        .all()
+    )
+    if not registers:
+        order.assignment_status = "UNASSIGNED"
+        return
+    selected = None
+    if order.branch_id:
+        cashier_ids = [register.responsible_user_id for register in registers if register.responsible_user_id]
+        branch_cashiers = {
+            user_id
+            for (user_id,) in db.query(User.id).filter(User.id.in_(cashier_ids), User.branch_id == order.branch_id).all()
+        } if cashier_ids else set()
+        selected = next((register for register in registers if register.responsible_user_id in branch_cashiers), None)
+    if selected is None and len(registers) == 1:
+        selected = registers[0]
+    if selected is None:
+        loads = dict(
+            db.query(CustomerOrder.cash_register_id, func.count(CustomerOrder.id))
+            .filter(
+                CustomerOrder.restaurant_id == order.restaurant_id,
+                CustomerOrder.deleted_at.is_(None),
+                CustomerOrder.assignment_status == "ASSIGNED",
+                ~CustomerOrder.status.in_(EXCLUDED_ACTIVE_STATUSES | PAID_STATUSES),
+            )
+            .group_by(CustomerOrder.cash_register_id)
+            .all()
+        )
+        selected = min(registers, key=lambda register: int(loads.get(register.id, 0)))
+    order.cash_register_id = selected.id
+    order.assigned_cashier_id = selected.responsible_user_id
+    order.assignment_status = "ASSIGNED"
+    order.assigned_at = datetime.utcnow()
 
 
 def normalize_promo_code(code: str) -> str:
@@ -832,10 +1073,11 @@ def sync_table_status_by_id(db: Session, table_id: int, restaurant_id: str) -> N
     )
     if not table:
         return
-    inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee"}
+    inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee", "Archivée", "Archivee"}
     has_active_order = (
         db.query(CustomerOrder.id)
         .filter(CustomerOrder.table_id == table_id, CustomerOrder.restaurant_id == restaurant_id)
+        .filter(CustomerOrder.deleted_at.is_(None))
         .filter(~CustomerOrder.status.in_(inactive_statuses))
         .first()
         is not None
@@ -901,13 +1143,13 @@ def order_requires_packaging(order: CustomerOrder) -> bool:
     return any(token in value for token in ["livraison", "emporter", "emport", "ligne", "online"])
 
 
-def calculate_packaging_requirements(db: Session, order: CustomerOrder) -> dict[str, float]:
+def calculate_packaging_requirements(db: Session, order: CustomerOrder) -> dict[str, Decimal]:
     if not order_requires_packaging(order):
         return {}
-    dish_quantities: dict[str, float] = {}
+    dish_quantities: dict[str, Decimal] = {}
     for item in order.items:
         if item.menu_item_id and item.sale_channel != "EMBALLAGE":
-            dish_quantities[item.menu_item_id] = dish_quantities.get(item.menu_item_id, 0) + float(item.quantity or 0)
+            dish_quantities[item.menu_item_id] = dish_quantities.get(item.menu_item_id, Decimal("0")) + dec(item.quantity)
     if not dish_quantities:
         return {}
     links = (
@@ -919,10 +1161,11 @@ def calculate_packaging_requirements(db: Session, order: CustomerOrder) -> dict[
         )
         .all()
     )
-    requirements: dict[str, float] = {}
+    requirements: dict[str, Decimal] = {}
     for link in links:
-        requirements[link.packaging_item_id] = requirements.get(link.packaging_item_id, 0) + (
-            float(link.required_quantity or 1) * float(dish_quantities.get(link.menu_item_id, 0))
+        required = dec(link.required_quantity) or Decimal("1")
+        requirements[link.packaging_item_id] = requirements.get(link.packaging_item_id, Decimal("0")) + (
+            required * dish_quantities.get(link.menu_item_id, Decimal("0"))
         )
     return requirements
 
@@ -935,7 +1178,7 @@ def deduct_order_packaging_stock(db: Session, order: CustomerOrder, user_id: str
             db,
             packaging,
             StockLocation.MAGASIN,
-            float(line.quantity or 0),
+            dec(line.quantity),
             StockMovementType.OUT,
             user_id,
             "Emballage facturé",
@@ -950,7 +1193,7 @@ def deduct_order_packaging_stock(db: Session, order: CustomerOrder, user_id: str
             db,
             packaging,
             StockLocation.MAGASIN,
-            float(quantity),
+            quantity,
             StockMovementType.OUT,
             user_id,
             "Emballage consomme",
@@ -1018,8 +1261,8 @@ def adjust_recipe_stock(
                     source_location=link.location,
                     destination_location=None,
                     quantity=quantity_delta,
-                    unit_price=item.cmup_current or item.purchase_price,
-                    value=quantity_delta * float(item.cmup_current or item.purchase_price or 0),
+                    unit_price=dec(item.cmup_current or item.purchase_price),
+                    value=quantity_delta * dec(item.cmup_current or item.purchase_price),
                     destination=destination,
                     note=movement_note,
                 )

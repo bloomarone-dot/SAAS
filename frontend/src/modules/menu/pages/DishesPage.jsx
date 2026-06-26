@@ -427,7 +427,7 @@ function OrderCart({ order, onQuantityChange, onSendToKitchen }) {
   );
 }
 
-function DishesTable({ dishes, categoryNameById, role, orderMode, onAddToOrder, onToggle, onDelete }) {
+function DishesTable({ dishes, categoryNameById, role, orderMode, onAddToOrder, onToggle }) {
   if (!dishes.length) return <EmptyState icon="UtensilsCrossed" title="Aucun plat trouvé" text="Créez un plat ou ajustez vos filtres." />;
   return (
     <>
@@ -474,7 +474,6 @@ function DishesTable({ dishes, categoryNameById, role, orderMode, onAddToOrder, 
                 ) : (
                   <>
                     <IconButton icon={dish.is_available ? "Eye" : "EyeOff"} title={dish.is_available ? "Marquer indisponible" : "Marquer disponible"} onClick={() => onToggle(dish)} />
-                    {role !== "CUISINE" && <IconButton icon="Trash2" title="Supprimer" tone="red" onClick={() => onDelete(dish)} className="ml-2" />}
                   </>
                 )}
               </td>

@@ -31,7 +31,13 @@ services:
     ports:
       - "8001:8000"
     volumes:
-      - ./backend/uploads:/app/uploads
+      - ./uploads:/app/uploads
+      # Code applicatif monté en live (dev) : évite de rebuild l'image à chaque modif.
+      # En prod (docker-compose.prod.yml) l'app reste bakée dans l'image.
+      - ./backend/app:/app/app:ro
+      # Tests montés pour pouvoir lancer `python -m unittest` dans le conteneur
+      # (le Dockerfile de prod ne copie pas le dossier tests).
+      - ./backend/tests:/app/tests:ro
     depends_on:
       db:
         condition: service_healthy

@@ -43,7 +43,7 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
       },
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(formatApiError(data?.detail, "Erreur API"));
+    if (!response.ok) throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, "Action MTN Money impossible."));
     return data;
   }
 

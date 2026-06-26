@@ -157,8 +157,8 @@ def create_table_order(
         server_id=current_user.id,
         party_size=payload.party_size,
         order_number=make_table_order_number(db_table.number),
-        customer_name=f"Table {db_table.number}",
-        customer_phone="-",
+        customer_name=(payload.customer_name or f"Client table {db_table.number}").strip(),
+        customer_phone=(payload.customer_phone or "-").strip(),
         status="Nouvelle",
         fulfillment_type="Sur place",
         payment_method="À régler",
@@ -189,22 +189,23 @@ def get_table_for_user(db: Session, table_id: int, user: User) -> TableModel:
 
 
 def assert_table_read_allowed(user: User) -> None:
-    if user.role in {Role.ADMIN, Role.MANAGER}:
+    if user.role in {Role.ADMIN, Role.MANAGER, Role.STOCK}:
         return
     assert_permission(user, Permission.SERVICE_READ)
 
 
 def assert_table_update_allowed(user: User) -> None:
-    if user.role in {Role.ADMIN, Role.MANAGER}:
+    if user.role in {Role.ADMIN, Role.MANAGER, Role.STOCK}:
         return
     assert_permission(user, Permission.SERVICE_UPDATE)
 
 
 def get_active_orders(db: Session, table_id: int) -> list[CustomerOrder]:
-    inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee"}
+    inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee", "Archivée", "Archivee"}
     return (
         db.query(CustomerOrder)
         .filter(CustomerOrder.table_id == table_id)
+        .filter(CustomerOrder.deleted_at.is_(None))
         .filter(~CustomerOrder.status.in_(inactive_statuses))
         .order_by(CustomerOrder.created_at.asc())
         .all()
@@ -214,11 +215,12 @@ def get_active_orders(db: Session, table_id: int) -> list[CustomerOrder]:
 def get_active_orders_by_table(db: Session, table_ids: list[int], restaurant_id: str) -> dict[int, list[CustomerOrder]]:
     if not table_ids:
         return {}
-    inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee"}
+    inactive_statuses = {"Payée", "Payee", "Livrée", "Livree", "Annulée", "Annulee", "Archivée", "Archivee"}
     orders = (
         db.query(CustomerOrder)
         .filter(CustomerOrder.restaurant_id == restaurant_id)
         .filter(CustomerOrder.table_id.in_(table_ids))
+        .filter(CustomerOrder.deleted_at.is_(None))
         .filter(~CustomerOrder.status.in_(inactive_statuses))
         .order_by(CustomerOrder.created_at.asc())
         .all()
@@ -239,6 +241,8 @@ def serialize_table_order(order: CustomerOrder, table: TableModel, db: Session) 
         table_name=table.number,
         server_id=order.server_id or "",
         server_name=f"{server.first_name} {server.last_name}" if server else "Serveur non assigné",
+        customer_name=order.customer_name,
+        customer_phone=order.customer_phone,
         party_size=int(order.party_size or 1),
         status=order.status,
         total_amount=float(order.total_amount or 0),

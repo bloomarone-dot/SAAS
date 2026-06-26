@@ -107,10 +107,16 @@ export function ServerOpenTables({ restaurantId }) {
 
   async function openTable(table) {
     const partySize = Math.max(1, Number(partySizes[table.id] || 1));
+    const customerName = window.prompt("Nom du client", "")?.trim();
+    const customerPhone = window.prompt("Téléphone du client (optionnel)", "")?.trim();
     setLoadingTableId(table.id);
     setMessage("");
     try {
-      const result = await tableApi.createOrder(table.id, { party_size: partySize });
+      const result = await tableApi.createOrder(table.id, {
+        party_size: partySize,
+        customer_name: customerName || undefined,
+        customer_phone: customerPhone || undefined,
+      });
       setMessage(`Table ${table.name || table.number} ouverte avec la commande ${result.order.order_number}.`);
       await loadTables();
     } catch (error) {

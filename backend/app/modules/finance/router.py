@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
@@ -46,6 +47,13 @@ router = APIRouter(prefix="/finance", tags=["finance"])
 class OrmModel(BaseModel):
     class Config:
         from_attributes = True
+
+
+logger = logging.getLogger(__name__)
+
+# Taux de TVA Cameroun (19,25 %) appliqué aux ventes/achats. Prix saisis en TTC pour
+# les ventes, en HT pour les charges (apply_vat).
+VAT_RATE = Decimal("0.1925")
 
 
 def money(value) -> Decimal:
@@ -123,6 +131,7 @@ class ExpenseIn(BaseModel):
     amount: Decimal = Field(gt=0)
     tax_amount: Decimal = Decimal("0.00")
     total_amount: Optional[Decimal] = None
+    apply_vat: bool = False
     payment_status: PaymentStatus = PaymentStatus.PAID
     payment_method: PaymentMethod = PaymentMethod.CASH
     cash_register_id: Optional[str] = None
@@ -134,6 +143,8 @@ class ExpenseIn(BaseModel):
     def normalize_total(self):
         self.amount = money(self.amount)
         self.tax_amount = money(self.tax_amount)
+        if self.apply_vat and self.tax_amount == 0:
+            self.tax_amount = money(self.amount * VAT_RATE)
         self.total_amount = money(self.total_amount if self.total_amount is not None else self.amount + self.tax_amount)
         return self
 
@@ -144,6 +155,7 @@ class RevenueIn(BaseModel):
     amount: Decimal = Field(gt=0)
     tax_amount: Decimal = Decimal("0.00")
     total_amount: Optional[Decimal] = None
+    apply_vat: bool = False
     payment_status: PaymentStatus = PaymentStatus.PAID
     payment_method: PaymentMethod = PaymentMethod.CASH
     cash_register_id: Optional[str] = None
@@ -155,6 +167,8 @@ class RevenueIn(BaseModel):
     def normalize_total(self):
         self.amount = money(self.amount)
         self.tax_amount = money(self.tax_amount)
+        if self.apply_vat and self.tax_amount == 0:
+            self.tax_amount = money(self.amount * VAT_RATE)
         self.total_amount = money(self.total_amount if self.total_amount is not None else self.amount + self.tax_amount)
         return self
 
@@ -553,6 +567,300 @@ def create_payment_entry(db: Session, restaurant_id: str, user_id: str, payment:
         ],
     )
     return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+# Alias historique : voir VAT_RATE (source unique du taux 19,25 %).
+SALE_VAT_RATE = VAT_RATE
+
+
+def map_order_payment_method(raw: str | None) -> PaymentMethod:
+    """Convertit le mode de paiement libre d'une commande en PaymentMethod comptable."""
+    text = (raw or "").lower()
+    if any(k in text for k in ("orange", "mtn", "momo", "mobile", "money")):
+        return PaymentMethod.MOBILE_MONEY
+    if any(k in text for k in ("banque", "bank", "carte", "card", "virement", "cheque", "chèque")):
+        return PaymentMethod.BANK
+    return PaymentMethod.CASH
+
+
+def post_order_sale_entry(
+    db: Session,
+    restaurant_id: str,
+    order,
+    user_id: str,
+    *,
+    payment_method: PaymentMethod | None = None,
+) -> AccountingEntry | None:
+    """Génère l'écriture de vente à l'encaissement d'une commande (idempotent).
+
+    Débit trésorerie (TTC) / Crédit 701 Ventes (HT) + 4457 TVA collectée.
+    Une seule écriture par commande (garde sur source_type='order_sale').
+    Ne commit pas : l'appelant gère la transaction.
+    """
+    if not order or not getattr(order, "id", None):
+        return None
+    existing = (
+        db.query(AccountingEntry)
+        .filter(
+            AccountingEntry.restaurant_id == restaurant_id,
+            AccountingEntry.source_type == "order_sale",
+            AccountingEntry.source_id == order.id,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    total = money(order.total_amount)
+    if total <= 0:
+        return None
+    method = payment_method or map_order_payment_method(getattr(order, "payment_method", None))
+    defaults = ensure_default_accounting(db, restaurant_id)
+    asset_account_id = payment_asset_account(db, restaurant_id, method, None, None)
+    ht = (total / (Decimal("1") + SALE_VAT_RATE)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    tva = total - ht
+    journal = journal_by_type(db, restaurant_id, JournalType.CASH if method == PaymentMethod.CASH else JournalType.SALE)
+    order_number = getattr(order, "order_number", None) or order.id
+    lines = [
+        EntryLineIn(account_id=asset_account_id, label=f"Encaissement {order_number}", debit=total, credit=0),
+        EntryLineIn(account_id=defaults["sales"].id, label=f"Vente {order_number}", debit=0, credit=ht),
+    ]
+    if tva > 0:
+        lines.append(EntryLineIn(account_id=defaults["vat_collected"].id, label=f"TVA collectée {order_number}", debit=0, credit=tva))
+    payload = EntryIn(
+        entry_date=datetime.utcnow(),
+        journal_id=journal.id,
+        reference=str(order_number),
+        description=f"Vente commande {order_number}",
+        source_type="order_sale",
+        source_id=order.id,
+        lines=lines,
+    )
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def post_stock_reception_entry(db: Session, restaurant_id: str, movement, user_id: str) -> AccountingEntry | None:
+    """Génère l'écriture d'achat à la réception d'une marchandise (idempotent).
+
+    Débit 607 Achats marchandises / Crédit 401 Fournisseurs (tiers = fournisseur).
+    Une seule écriture par mouvement (garde sur source_type='stock_reception').
+    Ne commit pas. La TVA déductible relève du flux facture fournisseur.
+    """
+    if not movement or not getattr(movement, "id", None):
+        return None
+    supplier_id = getattr(movement, "supplier_id", None)
+    amount = money(getattr(movement, "total_amount", 0) or 0)
+    if not supplier_id or amount <= 0:
+        return None
+    existing = (
+        db.query(AccountingEntry)
+        .filter(
+            AccountingEntry.restaurant_id == restaurant_id,
+            AccountingEntry.source_type == "stock_reception",
+            AccountingEntry.source_id == movement.id,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    defaults = ensure_default_accounting(db, restaurant_id)
+    journal = journal_by_type(db, restaurant_id, JournalType.PURCHASE)
+    reference = getattr(movement, "reference", None) or movement.id
+    label = f"Réception {reference}"
+    # Inventaire permanent : la réception entre à l'actif Stock (37), pas en charge (607).
+    payload = EntryIn(
+        entry_date=getattr(movement, "movement_date", None) or datetime.utcnow(),
+        journal_id=journal.id,
+        reference=str(reference),
+        description=f"Réception marchandises {reference}",
+        source_type="stock_reception",
+        source_id=movement.id,
+        lines=[
+            EntryLineIn(account_id=defaults["stock"].id, label=label, debit=amount, credit=0),
+            EntryLineIn(account_id=defaults["suppliers"].id, label=label, debit=0, credit=amount, third_party_type="supplier", third_party_id=supplier_id),
+        ],
+    )
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def post_stock_cogs_entry(db: Session, restaurant_id: str, movement, user_id: str) -> AccountingEntry | None:
+    """Coût des marchandises vendues / consommées au déstockage (inventaire permanent).
+
+    Débit 6037 Variation de stock / Crédit 37 Stock, à la valeur CMUP du mouvement.
+    Idempotent (source_type='stock_cogs'). Ne commit pas.
+    """
+    if not movement or not getattr(movement, "id", None):
+        return None
+    amount = money(getattr(movement, "total_amount", 0) or 0)
+    if amount <= 0:
+        return None
+    existing = (
+        db.query(AccountingEntry)
+        .filter(
+            AccountingEntry.restaurant_id == restaurant_id,
+            AccountingEntry.source_type == "stock_cogs",
+            AccountingEntry.source_id == movement.id,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    defaults = ensure_default_accounting(db, restaurant_id)
+    journal = journal_by_type(db, restaurant_id, JournalType.STOCK)
+    reference = getattr(movement, "reference", None) or movement.id
+    label = f"Sortie stock {reference}"
+    payload = EntryIn(
+        entry_date=getattr(movement, "movement_date", None) or datetime.utcnow(),
+        journal_id=journal.id,
+        reference=str(reference),
+        description=f"COGS / consommation {reference}",
+        source_type="stock_cogs",
+        source_id=movement.id,
+        lines=[
+            EntryLineIn(account_id=defaults["stock_adjustment"].id, label=label, debit=amount, credit=0),
+            EntryLineIn(account_id=defaults["stock"].id, label=label, debit=0, credit=amount),
+        ],
+    )
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def post_stock_cogs_entry_safe(db: Session, movement, user_id: str | None) -> None:
+    """Comptabilise le COGS sans bloquer l'opération stock (savepoint isolé)."""
+    try:
+        if not movement or not getattr(movement, "restaurant_id", None):
+            return
+        resolved_user = user_id or getattr(movement, "created_by", None)
+        if not resolved_user:
+            resolved_user = (
+                db.query(User.id)
+                .filter(User.restaurant_id == movement.restaurant_id)
+                .order_by(User.created_at.asc())
+                .scalar()
+            )
+        if not resolved_user:
+            return
+        with db.begin_nested():
+            post_stock_cogs_entry(db, movement.restaurant_id, movement, resolved_user)
+    except Exception:  # noqa: BLE001 - l'opération stock prime sur la comptabilisation
+        logger.warning("Echec comptabilisation COGS %s", getattr(movement, "id", "?"), exc_info=True)
+
+
+def post_stock_reception_entry_safe(db: Session, movement, user_id: str | None) -> None:
+    """Comptabilise une réception sans bloquer l'opération stock (savepoint isolé)."""
+    try:
+        if not movement or not getattr(movement, "restaurant_id", None):
+            return
+        resolved_user = user_id or getattr(movement, "created_by", None)
+        if not resolved_user:
+            resolved_user = (
+                db.query(User.id)
+                .filter(User.restaurant_id == movement.restaurant_id)
+                .order_by(User.created_at.asc())
+                .scalar()
+            )
+        if not resolved_user:
+            return
+        with db.begin_nested():
+            post_stock_reception_entry(db, movement.restaurant_id, movement, resolved_user)
+    except Exception:  # noqa: BLE001 - l'opération stock prime sur la comptabilisation
+        logger.warning("Echec comptabilisation réception %s", getattr(movement, "id", "?"), exc_info=True)
+
+
+def post_inventory_adjustment_entry(
+    db: Session,
+    restaurant_id: str,
+    *,
+    source_id: str,
+    reference: str,
+    entry_date,
+    net_amount,
+    user_id: str,
+) -> AccountingEntry | None:
+    """Écriture d'ajustement d'inventaire (idempotent).
+
+    net_amount > 0 (excédent) : Débit 37 Stock / Crédit 6037 Variation de stock.
+    net_amount < 0 (manquant)  : Débit 6037 / Crédit 37.
+    Ne commit pas.
+    """
+    raw = Decimal(str(net_amount or 0))
+    amount = money(abs(raw))
+    if amount <= 0:
+        return None
+    existing = (
+        db.query(AccountingEntry)
+        .filter(
+            AccountingEntry.restaurant_id == restaurant_id,
+            AccountingEntry.source_type == "inventory_adjustment",
+            AccountingEntry.source_id == source_id,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    defaults = ensure_default_accounting(db, restaurant_id)
+    journal = journal_by_type(db, restaurant_id, JournalType.STOCK)
+    stock_account_id = defaults["stock"].id
+    variation_account_id = defaults["stock_adjustment"].id
+    label = f"Ajustement inventaire {reference}"
+    if raw > 0:
+        lines = [
+            EntryLineIn(account_id=stock_account_id, label=label, debit=amount, credit=0),
+            EntryLineIn(account_id=variation_account_id, label=label, debit=0, credit=amount),
+        ]
+    else:
+        lines = [
+            EntryLineIn(account_id=variation_account_id, label=label, debit=amount, credit=0),
+            EntryLineIn(account_id=stock_account_id, label=label, debit=0, credit=amount),
+        ]
+    payload = EntryIn(
+        entry_date=entry_date or datetime.utcnow(),
+        journal_id=journal.id,
+        reference=str(reference),
+        description=f"Écart d'inventaire {reference}",
+        source_type="inventory_adjustment",
+        source_id=source_id,
+        lines=lines,
+    )
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def post_inventory_adjustment_entry_safe(db: Session, restaurant_id: str, *, source_id, reference, entry_date, net_amount, user_id) -> None:
+    """Comptabilise un écart d'inventaire sans bloquer la validation (savepoint isolé)."""
+    try:
+        if not restaurant_id or not user_id:
+            return
+        with db.begin_nested():
+            post_inventory_adjustment_entry(
+                db,
+                restaurant_id,
+                source_id=source_id,
+                reference=reference,
+                entry_date=entry_date,
+                net_amount=net_amount,
+                user_id=user_id,
+            )
+    except Exception:  # noqa: BLE001 - l'opération stock prime sur la comptabilisation
+        logger.warning("Echec comptabilisation écart inventaire %s", source_id, exc_info=True)
+
+
+def post_order_sale_entry_safe(db: Session, order, user_id: str | None, *, payment_method: PaymentMethod | None = None) -> None:
+    """Comptabilise une vente sans jamais bloquer l'encaissement (savepoint isolé)."""
+    try:
+        if not order or not getattr(order, "restaurant_id", None):
+            return
+        resolved_user = user_id or getattr(order, "cashier_id", None)
+        if not resolved_user:
+            resolved_user = (
+                db.query(User.id)
+                .filter(User.restaurant_id == order.restaurant_id)
+                .order_by(User.created_at.asc())
+                .scalar()
+            )
+        if not resolved_user:
+            return
+        with db.begin_nested():
+            post_order_sale_entry(db, order.restaurant_id, order, resolved_user, payment_method=payment_method)
+    except Exception:  # noqa: BLE001 - la vente prime sur la comptabilisation
+        logger.warning("Echec comptabilisation vente commande %s", getattr(order, "id", "?"), exc_info=True)
 
 
 def posted_lines_query(db: Session, restaurant_id: str, start: datetime | None = None, end: datetime | None = None):
@@ -1082,6 +1390,46 @@ def stock_valuation(depot_id: str | None = None, current_user: User = Depends(re
         return {"warning": f"Etat de stock valorise indisponible: {exc}"}
 
 
+def vat_declaration_totals(db: Session, restaurant_id: str, start: datetime, end: datetime) -> dict:
+    """Agrège la TVA collectée (4457) et déductible (4456) sur une période.
+
+    Retourne collected, deductible, net_vat_due (à payer si >0) et vat_credit
+    (crédit reportable si la déductible dépasse la collectée).
+    """
+    accounts = ensure_default_accounting(db, restaurant_id)
+    collected_id = accounts["vat_collected"].id
+    deductible_id = accounts["vat_deductible"].id
+    collected = Decimal("0.00")
+    deductible = Decimal("0.00")
+    for line, _entry, account in posted_lines_query(db, restaurant_id, start, end).all():
+        if account.id == collected_id:
+            collected += money(line.credit) - money(line.debit)
+        elif account.id == deductible_id:
+            deductible += money(line.debit) - money(line.credit)
+    net = collected - deductible
+    return {
+        "rate": float(VAT_RATE),
+        "vat_collected": collected,
+        "vat_deductible": deductible,
+        "net_vat_due": net if net > 0 else Decimal("0.00"),
+        "vat_credit": (-net) if net < 0 else Decimal("0.00"),
+    }
+
+
+@router.get("/reports/vat-declaration")
+def vat_declaration(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Déclaration de TVA (collectée / déductible / net à payer) sur une période (mois)."""
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    totals = vat_declaration_totals(db, current_user.restaurant_id, start, end)
+    return {"start_date": start, "end_date": end, **totals}
+
+
 @router.post("/stock-movements/{movement_id}/generate-entry", status_code=201)
 def generate_stock_accounting_entry(movement_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
@@ -1170,7 +1518,74 @@ def dish_margins(start_date: datetime | None = None, end_date: datetime | None =
         .group_by(CustomerOrderItem.menu_item_id, CustomerOrderItem.name)
         .all()
     )
-    return [{"menu_item_id": menu_item_id, "name": name, "quantity_sold": int(quantity or 0), "revenue": float(revenue or 0), "estimated_cost": 0, "estimated_margin": float(revenue or 0), "margin_rate": 100 if revenue else 0} for menu_item_id, name, quantity, revenue in rows]
+    from app.modules.stock.router import compute_dish_costs
+
+    costs = compute_dish_costs(db, current_user.restaurant_id)
+    result = []
+    for menu_item_id, name, quantity, revenue in rows:
+        qty = int(quantity or 0)
+        rev = money(revenue or 0)
+        unit_cost = money(costs.get(menu_item_id, Decimal("0")))
+        total_cost = money(unit_cost * qty)
+        margin = rev - total_cost
+        result.append({
+            "menu_item_id": menu_item_id,
+            "name": name,
+            "quantity_sold": qty,
+            "revenue": rev,
+            "unit_cost": unit_cost,
+            "estimated_cost": total_cost,
+            "estimated_margin": margin,
+            "margin_rate": round(float(margin / rev * 100), 2) if rev else 0,
+            "food_cost_rate": round(float(total_cost / rev * 100), 2) if rev else 0,
+        })
+    return result
+
+
+@router.get("/reports/food-cost")
+def food_cost_report(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    """Food-cost % global et par catégorie (coût matière CMUP / CA) sur une période."""
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    from app.modules.catalog.models import MenuCategory, MenuItem
+    from app.modules.stock.router import compute_dish_costs
+
+    start, end = report_range(start_date, end_date)
+    costs = compute_dish_costs(db, current_user.restaurant_id)
+    rows = (
+        db.query(CustomerOrderItem.menu_item_id, func.coalesce(func.sum(CustomerOrderItem.quantity), 0), func.coalesce(func.sum(CustomerOrderItem.line_total), 0))
+        .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.order_id)
+        .filter(CustomerOrder.restaurant_id == current_user.restaurant_id, CustomerOrder.created_at >= start, CustomerOrder.created_at <= end, CustomerOrder.status != "Annulée")
+        .group_by(CustomerOrderItem.menu_item_id)
+        .all()
+    )
+    category_of = {item.id: item.category_id for item in db.query(MenuItem).filter(MenuItem.restaurant_id == current_user.restaurant_id).all()}
+    category_name = {cat.id: cat.name for cat in db.query(MenuCategory).filter(MenuCategory.restaurant_id == current_user.restaurant_id).all()}
+
+    total_revenue = Decimal("0")
+    total_cost = Decimal("0")
+    by_category: dict[str, dict] = {}
+    for menu_item_id, quantity, revenue in rows:
+        rev = money(revenue or 0)
+        cost = money(money(costs.get(menu_item_id, Decimal("0"))) * int(quantity or 0))
+        total_revenue += rev
+        total_cost += cost
+        name = category_name.get(category_of.get(menu_item_id), "Sans catégorie")
+        bucket = by_category.setdefault(name, {"category": name, "revenue": Decimal("0"), "material_cost": Decimal("0")})
+        bucket["revenue"] += rev
+        bucket["material_cost"] += cost
+    for bucket in by_category.values():
+        bucket["margin"] = bucket["revenue"] - bucket["material_cost"]
+        bucket["food_cost_rate"] = round(float(bucket["material_cost"] / bucket["revenue"] * 100), 2) if bucket["revenue"] else 0
+
+    return {
+        "start_date": start,
+        "end_date": end,
+        "revenue": total_revenue,
+        "material_cost": total_cost,
+        "margin": total_revenue - total_cost,
+        "food_cost_rate": round(float(total_cost / total_revenue * 100), 2) if total_revenue else 0,
+        "by_category": sorted(by_category.values(), key=lambda row: row["category"]),
+    }
 
 
 @router.get("/stock-rotation")

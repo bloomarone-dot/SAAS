@@ -2,9 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DashboardIcon } from "../icons";
 import { Panel } from "../DashboardPrimitives";
+import { apiFetch } from "@/config/http";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 const PERIODS = [
@@ -61,11 +72,9 @@ export function AdminDashboard({ overrides = {} }) {
       const query = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString() });
       if (category !== "all") query.set("category", category);
       if (branchId) query.set("branch_id", branchId);
-      const token = localStorage.getItem("access_token");
-      const response = await fetch(`${apiBaseUrl}/api/v1/dashboard/analytics?${query}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) setData(await response.json());
+      setData(await apiFetch(`/api/v1/dashboard/analytics?${query}`, {
+        fallback: "Impossible de charger les analyses du tableau de bord.",
+      }));
     } catch {
       // le dashboard ne doit pas casser sur une erreur réseau
     } finally {
@@ -87,6 +96,19 @@ export function AdminDashboard({ overrides = {} }) {
   const meal = Number(data?.meal_vs_drink?.meal || 0);
   const drink = Number(data?.meal_vs_drink?.drink || 0);
   const mealShare = meal + drink ? Math.round((meal / (meal + drink)) * 100) : 0;
+
+  function exportDashboardData() {
+    const rows = [
+      ["Graphique", "Libellé", "Valeur"],
+      ...(data?.hourly_sales ?? []).map((row) => ["Chiffre d'affaires", row.hour, row.revenue]),
+      ...(data?.sales_chart ?? []).map((row) => ["Ventes par période", row.label, row.revenue]),
+      ...(data?.payment_methods ?? []).map((row) => ["Paiements", row.method, row.amount]),
+      ...(data?.top_products ?? []).map((row) => ["Produits", row.name, row.revenue]),
+      ...(data?.employee_performance ?? []).map((row) => ["Performance serveur", row.name, row.revenue]),
+      ...(data?.stock_alerts ?? []).map((row) => ["Stock", row.name, row.current_stock]),
+    ];
+    downloadCsv("dashboard-graphiques.csv", rows);
+  }
 
   return (
     <section className="space-y-4">
@@ -115,6 +137,9 @@ export function AdminDashboard({ overrides = {} }) {
           </select>
         )}
         <div className="ml-auto flex gap-1">
+          <button type="button" onClick={exportDashboardData} className="rounded bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
+            Exporter graphiques
+          </button>
           {CATEGORIES.map(([key, label]) => (
             <button key={key} type="button" onClick={() => setCategory(key)}
               className={`rounded px-3 py-1.5 text-xs font-semibold transition ${category === key ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
@@ -178,7 +203,7 @@ export function AdminDashboard({ overrides = {} }) {
       {isLoading && !data && <p className="text-center text-sm font-semibold text-slate-400">Chargement…</p>}
 
       {ordersModal && (
-        <OrdersModal apiBaseUrl={apiBaseUrl} title={ordersModal.title} statuses={ordersModal.statuses} onClose={() => setOrdersModal(null)} />
+        <OrdersModal title={ordersModal.title} statuses={ordersModal.statuses} onClose={() => setOrdersModal(null)} />
       )}
     </section>
   );
@@ -194,7 +219,7 @@ function RealtimeStat({ label, value, tone, onClick }) {
   );
 }
 
-function OrdersModal({ apiBaseUrl, title, statuses, onClose }) {
+function OrdersModal({ title, statuses, onClose }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
@@ -203,16 +228,16 @@ function OrdersModal({ apiBaseUrl, title, statuses, onClose }) {
     let active = true;
     (async () => {
       try {
-        const token = localStorage.getItem("access_token");
-        const res = await fetch(`${apiBaseUrl}/api/v1/orders?limit=100`, { headers: { Authorization: `Bearer ${token}` } });
-        const data = res.ok ? await res.json() : [];
+        const data = await apiFetch("/api/v1/orders?limit=100", {
+          fallback: "Impossible de charger les commandes.",
+        }).catch(() => []);
         if (active) setOrders((data || []).filter((order) => statuses.includes(order.status)));
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, [apiBaseUrl, statuses]);
+  }, [statuses]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>

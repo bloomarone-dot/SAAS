@@ -24,7 +24,7 @@ export function clearToken() {
  *   purge la session et notifie l'app pour rediriger vers le login
  * - normalise les erreurs reseau/HTTP en message lisible
  */
-export async function apiFetch(path, { body, headers, json = true, fallback = "Action impossible.", ...options } = {}) {
+export async function apiFetch(path, { body, headers, json = true, fallback = "Action impossible: le serveur n'a pas fourni de détail.", ...options } = {}) {
   const token = getToken();
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   // Une chaine est consideree deja serialisee (compat appels existants); seul un
@@ -60,7 +60,7 @@ export async function apiFetch(path, { body, headers, json = true, fallback = "A
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(formatApiError(data?.detail, fallback));
+    throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
   }
   return data;
 }

@@ -27,7 +27,7 @@ const roleLabels = {
   COMPTABLE: "Comptable",
 };
 
-export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, showCreateOnMount = false }) {
+export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, showCreateOnMount = false, onNavigate }) {
   const [users, setUsers] = useState([]);
   const [permissionGroups, setPermissionGroups] = useState([]);
   const [rolePresets, setRolePresets] = useState([]);
@@ -120,12 +120,14 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
   }, [form.role, formRoleDefaults]);
 
   async function api(path, options = {}) {
+    const fallback = options.fallback || "Action utilisateur impossible.";
+    const { fallback: _fallback, ...requestOptions } = options;
     const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
+      ...requestOptions,
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        ...(options.headers ?? {}),
+        ...(requestOptions.headers ?? {}),
       },
     });
 
@@ -133,7 +135,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(formatApiError(data.detail, "Opération impossible."));
+      throw new Error(formatApiError(data.detail ?? data.message ?? data.error, fallback));
     }
     return data;
   }
@@ -207,6 +209,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
       setForm(emptyForm);
       setShowCreateForm(false);
       onMessage(`Utilisateur ${created.first_name} ${created.last_name} créé avec ses accès.`);
+      if (showCreateOnMount) onNavigate?.("staff");
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -684,19 +687,34 @@ function RequiredLabel({ children, required }) {
 
 function Field({ label, required, ...props }) {
   const isPassword = props.type === "password";
+  const [showPassword, setShowPassword] = useState(false);
+  const inputType = isPassword && showPassword ? "text" : props.type;
   return (
     <label className="block">
       <RequiredLabel required={required}>{label}</RequiredLabel>
-      <input
-        {...props}
-        {...validationFor(props.name)}
-        required={required}
-        autoComplete={props.autoComplete ?? (isPassword ? "new-password" : undefined)}
-        autoCorrect={isPassword ? "off" : props.autoCorrect}
-        autoCapitalize={isPassword ? "none" : props.autoCapitalize}
-        spellCheck={isPassword ? false : props.spellCheck}
-        className="mt-2 form-control"
-      />
+      <div className="relative mt-2">
+        <input
+          {...props}
+          {...validationFor(props.name)}
+          type={inputType}
+          required={required}
+          autoComplete={props.autoComplete ?? (isPassword ? "new-password" : undefined)}
+          autoCorrect={isPassword ? "off" : props.autoCorrect}
+          autoCapitalize={isPassword ? "none" : props.autoCapitalize}
+          spellCheck={isPassword ? false : props.spellCheck}
+          className={`form-control ${isPassword ? "pr-12" : ""}`}
+        />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setShowPassword((value) => !value)}
+            aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+            className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-400 hover:text-[var(--dashboard-primary)]"
+          >
+            <DashboardIcon name={showPassword ? "EyeOff" : "Eye"} size={17} />
+          </button>
+        )}
+      </div>
     </label>
   );
 }

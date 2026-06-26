@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -240,25 +242,33 @@ def normalize_type(value: StockMovementType) -> StockMovementType:
     return value
 
 
-def signed_quantity(movement: StockMovement, depot_id: str | None = None) -> float:
+def dec(value) -> Decimal:
+    """Convertit n'importe quelle valeur numérique en Decimal (montants/quantités stock)."""
+    if value is None or value == "":
+        return Decimal("0")
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+def signed_quantity(movement: StockMovement, depot_id: str | None = None) -> Decimal:
     if movement.status != StockMovementStatus.VALIDATED:
-        return 0
+        return Decimal("0")
     movement_type = normalize_type(movement.movement_type)
+    qty = dec(movement.quantity)
     if movement_type in IN_TYPES:
-        return movement.quantity if depot_id is None or movement.destination_depot_id == depot_id else 0
+        return qty if depot_id is None or movement.destination_depot_id == depot_id else Decimal("0")
     if movement_type in OUT_TYPES:
-        return -movement.quantity if depot_id is None or movement.source_depot_id == depot_id else 0
+        return -qty if depot_id is None or movement.source_depot_id == depot_id else Decimal("0")
     if movement_type == StockMovementType.TRANSFER:
         if depot_id is None:
-            return 0
+            return Decimal("0")
         if movement.destination_depot_id == depot_id:
-            return movement.quantity
+            return qty
         if movement.source_depot_id == depot_id:
-            return -movement.quantity
-    return 0
+            return -qty
+    return Decimal("0")
 
 
-def get_current_stock(db: Session, product_id: str, depot_id: str | None = None, restaurant_id: str | None = None) -> float:
+def get_current_stock(db: Session, product_id: str, depot_id: str | None = None, restaurant_id: str | None = None) -> Decimal:
     query = db.query(StockMovement).filter(
         StockMovement.product_id == product_id,
         StockMovement.status == StockMovementStatus.VALIDATED,
@@ -269,7 +279,7 @@ def get_current_stock(db: Session, product_id: str, depot_id: str | None = None,
         query = query.filter(
             (StockMovement.source_depot_id == depot_id) | (StockMovement.destination_depot_id == depot_id)
         )
-    return float(sum(signed_quantity(movement, depot_id) for movement in query.all()))
+    return sum((signed_quantity(movement, depot_id) for movement in query.all()), Decimal("0"))
 
 
 def get_product_stock_by_depot(db: Session, product: Product) -> list[ProductStockByDepot]:
@@ -282,7 +292,7 @@ def get_product_stock_by_depot(db: Session, product: Product) -> list[ProductSto
                 depot_name=depot.name,
                 depot_code=depot.code,
                 quantity=quantity,
-                value=quantity * float(product.purchase_price or 0),
+                value=quantity * dec(product.purchase_price),
             )
         )
     return rows
@@ -290,8 +300,9 @@ def get_product_stock_by_depot(db: Session, product: Product) -> list[ProductSto
 
 def product_public(db: Session, product: Product) -> dict:
     unit = db.get(Unit, product.unit_id)
+    purchase_unit = db.get(Unit, product.purchase_unit_id) if product.purchase_unit_id else None
     stock_by_depot = get_product_stock_by_depot(db, product)
-    current_stock = sum(row.quantity for row in stock_by_depot)
+    current_stock = get_current_stock(db, product.id, restaurant_id=product.restaurant_id)
     return {
         "id": product.id,
         "restaurant_id": product.restaurant_id,
@@ -302,13 +313,16 @@ def product_public(db: Session, product: Product) -> dict:
         "unit_id": product.unit_id,
         "unit_name": unit.name if unit else None,
         "unit_symbol": unit.symbol if unit else None,
+        "purchase_unit_id": product.purchase_unit_id,
+        "purchase_unit_name": purchase_unit.name if purchase_unit else None,
+        "purchase_factor": product.purchase_factor,
         "purchase_price": product.purchase_price,
         "minimum_stock": product.minimum_stock,
         "packaging_sale_price": product.packaging_sale_price,
         "sale_margin_rate": product.sale_margin_rate,
         "is_active": product.is_active,
         "current_stock": current_stock,
-        "stock_value": current_stock * float(product.purchase_price or 0),
+        "stock_value": current_stock * dec(product.purchase_price),
         "stock_by_depot": stock_by_depot,
         "created_at": product.created_at,
     }
@@ -345,8 +359,8 @@ def validate_movement_payload(
                 raise HTTPException(status_code=404, detail="Depot introuvable ou inactif")
     if movement_type in {StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS, StockMovementType.TRANSFER}:
         available = get_current_stock(db, product_id, source_depot_id, restaurant_id)
-        if available < quantity:
-            raise HTTPException(status_code=400, detail=f"Stock insuffisant: disponible {available:g}, demande {quantity:g}")
+        if available < dec(quantity):
+            raise HTTPException(status_code=400, detail=f"Stock insuffisant: disponible {available:g}, demande {dec(quantity):g}")
 
 
 def add_movement(
@@ -378,7 +392,25 @@ def add_movement(
             source_depot_id=source_depot_id,
             destination_depot_id=destination_depot_id,
         )
-    price = float(unit_price if unit_price is not None else product.purchase_price or 0)
+    qty = dec(quantity)
+    is_purchase_entry = movement_type in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY} and unit_price is not None
+    if is_purchase_entry:
+        # Recalcul du CMUP pondéré : (qté_avant×cmup + qté_entrée×prix) / qté_totale.
+        entry_price = dec(unit_price)
+        qty_before = get_current_stock(db, product.id, restaurant_id=restaurant_id)
+        cmup_before = product.cmup if product.cmup else dec(product.purchase_price)
+        new_total = qty_before + qty
+        product.cmup = (
+            ((qty_before * cmup_before + qty * entry_price) / new_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if new_total > 0 else entry_price
+        )
+        product.purchase_price = entry_price
+        price = entry_price
+    elif unit_price is not None:
+        price = dec(unit_price)
+    else:
+        # Sorties / pertes / transferts : valorisées au CMUP courant (repli prix d'achat).
+        price = product.cmup if product.cmup else dec(product.purchase_price)
     movement = StockMovement(
         restaurant_id=restaurant_id,
         movement_date=movement_date or datetime.utcnow(),
@@ -386,9 +418,9 @@ def add_movement(
         product_id=product.id,
         source_depot_id=source_depot_id,
         destination_depot_id=destination_depot_id,
-        quantity=float(quantity),
+        quantity=qty,
         unit_price=price,
-        total_amount=float(quantity) * price,
+        total_amount=qty * price,
         supplier_id=supplier_id,
         reason=reason,
         reference=reference,
@@ -399,17 +431,21 @@ def add_movement(
     )
     db.add(movement)
     db.flush()
-    if movement_type in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY} and unit_price is not None:
-        product.purchase_price = float(unit_price)
+    # Inventaire permanent : une sortie pour vente/consommation/perte décharge le stock
+    # (Débit 6037 / Crédit 37 au CMUP). Les écarts d'inventaire sont gérés séparément.
+    if status == StockMovementStatus.VALIDATED and movement_type in {StockMovementType.OUTPUT, StockMovementType.LOSS}:
+        from app.modules.finance.router import post_stock_cogs_entry_safe
+
+        post_stock_cogs_entry_safe(db, movement, user_id)
     return movement
 
 
-def notify_if_low_stock(db: Session, product: Product, previous_total: float) -> None:
-    threshold = float(product.minimum_stock or 0)
+def notify_if_low_stock(db: Session, product: Product, previous_total) -> None:
+    threshold = dec(product.minimum_stock)
     if threshold <= 0:
         return
     new_total = get_current_stock(db, product.id, restaurant_id=product.restaurant_id)
-    if not (new_total <= threshold < previous_total):
+    if not (new_total <= threshold < dec(previous_total)):
         return
     message = f"{product.name} est sous le seuil minimum ({new_total:g} restant, seuil {threshold:g})."
     for target_role in ("STOCK", "ADMIN"):
@@ -425,8 +461,8 @@ def get_item_or_404(db: Session, item_id: str, restaurant_id: str | None, *, for
     return product
 
 
-def get_location_quantity(item: Product, location: StockLocation) -> float:
-    return float(getattr(item, "_stock_by_location", {}).get(location, 0))
+def get_location_quantity(item: Product, location: StockLocation) -> Decimal:
+    return dec(getattr(item, "_stock_by_location", {}).get(location, 0))
 
 
 def set_location_quantity(_item: Product, _location: StockLocation, _value: float) -> None:
@@ -453,12 +489,12 @@ def consume_fifo(
         movement_type=StockMovementType.LOSS if movement_type == StockMovementType.LOSS else StockMovementType.OUTPUT,
         product_id=item.id,
         source_depot_id=source.id,
-        quantity=float(quantity),
-        unit_price=float(item.purchase_price or 0),
+        quantity=dec(quantity),
+        unit_price=dec(item.purchase_price),
         reason=note or destination,
         reference=reference,
     )
-    return float(movement.total_amount or 0), [movement], movement.id
+    return dec(movement.total_amount), [movement], movement.id
 
 
 @router.get("/summary", response_model=StockSummaryOut)
@@ -488,7 +524,7 @@ def stock_summary(current_user: User = Depends(require_tenant_user), db: Session
     for movement in outputs:
         if normalize_type(movement.movement_type) == StockMovementType.LOSS:
             key = movement.reason or "perte"
-            loss_by_reason[key] = loss_by_reason.get(key, 0) + float(movement.total_amount or 0)
+            loss_by_reason[key] = loss_by_reason.get(key, Decimal("0")) + dec(movement.total_amount)
     return StockSummaryOut(
         product_count=len(products),
         low_stock_count=len([p for p in public_products if p["current_stock"] <= p["minimum_stock"]]),
@@ -497,9 +533,9 @@ def stock_summary(current_user: User = Depends(require_tenant_user), db: Session
         main_stock_value=main_value,
         kitchen_stock_value=kitchen_value,
         drink_stock_value=drink_value,
-        total_entries_value=sum(float(m.total_amount or 0) for m in entries),
-        total_outputs_value=sum(float(m.total_amount or 0) for m in outputs),
-        total_damage_loss=sum(float(m.total_amount or 0) for m in outputs if normalize_type(m.movement_type) == StockMovementType.LOSS),
+        total_entries_value=sum((dec(m.total_amount) for m in entries), Decimal("0")),
+        total_outputs_value=sum((dec(m.total_amount) for m in outputs), Decimal("0")),
+        total_damage_loss=sum((dec(m.total_amount) for m in outputs if normalize_type(m.movement_type) == StockMovementType.LOSS), Decimal("0")),
         latest_entries=entries[:5],
         latest_outputs=outputs[:5],
         latest_transfers=transfers[:5],
@@ -525,6 +561,7 @@ def create_product(payload: ProductIn, current_user: User = Depends(require_tena
     assert_permission(current_user, Permission.STOCK_UPDATE)
     ensure_default_data(db, current_user.restaurant_id)
     unit = resolve_unit(db, current_user.restaurant_id, payload.unit_id or payload.unit)
+    purchase_unit = resolve_unit(db, current_user.restaurant_id, payload.purchase_unit_id) if payload.purchase_unit_id else None
     product = Product(
         restaurant_id=current_user.restaurant_id,
         code=payload.code,
@@ -532,7 +569,10 @@ def create_product(payload: ProductIn, current_user: User = Depends(require_tena
         product_type=payload.product_type,
         category_id=payload.category_id,
         unit_id=unit.id,
+        purchase_unit_id=purchase_unit.id if purchase_unit else None,
+        purchase_factor=payload.purchase_factor,
         purchase_price=payload.purchase_price,
+        cmup=payload.purchase_price,
         minimum_stock=payload.minimum_stock,
         packaging_sale_price=payload.packaging_sale_price,
         sale_margin_rate=payload.sale_margin_rate,
@@ -566,6 +606,8 @@ def update_product(product_id: str, payload: ProductUpdateIn, current_user: User
             data["unit_id"] = resolve_unit(db, current_user.restaurant_id, unit_value).id
     if data.get("unit_id"):
         data["unit_id"] = resolve_unit(db, current_user.restaurant_id, data["unit_id"]).id
+    if data.get("purchase_unit_id"):
+        data["purchase_unit_id"] = resolve_unit(db, current_user.restaurant_id, data["purchase_unit_id"]).id
     for field, value in data.items():
         setattr(product, field, value)
     log_action(db, current_user, "stock.product_update", "product", product.id, f"Modification produit stock {product.name}")
@@ -595,9 +637,27 @@ def list_depots(current_user: User = Depends(require_tenant_user), db: Session =
 @router.post("/depots", response_model=DepotPublic, status_code=201)
 def create_depot(payload: DepotIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    depot = Depot(restaurant_id=current_user.restaurant_id, **payload.dict())
+    code = payload.code.strip().upper()
+    exists = db.query(Depot).filter(
+        Depot.restaurant_id == current_user.restaurant_id,
+        Depot.code == code,
+    ).first()
+    if exists:
+        raise HTTPException(status_code=400, detail=f"Un dépôt avec le code {code} existe déjà.")
+
+    data = payload.model_dump()
+    data["code"] = code
+    data["type"] = DepotType(data["type"])
+    depot = Depot(restaurant_id=current_user.restaurant_id, **data)
     db.add(depot)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Création du dépôt impossible: code ou données déjà utilisés.") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Création du dépôt impossible: données invalides.") from exc
     db.refresh(depot)
     return depot
 
@@ -676,8 +736,48 @@ def create_supplier(payload: SupplierIn, current_user: User = Depends(require_te
     return supplier
 
 
+def conversion_factor(product: Product) -> Decimal:
+    """Nombre d'unités de stock par unité d'achat (>=1 par défaut)."""
+    factor = dec(product.purchase_factor) if product.purchase_factor else Decimal("1")
+    return factor if factor > 0 else Decimal("1")
+
+
+def compute_dish_costs(db: Session, restaurant_id: str) -> dict[str, Decimal]:
+    """Coût matière unitaire par plat (menu_item_id -> Decimal).
+
+    = Σ ingrédients (quantité/plat × CMUP) + Σ emballages (quantité requise × CMUP).
+    """
+    costs: dict[str, Decimal] = {}
+    recipe_rows = (
+        db.query(StockRecipeIngredient, Product)
+        .join(Product, Product.id == StockRecipeIngredient.stock_item_id)
+        .filter(StockRecipeIngredient.restaurant_id == restaurant_id, StockRecipeIngredient.is_active.is_(True))
+        .all()
+    )
+    for link, product in recipe_rows:
+        costs[link.menu_item_id] = costs.get(link.menu_item_id, Decimal("0")) + dec(link.quantity_per_dish) * dec(product.cmup_current)
+    packaging_rows = (
+        db.query(StockItemPackaging, Product)
+        .join(Product, Product.id == StockItemPackaging.packaging_item_id)
+        .filter(StockItemPackaging.restaurant_id == restaurant_id, StockItemPackaging.is_active.is_(True))
+        .all()
+    )
+    for link, product in packaging_rows:
+        costs[link.menu_item_id] = costs.get(link.menu_item_id, Decimal("0")) + dec(link.required_quantity) * dec(product.cmup_current)
+    return costs
+
+
 def create_stock_entry(payload: StockEntryIn, current_user: User, db: Session, movement_type: StockMovementType) -> StockMovement:
     previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
+    quantity = dec(payload.quantity)
+    unit_price = dec(payload.unit_price) if payload.unit_price is not None else None
+    if payload.in_purchase_unit:
+        # Saisie en unité d'achat (sac, casier) -> conversion en unité de stock.
+        product = get_product_or_404(db, payload.product_id, current_user.restaurant_id)
+        factor = conversion_factor(product)
+        quantity = quantity * factor
+        if unit_price is not None:
+            unit_price = unit_price / factor  # prix par unité de stock (précision conservée)
     movement = add_movement(
         db,
         restaurant_id=current_user.restaurant_id,
@@ -685,14 +785,17 @@ def create_stock_entry(payload: StockEntryIn, current_user: User, db: Session, m
         movement_type=movement_type,
         product_id=payload.product_id,
         destination_depot_id=payload.destination_depot_id,
-        quantity=payload.quantity,
-        unit_price=payload.unit_price,
+        quantity=quantity,
+        unit_price=unit_price,
         supplier_id=payload.supplier_id,
         reason=payload.reason,
         reference=payload.reference,
         movement_date=payload.movement_date,
     )
     notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
+    from app.modules.finance.router import post_stock_reception_entry_safe
+
+    post_stock_reception_entry_safe(db, movement, current_user.id)
     db.commit()
     db.refresh(movement)
     return movement
@@ -891,7 +994,7 @@ def create_inventory(payload: InventoryCreateIn, current_user: User = Depends(re
         ]
     for detail in details:
         theoretical = get_current_stock(db, detail.product_id, depot.id, current_user.restaurant_id)
-        real = float(detail.real_quantity)
+        real = dec(detail.real_quantity)
         db.add(InventoryDetail(restaurant_id=current_user.restaurant_id, inventory_id=inventory.id, product_id=detail.product_id, theoretical_quantity=theoretical, real_quantity=real, gap_quantity=real - theoretical))
     db.commit()
     db.refresh(inventory)
@@ -932,8 +1035,8 @@ def update_inventory_line(inventory_id: str, line_id: str, payload: InventoryLin
     line = db.get(InventoryDetail, line_id)
     if not line or line.inventory_id != inventory.id:
         raise HTTPException(status_code=404, detail="Ligne inventaire introuvable")
-    line.real_quantity = payload.real_stock
-    line.gap_quantity = payload.real_stock - float(line.theoretical_quantity or 0)
+    line.real_quantity = dec(payload.real_stock)
+    line.gap_quantity = dec(payload.real_stock) - dec(line.theoretical_quantity)
     db.commit()
     db.refresh(line)
     return line
@@ -957,6 +1060,30 @@ def validate_inventory(inventory_id: str, current_user: User = Depends(require_t
     inventory.status = InventoryStatus.VALIDATED
     inventory.validated_by = current_user.id
     inventory.validated_at = datetime.utcnow()
+
+    from decimal import Decimal
+
+    from app.modules.finance.router import post_inventory_adjustment_entry_safe
+
+    product_ids = [detail.product_id for detail in details]
+    costs = {
+        product.id: product.purchase_price
+        for product in db.query(Product).filter(Product.id.in_(product_ids)).all()
+    } if product_ids else {}
+    net_amount = sum(
+        (Decimal(str(detail.gap_quantity or 0)) * Decimal(str(costs.get(detail.product_id, 0) or 0)) for detail in details),
+        Decimal("0"),
+    )
+    post_inventory_adjustment_entry_safe(
+        db,
+        current_user.restaurant_id,
+        source_id=inventory.id,
+        reference=inventory.id,
+        entry_date=inventory.inventory_date,
+        net_amount=net_amount,
+        user_id=current_user.id,
+    )
+
     db.commit()
     db.refresh(inventory)
     return inventory_public(db, inventory)
@@ -988,17 +1115,17 @@ def get_stock_movements_report(
     movements = query.order_by(StockMovement.movement_date.desc()).all()
     products = [product_public(db, p) for p in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id).all()]
     stock_value = sum(product["stock_value"] for product in products)
-    entries = sum(float(m.total_amount or 0) for m in movements if normalize_type(m.movement_type) in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS})
-    outputs = sum(float(m.total_amount or 0) for m in movements if normalize_type(m.movement_type) in OUT_TYPES)
+    entries = sum((dec(m.total_amount) for m in movements if normalize_type(m.movement_type) in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS}), Decimal("0"))
+    outputs = sum((dec(m.total_amount) for m in movements if normalize_type(m.movement_type) in OUT_TYPES), Decimal("0"))
     return StockReportOut(
         start_date=start,
         end_date=end,
         entries_value=entries,
         outputs_value=outputs,
-        damage_loss=sum(float(m.total_amount or 0) for m in movements if normalize_type(m.movement_type) == StockMovementType.LOSS),
+        damage_loss=sum((dec(m.total_amount) for m in movements if normalize_type(m.movement_type) == StockMovementType.LOSS), Decimal("0")),
         stock_value=stock_value,
-        estimated_sales_value=sum(product["stock_value"] * (1 + float(product["sale_margin_rate"] or 0) / 100) for product in products),
-        estimated_profit=max(0, sum(product["stock_value"] * (float(product["sale_margin_rate"] or 0) / 100) for product in products)),
+        estimated_sales_value=sum((product["stock_value"] * (1 + dec(product["sale_margin_rate"]) / 100) for product in products), Decimal("0")),
+        estimated_profit=max(Decimal("0"), sum((product["stock_value"] * (dec(product["sale_margin_rate"]) / 100) for product in products), Decimal("0"))),
         low_stock_count=len([product for product in products if product["current_stock"] <= product["minimum_stock"]]),
         movement_count=len(movements),
         movements=movements,

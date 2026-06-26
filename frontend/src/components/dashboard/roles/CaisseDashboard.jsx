@@ -187,7 +187,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const showSearch = ["dashboard", "cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation"].includes(activeView);
   const showKpis = ["dashboard", "cashier", "payments", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView);
   const showPaymentArea = ["dashboard", "cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation"].includes(activeView);
-  const showReceiptArea = ["dashboard", "cashier", "receipts", "print-receipt", "cancel-payment", "payment-history"].includes(activeView);
+  const showReceiptArea = ["dashboard", "cashier", "receipts", "print-receipt", "cancel-payment", "payment-history", "completed-payments"].includes(activeView);
   const showClosingArea = ["dashboard", "cashier", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView);
   const paymentGridClass = activeView === "unpaid-orders" ? "grid gap-4" : "grid gap-4 xl:grid-cols-[0.95fr_1fr]";
 
@@ -281,10 +281,10 @@ export function CaisseDashboard({ overrides = {} }) {
     }
   }
 
-  function printReceipt(order) {
+  async function printReceipt(order) {
     if (!order) return;
-    orderApi.logReceiptPrint(order.id).catch(() => {});
-    openPrintWindow(receiptHtml(order, restaurant, currentUser), `Reçu ${order.order_number}`);
+    const printable = await orderApi.logReceiptPrint(order.id).catch(() => order);
+    openPrintWindow(receiptHtml(printable, restaurant, currentUser), `Reçu ${order.order_number}`);
   }
 
   function printCashReport() {
@@ -514,7 +514,8 @@ function getCashierViewCopy(view) {
   const copy = {
     dashboard: ["Dashboard Caissier", ""],
     cashier: ["Dashboard Caissier", ""],
-    payments: ["Paiements", "Encaissez les commandes prêtes, choisissez le mode de paiement et appliquez les remises autorisées."],
+    payments: ["Tous les paiements", "Encaissez les commandes prêtes et consultez les paiements reçus, annulés ou en attente."],
+    "completed-payments": ["Paiements effectués", "Consultez uniquement les paiements validés et réellement encaissés."],
     "unpaid-orders": ["Commandes non payées", "Liste des commandes prêtes ou servies en attente d'encaissement."],
     "cash-order-detail": ["Commande à encaisser", "Sélectionnez une commande et contrôlez son détail avant validation."],
     discounts: ["Remise autorisée", "Appliquez une remise validée ou un code promotionnel avant paiement."],
@@ -816,14 +817,17 @@ function receiptHtml(order, restaurant, currentUser) {
           ${restaurant?.tax_id ? `<p class="center muted">RC/ID fiscal : ${escapeHtml(restaurant.tax_id)}</p>` : ""}
           <div class="separator"></div>
           <p class="center"><strong>REÇU DE PAIEMENT</strong></p>
-          <p class="center muted">${formatDateTime(order.updated_at || new Date().toISOString())}</p>
+          <p class="center muted">Créée le ${formatDateTime(order.created_at || order.updated_at || new Date().toISOString())}</p>
           <div class="separator"></div>
           <div class="meta">
             <strong>Commande</strong><span>${escapeHtml(order.order_number)}</span>
-            <strong>Client/Table</strong><span>${escapeHtml(orderCustomerLabel(order))}</span>
+            <strong>Client</strong><span>${escapeHtml(order.customer_name || orderCustomerLabel(order) || "Client anonyme")}</span>
+            <strong>Table</strong><span>${escapeHtml(order.table_id ? `${order.table_room || "Salle"} · Table ${order.table_name || order.table_id}` : "-")}</span>
             <strong>Serveur</strong><span>${escapeHtml(order.server_name || "Non assigné")}</span>
             <strong>Caissier</strong><span>${escapeHtml(cashierName)}</span>
             <strong>Paiement</strong><span>${escapeHtml(order.payment_method || "Non renseigné")}</span>
+            <strong>Encaissement</strong><span>${escapeHtml(formatDateTime(order.paid_at || order.updated_at || new Date().toISOString()))}</span>
+            <strong>Impression</strong><span>${escapeHtml(formatDateTime(order.printed_at || new Date().toISOString()))}</span>
             ${order.transaction_id ? `<strong>Transaction</strong><span>${escapeHtml(order.transaction_id)}</span>` : ""}
           </div>
           <div class="separator"></div>

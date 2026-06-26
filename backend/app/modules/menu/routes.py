@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,7 +17,7 @@ from app.modules.users.models import User
 from app.security import detect_image_extension
 
 router = APIRouter(prefix="/menu", tags=["menu"])
-MENU_UPLOAD_DIR = Path("uploads/menu")
+MENU_UPLOAD_DIR = Path(os.getenv("UPLOADS_DIR", "uploads")) / "menu"
 ALLOWED_MENU_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 
@@ -26,13 +27,30 @@ def assert_any_permission(user: User, permissions: tuple[Permission, ...]) -> No
         raise HTTPException(status_code=403, detail=f"Permission requise: {required}")
 
 
+def assert_menu_read_allowed(user: User) -> None:
+    assert_any_permission(user, (
+        Permission.RESTAURANT_SETTINGS_READ,
+        Permission.KITCHEN_READ,
+        Permission.SERVICE_READ,
+        Permission.STOCK_READ,
+    ))
+
+
+def assert_menu_update_allowed(user: User) -> None:
+    assert_any_permission(user, (
+        Permission.RESTAURANT_SETTINGS_UPDATE,
+        Permission.KITCHEN_UPDATE,
+        Permission.STOCK_UPDATE,
+    ))
+
+
 @router.post("/images")
 async def upload_menu_image(
     request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(require_tenant_user),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_UPDATE, Permission.KITCHEN_UPDATE))
+    assert_menu_update_allowed(current_user)
     if (file.content_type or "") not in ALLOWED_MENU_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Format image invalide. Utilisez PNG, JPG ou WEBP.")
 
@@ -43,11 +61,14 @@ async def upload_menu_image(
     if not extension:
         raise HTTPException(status_code=400, detail="Fichier image invalide ou corrompu.")
 
-    MENU_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     filename = f"{current_user.restaurant_id}-{uuid4().hex}{extension}"
     destination = MENU_UPLOAD_DIR / filename
-    destination.write_bytes(content)
-    return {"image_url": str(request.url_for("uploads", path=f"menu/{filename}"))}
+    try:
+        MENU_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Stockage image indisponible. Vérifiez les permissions du dossier uploads/menu.") from exc
+    return {"image_url": f"/uploads/menu/{filename}"}
 
 
 @router.get("/public/{slug}", response_model=PublicRestaurantMenu)
@@ -104,7 +125,7 @@ def create_new_category(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_UPDATE, Permission.KITCHEN_UPDATE))
+    assert_menu_update_allowed(current_user)
     created = MenuService.create_category(
         db=db,
         restaurant_id=current_user.restaurant_id,
@@ -129,7 +150,7 @@ def get_restaurant_categories(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_READ, Permission.KITCHEN_READ, Permission.SERVICE_READ))
+    assert_menu_read_allowed(current_user)
     if restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=403, detail="Restaurant non autorise")
     return MenuService.get_categories_by_restaurant(db=db, restaurant_id=current_user.restaurant_id)
@@ -141,7 +162,7 @@ def delete_category(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+    assert_menu_update_allowed(current_user)
     category = db.get(CategoryModel, category_id)
     category_name = category.name if category else None
     success = MenuService.delete_category(
@@ -170,7 +191,7 @@ def create_new_dish(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_UPDATE, Permission.KITCHEN_UPDATE))
+    assert_menu_update_allowed(current_user)
     created = MenuService.create_dish(
         db=db,
         restaurant_id=current_user.restaurant_id,
@@ -198,7 +219,7 @@ def get_category_dishes(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_READ, Permission.KITCHEN_READ, Permission.SERVICE_READ))
+    assert_menu_read_allowed(current_user)
     if not MenuService.category_belongs_to_restaurant(db, current_user.restaurant_id, category_id):
         raise HTTPException(status_code=404, detail="Categorie introuvable")
     return MenuService.get_dishes_by_category(
@@ -216,7 +237,7 @@ def update_dish_info(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+    assert_menu_update_allowed(current_user)
     updated_dish = MenuService.update_dish(
         db=db,
         restaurant_id=current_user.restaurant_id,
@@ -244,7 +265,7 @@ def toggle_dish_status(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_any_permission(current_user, (Permission.RESTAURANT_SETTINGS_UPDATE, Permission.KITCHEN_UPDATE))
+    assert_menu_update_allowed(current_user)
     updated_dish = MenuService.toggle_dish_availability(
         db=db,
         restaurant_id=current_user.restaurant_id,
@@ -271,7 +292,7 @@ def delete_dish(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+    assert_menu_update_allowed(current_user)
     dish = db.get(DishModel, dish_id)
     dish_name = dish.name if dish else None
     success = MenuService.delete_dish(

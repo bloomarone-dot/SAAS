@@ -107,6 +107,9 @@ class ProductPublic(OrmModel):
     unit_id: str
     unit_name: Optional[str] = None
     unit_symbol: Optional[str] = None
+    purchase_unit_id: Optional[str] = None
+    purchase_unit_name: Optional[str] = None
+    purchase_factor: float = 1
     purchase_price: float
     minimum_stock: float
     packaging_sale_price: float = 0
@@ -145,6 +148,8 @@ class ProductIn(BaseModel):
     category_id: Optional[str] = None
     unit_id: Optional[str] = None
     unit: Optional[str] = None
+    purchase_unit_id: Optional[str] = None
+    purchase_factor: float = Field(default=1, gt=0)
     purchase_price: float = Field(default=0, ge=0)
     minimum_stock: float = Field(default=0, ge=0)
     alert_threshold: Optional[float] = Field(default=None, ge=0)
@@ -166,6 +171,8 @@ class ProductUpdateIn(BaseModel):
     category_id: Optional[str] = None
     unit_id: Optional[str] = None
     unit: Optional[str] = None
+    purchase_unit_id: Optional[str] = None
+    purchase_factor: Optional[float] = Field(default=None, gt=0)
     purchase_price: Optional[float] = Field(default=None, ge=0)
     minimum_stock: Optional[float] = Field(default=None, ge=0)
     alert_threshold: Optional[float] = Field(default=None, ge=0)
@@ -236,6 +243,9 @@ class StockEntryIn(BaseModel):
     destination_depot_id: str
     quantity: float = Field(gt=0)
     unit_price: Optional[float] = Field(default=None, ge=0)
+    # Si vrai, quantity/unit_price sont exprimés en unité d'ACHAT (sac, casier) :
+    # convertis en unité de stock via le facteur du produit.
+    in_purchase_unit: bool = False
     supplier_id: Optional[str] = None
     reason: Optional[str] = None
     reference: Optional[str] = None

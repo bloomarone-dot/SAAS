@@ -20,6 +20,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
   const [cityFilter, setCityFilter] = useState("ALL");
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
   const [isLoading, setIsLoading] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(focusCreate);
 
   const token = localStorage.getItem("access_token");
 
@@ -54,18 +55,24 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
     fetchBranches();
   }, []);
 
+  useEffect(() => {
+    setShowCreateForm(focusCreate);
+  }, [focusCreate]);
+
   async function api(path, options = {}) {
+    const fallback = options.fallback || "Action branche impossible.";
+    const { fallback: _fallback, ...requestOptions } = options;
     const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
+      ...requestOptions,
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        ...(options.headers ?? {}),
+        ...(requestOptions.headers ?? {}),
       },
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(formatApiError(data.detail, "Opération impossible."));
+      throw new Error(formatApiError(data.detail ?? data.message ?? data.error, fallback));
     }
     return data;
   }
@@ -99,6 +106,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
       });
       setBranches((current) => [created, ...current]);
       setForm(initialBranch);
+      setShowCreateForm(false);
       onMessage(`Branche "${created.name}" créée.`);
     } catch (error) {
       onMessage(error.message);
@@ -113,9 +121,16 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
         <div>
           <h1 className="mt-2 text-4xl font-black text-[#070528]">Branches</h1>
         </div>
+        {!showCreateForm && (
+          <button type="button" onClick={() => setShowCreateForm(true)} className="lte-btn lte-btn-primary">
+            <DashboardIcon name="Plus" size={17} />
+            Créer une branche
+          </button>
+        )}
       </div>
 
-      <div className={`grid gap-6 ${focusCreate ? "xl:grid-cols-1" : "xl:grid-cols-[0.8fr_1.2fr]"}`}>
+      <div className={`grid gap-6 ${showCreateForm ? "xl:grid-cols-[0.8fr_1.2fr]" : "xl:grid-cols-1"}`}>
+        {showCreateForm && (
         <form onSubmit={createBranch} className="border border-slate-200 bg-white p-5 shadow-sm">
           <div className="border-b border-slate-100 pb-4">
             <div>
@@ -142,8 +157,9 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
             Créer la branche
           </button>
         </form>
+        )}
 
-        {!focusCreate && <div className="border border-slate-200 bg-white shadow-sm">
+        <div className="border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 p-5">
             <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
               <div className="flex h-10 items-center gap-2 rounded border border-slate-300 bg-white px-3 focus-within:border-[var(--dashboard-primary)]">
@@ -171,13 +187,16 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="lte-table min-w-[720px]">
+            <table className="lte-table min-w-[900px]">
               <thead>
                 <tr>
                   <th><SortButton label="Branche" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th><SortButton label="Ville" column="city" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th><SortButton label="Adresse" column="address" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                   <th><SortButton label="Téléphone" column="phone" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+                  <th>Responsable</th>
+                  <th>Utilisateurs</th>
+                  <th>Caisses</th>
                   <th><SortButton label="Statut" column="status" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
                 </tr>
               </thead>
@@ -193,6 +212,9 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
                     <td className="px-5 py-4 text-sm font-bold text-slate-700">{branch.city}</td>
                     <td className="px-5 py-4 text-sm font-semibold text-slate-500">{branch.address}</td>
                     <td className="px-5 py-4 text-sm font-semibold text-slate-500">{branch.phone ?? "-"}</td>
+                    <td className="px-5 py-4 text-sm font-semibold text-slate-500">{branch.manager_name ?? "-"}</td>
+                    <td className="px-5 py-4 text-sm font-black text-slate-700">{branch.users_count ?? 0}</td>
+                    <td className="px-5 py-4 text-sm font-black text-slate-700">{branch.cash_registers_count ?? 0}</td>
                     <td className="px-5 py-4">
                       <span className="inline-flex rounded bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
                         {branch.is_active ? "Active" : "Inactive"}
@@ -216,7 +238,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
             )}
           </div>
           {Boolean(filteredBranches.length) && <TableFooter count={filteredBranches.length} label="branche" flush={false} />}
-        </div>}
+        </div>
       </div>
     </section>
   );

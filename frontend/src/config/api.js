@@ -1,3 +1,5 @@
 export function getApiBaseUrl() {
-  return window.location.origin;
+  const configured = import.meta.env.VITE_API_URL?.trim();
+  if (!configured || configured === "/") return window.location.origin;
+  return configured.replace(/\/+$/, "");
 }

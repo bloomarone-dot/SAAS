@@ -121,6 +121,10 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
 
   const token = localStorage.getItem("access_token");
 
+  useEffect(() => {
+    setActiveTab(resolveInitialTab(mode));
+  }, [mode]);
+
   const visibleProducts = useMemo(() => {
     const value = query.trim().toLowerCase();
     if (!value) return products;
@@ -172,17 +176,19 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   }, [inventoryDepotId, products]);
 
   async function api(path, options = {}) {
+    const fallback = options.fallback || "Action stock impossible.";
+    const { fallback: _fallback, ...requestOptions } = options;
     const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
+      ...requestOptions,
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        ...(options.headers || {}),
+        ...(requestOptions.headers || {}),
       },
     });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
-      throw new Error(formatApiError(data?.detail));
+      throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
     }
     if (response.status === 204) return null;
     return response.json();
@@ -190,31 +196,29 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
 
   async function loadAll() {
     setIsLoading(true);
-    try {
-      const [summaryData, productData, depotData, unitData, supplierData, movementData, inventoryData, reportData] =
-        await Promise.all([
-          api("/api/v1/stock/summary"),
-          api("/api/v1/stock/products"),
-          api("/api/v1/stock/depots"),
-          api("/api/v1/stock/units"),
-          api("/api/v1/stock/suppliers"),
-          api("/api/v1/stock/movements"),
-          api("/api/v1/stock/inventories"),
-          api("/api/v1/stock/reports"),
-        ]);
-      setSummary(summaryData);
-      setProducts(productData);
-      setDepots(depotData);
-      setUnits(unitData);
-      setSuppliers(supplierData);
-      setMovements(movementData);
-      setInventories(inventoryData);
-      setReport(reportData);
-    } catch (error) {
-      emit(error.message || "Chargement du stock impossible.");
-    } finally {
-      setIsLoading(false);
-    }
+    const resources = [
+      ["summary", () => api("/api/v1/stock/summary", { fallback: "Résumé stock indisponible." }), setSummary, null],
+      ["products", () => api("/api/v1/stock/products", { fallback: "Chargement des produits impossible." }), setProducts, []],
+      ["depots", () => api("/api/v1/stock/depots", { fallback: "Chargement des dépôts impossible." }), setDepots, []],
+      ["units", () => api("/api/v1/stock/units", { fallback: "Chargement des unités impossible." }), setUnits, []],
+      ["suppliers", () => api("/api/v1/stock/suppliers", { fallback: "Chargement des fournisseurs impossible." }), setSuppliers, []],
+      ["movements", () => api("/api/v1/stock/movements", { fallback: "Chargement des mouvements impossible." }), setMovements, []],
+      ["inventories", () => api("/api/v1/stock/inventories", { fallback: "Chargement des inventaires impossible." }), setInventories, []],
+      ["report", () => api("/api/v1/stock/reports", { fallback: "Rapport stock indisponible." }), setReport, null],
+    ];
+    const results = await Promise.allSettled(resources.map(([, load]) => load()));
+    const errors = [];
+    results.forEach((result, index) => {
+      const [, , setter, fallbackValue] = resources[index];
+      if (result.status === "fulfilled") {
+        setter(result.value);
+        return;
+      }
+      setter(fallbackValue);
+      errors.push(result.reason?.message || "Chargement partiel du stock impossible.");
+    });
+    if (errors.length) emit([...new Set(errors)].join(" "));
+    setIsLoading(false);
   }
 
   function emit(message) {
@@ -248,7 +252,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     await submit("/api/v1/stock/depots", depotForm, () => {
       setDepotForm(emptyDepot);
       emit("Dépôt créé.");
-    });
+    }, "Création du dépôt impossible.");
   }
 
   async function submitEntry(event) {
@@ -307,13 +311,13 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     }
   }
 
-  async function submit(path, payload, afterSuccess) {
+  async function submit(path, payload, afterSuccess, fallback = "Action stock impossible.") {
     try {
-      const result = await api(path, { method: "POST", body: JSON.stringify(payload) });
+      const result = await api(path, { method: "POST", body: JSON.stringify(payload), fallback });
       if (afterSuccess) await afterSuccess(result);
       await loadAll();
     } catch (error) {
-      emit(error.message || "Opération impossible.");
+      emit(error.message || fallback);
     }
   }
 

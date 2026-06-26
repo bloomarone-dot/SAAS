@@ -289,6 +289,17 @@ def ensure_order_columns() -> None:
         "is_closed": "BOOLEAN NOT NULL DEFAULT FALSE",
         "closed_at": "DATETIME NULL",
         "closed_by_id": "VARCHAR(36) NULL",
+        "cash_register_id": "VARCHAR(36) NULL",
+        "assigned_cashier_id": "VARCHAR(36) NULL",
+        "assignment_status": "VARCHAR(30) NOT NULL DEFAULT 'UNASSIGNED'",
+        "assigned_at": "DATETIME NULL",
+        "delivery_area_id": "VARCHAR(36) NULL",
+        "paid_at": "DATETIME NULL",
+        "printed_at": "DATETIME NULL",
+        "print_count": "INTEGER NOT NULL DEFAULT 0",
+        "deleted_at": "DATETIME NULL",
+        "deleted_by": "VARCHAR(36) NULL",
+        "delete_reason": "TEXT NULL",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if missing:
@@ -391,6 +402,52 @@ def ensure_stock_columns() -> None:
         if "is_active" not in existing_recipe:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE stock_recipe_ingredients ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+
+    # P0-2 : colonne CMUP (coût moyen unitaire pondéré) initialisée au prix d'achat.
+    if "products" in inspector.get_table_names():
+        existing_products = {column["name"] for column in inspector.get_columns("products")}
+        if "cmup" not in existing_products:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE products ADD COLUMN cmup DECIMAL(14,2) NOT NULL DEFAULT 0"))
+                connection.execute(text("UPDATE products SET cmup = purchase_price WHERE cmup = 0"))
+        # P2-2 : conversion multi-unités (unité d'achat + facteur).
+        if "purchase_unit_id" not in existing_products:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE products ADD COLUMN purchase_unit_id VARCHAR(36) NULL"))
+        if "purchase_factor" not in existing_products:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE products ADD COLUMN purchase_factor DECIMAL(14,4) NOT NULL DEFAULT 1"))
+
+    # P0-1 : montants/quantités du stock en DECIMAL (jamais FLOAT). Conversion idempotente
+    # des bases existantes (sautée si la colonne est déjà en decimal/numeric).
+    if engine.dialect.name == "mysql":
+        decimal_targets = [
+            ("products", "purchase_price", "DECIMAL(14,2) NOT NULL DEFAULT 0"),
+            ("products", "minimum_stock", "DECIMAL(14,3) NOT NULL DEFAULT 0"),
+            ("products", "packaging_sale_price", "DECIMAL(14,2) NOT NULL DEFAULT 0"),
+            ("products", "sale_margin_rate", "DECIMAL(7,4) NOT NULL DEFAULT 0"),
+            ("stock_movements", "quantity", "DECIMAL(14,3) NOT NULL"),
+            ("stock_movements", "unit_price", "DECIMAL(14,2) NULL"),
+            ("stock_movements", "total_amount", "DECIMAL(14,2) NULL"),
+            ("stock_movements", "value", "DECIMAL(14,2) NOT NULL DEFAULT 0"),
+            ("stock_movements", "valuation_delta", "DECIMAL(14,2) NOT NULL DEFAULT 0"),
+            ("inventory_details", "theoretical_quantity", "DECIMAL(14,3) NOT NULL"),
+            ("inventory_details", "real_quantity", "DECIMAL(14,3) NOT NULL"),
+            ("inventory_details", "gap_quantity", "DECIMAL(14,3) NOT NULL"),
+            ("stock_recipe_ingredients", "quantity_per_dish", "DECIMAL(14,3) NOT NULL"),
+            ("stock_item_packagings", "required_quantity", "DECIMAL(14,3) NOT NULL DEFAULT 1"),
+            ("stock_production_sheets", "quantity", "DECIMAL(14,3) NOT NULL"),
+        ]
+        tables = set(inspector.get_table_names())
+        with engine.begin() as connection:
+            for table, column, definition in decimal_targets:
+                if table not in tables:
+                    continue
+                column_types = {c["name"]: str(c["type"]).lower() for c in inspector.get_columns(table)}
+                current = column_types.get(column)
+                if current is None or "decimal" in current or "numeric" in current:
+                    continue
+                connection.execute(text(f"ALTER TABLE {table} MODIFY COLUMN {column} {definition}"))
 
 
 def ensure_finance_columns() -> None:
@@ -501,6 +558,14 @@ def ensure_performance_indexes() -> None:
             ("idx_orders_restaurant_updated", ("restaurant_id", "updated_at")),
             ("idx_orders_restaurant_status", ("restaurant_id", "status")),
             ("idx_orders_restaurant_table_status", ("restaurant_id", "table_id", "status")),
+            ("idx_orders_restaurant_paid", ("restaurant_id", "paid_at")),
+            ("idx_orders_restaurant_deleted", ("restaurant_id", "deleted_at")),
+            ("idx_orders_restaurant_cancelled", ("restaurant_id", "cancelled_at")),
+            ("idx_orders_restaurant_payment_status", ("restaurant_id", "payment_status")),
+            ("idx_orders_restaurant_server_paid", ("restaurant_id", "server_id", "paid_at")),
+            ("idx_orders_restaurant_cashier_paid", ("restaurant_id", "cashier_id", "paid_at")),
+            ("idx_orders_restaurant_branch_paid", ("restaurant_id", "branch_id", "paid_at")),
+            ("idx_orders_restaurant_register_status", ("restaurant_id", "cash_register_id", "assignment_status")),
         ],
         "customer_order_items": [
             ("idx_order_items_menu_order", ("menu_item_id", "order_id")),
@@ -558,6 +623,10 @@ def ensure_performance_indexes() -> None:
             ("idx_users_restaurant_active", ("restaurant_id", "is_active")),
             ("idx_users_restaurant_branch", ("restaurant_id", "branch_id")),
         ],
+        "delivery_areas": [
+            ("idx_delivery_areas_restaurant_active", ("restaurant_id", "is_active")),
+            ("idx_delivery_areas_restaurant_branch", ("restaurant_id", "branch_id")),
+        ],
     }
 
     with engine.begin() as connection:
@@ -565,8 +634,11 @@ def ensure_performance_indexes() -> None:
             if table_name not in tables:
                 continue
             existing_indexes = {index["name"] for index in inspector.get_indexes(table_name)}
+            table_columns = {column["name"] for column in inspector.get_columns(table_name)}
             for index_name, columns in indexes:
                 if index_name in existing_indexes:
+                    continue
+                if not set(columns).issubset(table_columns):
                     continue
                 column_sql = ", ".join(columns)
                 if engine.dialect.name == "mysql":

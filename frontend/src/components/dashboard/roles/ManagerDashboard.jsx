@@ -11,6 +11,7 @@ import {
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { tableApi } from "@/modules/menu/services/tableApi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { apiFetch } from "@/config/http";
 
 function isToday(value) {
   if (!value) return false;
@@ -49,12 +50,7 @@ export function ManagerDashboard({ overrides = {} }) {
   }
 
   async function fetchUsers() {
-    const token = localStorage.getItem("access_token");
-    const response = await fetch(`${apiBaseUrl}/api/v1/users`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) return [];
-    return response.json();
+    return apiFetch("/api/v1/users", { fallback: "Impossible de charger les utilisateurs." });
   }
 
   const todayOrders = useMemo(() => orders.filter((order) => isToday(order.created_at)), [orders]);

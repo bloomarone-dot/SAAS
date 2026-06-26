@@ -577,9 +577,6 @@ export function DashboardLayout({
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-1 pt-4">
             <div>
               <h1 className="text-2xl font-bold text-slate-800">{pageTitle}</h1>
-              <p className="text-sm text-slate-500">
-                {roleMeta.userRole} · {activeView === "dashboard" ? "vue d'ensemble" : pageTitle.toLowerCase()}
-              </p>
             </div>
             <span className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500">
               {new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())}

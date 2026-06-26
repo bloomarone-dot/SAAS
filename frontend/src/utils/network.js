@@ -8,7 +8,7 @@ export function friendlyNetworkMessage(error, fallback = "Connexion indisponible
   return message || fallback;
 }
 
-export function formatApiError(detail, fallback = "Opération impossible.") {
+export function formatApiError(detail, fallback = "Action impossible: le serveur n'a pas fourni de détail.") {
   if (!detail) return fallback;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
@@ -21,7 +21,7 @@ export function formatApiError(detail, fallback = "Opération impossible.") {
       .filter(Boolean)
       .join(" | ") || fallback;
   }
-  return detail.message || fallback;
+  return detail.message || detail.error || detail.detail || fallback;
 }
 
 export function isNetworkError(error) {
@@ -29,11 +29,11 @@ export function isNetworkError(error) {
   return !navigator.onLine || message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("Connexion indisponible");
 }
 
-export async function fetchJson(url, options = {}, fallback = "Opération impossible.") {
+export async function fetchJson(url, options = {}, fallback = "Action impossible: le serveur n'a pas fourni de détail.") {
   try {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(formatApiError(data?.detail, fallback));
+    if (!response.ok) throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
     return data;
   } catch (error) {
     throw new Error(friendlyNetworkMessage(error, fallback));

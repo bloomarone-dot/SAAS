@@ -59,8 +59,8 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
     try {
       const data = await tableApi.getTables(restaurantId);
       setTables(data);
-    } catch {
-      if (!silent) setError('Impossible de charger le plan de salle.');
+    } catch (error) {
+      if (!silent) setError(error.message || 'Impossible de charger le plan de salle.');
     } finally {
       if (!silent) setLoading(false);
     }
@@ -68,15 +68,18 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
 
   async function createTable(event) {
     event.preventDefault();
+    const requestedTable = {
+      name: form.name.trim(),
+      capacity: Number(form.capacity || 1),
+      room: form.room || 'Rez-de-chaussée',
+    };
     try {
-      const created = await tableApi.createTable(restaurantId, {
-        name: form.name.trim(),
-        capacity: Number(form.capacity || 1),
-        room: form.room || 'Rez-de-chaussée',
-      });
-      setTables((current) => [...current, created]);
+      const created = normalizeTable(await tableApi.createTable(restaurantId, requestedTable), requestedTable);
+      setTables((current) => [...current.filter((table) => table.id !== created.id), created]);
+      setRoomFilter(created.room || 'Rez-de-chaussée');
       setForm(emptyTable);
       setShowForm(false);
+      await loadTables({ silent: true });
     } catch (err) {
       setError(err.message || 'Création de table impossible.');
     }
@@ -227,7 +230,7 @@ function VisualTable({ table, slot, fallbackNumber, onClick }) {
       <span className="relative block h-24 w-28">
         <Chairs round={isRound} color={palette.chair} />
         <span className={`absolute left-1/2 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center border-2 text-xl font-black shadow-lg ${palette.table} ${sizeClass} ${isRound ? 'rounded-full' : 'rounded-lg'}`}>
-          <span>{label}</span>
+          <span className="block max-w-full truncate px-1 text-center text-sm leading-tight">{label}</span>
           <span className="text-[10px] font-black leading-none">{occupiedSeats}/{table.capacity}</span>
         </span>
         <span className="absolute -bottom-1 left-1/2 z-20 -translate-x-1/2 rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-700 shadow">
@@ -284,12 +287,21 @@ function Legend({ color, label }) {
 }
 
 function tableLabel(table, fallbackNumber) {
-  const raw = table.name || table.number || String(fallbackNumber);
-  const match = String(raw).match(/\d+/);
-  return match ? match[0] : raw;
+  return String(table.name || table.number || `Table ${fallbackNumber}`);
 }
 
 function tableSortValue(table) {
   const match = String(table.name || table.number || '').match(/\d+/);
   return match ? Number(match[0]) : Number(table.id || 0);
+}
+
+function normalizeTable(table, fallback) {
+  return {
+    ...fallback,
+    ...table,
+    name: table?.name || table?.number || fallback.name,
+    number: table?.number || table?.name || fallback.name,
+    room: table?.room || fallback.room || 'Rez-de-chaussée',
+    capacity: Number(table?.capacity || fallback.capacity || 1),
+  };
 }

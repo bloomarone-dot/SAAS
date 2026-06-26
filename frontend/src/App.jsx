@@ -18,6 +18,8 @@ import LandingPage from "@/LandingPage";
 import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
 import { AuditLogsAdmin } from "@/modules/admin/components/AuditLogsAdmin";
 import { CatalogAdmin } from "@/modules/admin/components/CatalogAdmin";
+import { OnlineOrderDispatchAdmin } from "@/modules/admin/components/OnlineOrderDispatchAdmin";
+import { PerformanceAdmin } from "@/modules/admin/components/PerformanceAdmin";
 import { PromotionsAdmin } from "@/modules/admin/components/PromotionsAdmin";
 import { RestaurantSettingsAdmin } from "@/modules/admin/components/RestaurantSettingsAdmin";
 import { StaffPermissionsAdmin } from "@/modules/admin/components/StaffPermissionsAdmin";
@@ -51,7 +53,7 @@ const AccountingOperations = lazyNamed(
 import { clearOfflineQueue, flushOfflineQueue, formatApiError, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { getApiBaseUrl } from "@/config/api";
-import { SESSION_EXPIRED_EVENT } from "@/config/http";
+import { apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/config/http";
 
 const initialLogin = { login: "", password: "" };
 const initialRestaurant = {
@@ -150,12 +152,8 @@ export default function App() {
     const token = localStorage.getItem("access_token");
     if (!token) return;
 
-    fetch(`${apiBaseUrl}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("invalid-session");
-        const user = await response.json();
+    apiFetch("/api/v1/auth/me")
+      .then((user) => {
         const routeView = viewFromPath(user);
         setSession(user);
         setActiveView(routeView);
@@ -165,7 +163,7 @@ export default function App() {
         if (user.restaurant_id) fetchRestaurantTheme();
       })
       .catch(() => {
-        localStorage.removeItem("access_token");
+        clearToken();
         if (shouldShowLoginForPath()) setShowLogin(true);
       });
   }, [apiBaseUrl]);
@@ -233,49 +231,28 @@ export default function App() {
   }, []);
 
   async function fetchRestaurants({ silent = false } = {}) {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
-
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/restaurants`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) return;
-      setRestaurants(await response.json());
+      setRestaurants(await apiFetch("/api/v1/restaurants", { fallback: "Impossible de charger la liste des restaurants." }));
     } catch {
       if (!silent) setMessage("Impossible de charger la liste des restaurants.");
     }
   }
 
   async function fetchAdminSummary({ silent = false } = {}) {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
-
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/dashboard/admin-summary`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (!silent) setMessage(formatApiError(data.detail, "Impossible de charger les indicateurs du tableau de bord."));
-        return;
-      }
-      setAdminSummary(data);
+      setAdminSummary(await apiFetch("/api/v1/dashboard/admin-summary", {
+        fallback: "Impossible de charger les indicateurs du tableau de bord.",
+      }));
     } catch (error) {
       if (!silent) setMessage(error.message || "Impossible de charger les indicateurs du tableau de bord.");
     }
   }
 
   async function fetchRestaurantTheme() {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
-
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/restaurants/me`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const restaurant = await apiFetch("/api/v1/restaurants/me", {
+        fallback: "Impossible de charger le thème du restaurant.",
       });
-      if (!response.ok) return;
-      const restaurant = await response.json();
       setRestaurantTheme({
         name: restaurant.name,
         primary: restaurant.primary_color || "#078d50",
@@ -307,7 +284,7 @@ export default function App() {
 
   function handleAuthenticated(data) {
     // Post-connexion commun aux pages publiques (superadmin / restaurant par slug).
-    localStorage.setItem("access_token", data.access_token);
+    setToken(data.access_token);
     setSession(data.user);
     setActiveView("dashboard");
     setShowLogin(false);
@@ -336,15 +313,20 @@ export default function App() {
         return;
       }
 
-      localStorage.setItem("access_token", data.access_token);
+      setToken(data.access_token);
       setSession(data.user);
       setActiveView("dashboard");
       pushAppRoute(data.user, "dashboard", true);
       if (data.user.role === "SUPERADMIN") fetchRestaurants();
       if (data.user.role === "ADMIN") fetchAdminSummary();
       if (data.user.restaurant_id) fetchRestaurantTheme();
-    } catch {
-      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
+    } catch (error) {
+      setMessage(
+        friendlyNetworkMessage(
+          error,
+          `API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`
+        )
+      );
     } finally {
       setIsLoading(false);
     }
@@ -356,26 +338,16 @@ export default function App() {
     setMessage("");
 
     try {
-      const token = localStorage.getItem("access_token");
       const payload = Object.fromEntries(
         Object.entries(restaurantForm)
           .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
           .filter(([key, value]) => !(optionalRestaurantFields.has(key) && !value))
       );
-      const response = await fetch(`${apiBaseUrl}/api/v1/restaurants`, {
+      const data = await apiFetch("/api/v1/restaurants", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+        body: payload,
+        fallback: "Création du restaurant impossible.",
       });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(formatApiError(data.detail, "Création du restaurant impossible."));
-        return;
-      }
 
       setRestaurantForm(initialRestaurant);
       setShowRestaurantForm(false);
@@ -383,15 +355,15 @@ export default function App() {
       setMessage(
         `Restaurant "${data.restaurant.name}" créé. Propriétaire: ${data.owner.username}`
       );
-    } catch {
-      setMessage(`API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`);
+    } catch (error) {
+      setMessage(error.message || "Création du restaurant impossible.");
     } finally {
       setIsLoading(false);
     }
   }
 
   function logout({ expired = false } = {}) {
-    localStorage.removeItem("access_token");
+    clearToken();
     setSession(null);
     setLoginForm(initialLogin);
     setRestaurants([]);
@@ -544,11 +516,11 @@ export default function App() {
 
   function renderContent() {
     if (session.role !== "SUPERADMIN") {
-      if (session.role === "SERVEUR") {
+      if (session.role === "SERVEUR" && activeView === "dashboard") {
         return <RoleDashboard role="SERVEUR" overrides={{ ...overrides, __currentUser: session }} />;
       }
 
-      if (session.role === "CUISINE") {
+      if (session.role === "CUISINE" && activeView === "dashboard") {
         return <RoleDashboard role="CUISINE" overrides={{ ...overrides, __currentUser: session }} />;
       }
 
@@ -557,13 +529,21 @@ export default function App() {
         return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
       }
 
-      // Accès comptabilité pour l'ADMIN (vues dédiées sans collision avec le stock).
-      const accountingViews = ["comptabilite", "accounts", "journals", "entries", "revenues", "cash", "banks", "statements"];
+      // Accès comptabilité (vues dédiées sans collision avec le stock).
+      const accountingViews = ["comptabilite", "accounts", "journals", "entries", "expenses", "revenues", "cash", "banks", "statements"];
       if (accountingViews.includes(activeView) && session.role === "ADMIN") {
         return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
       }
+      const stockAccountingViews = ["comptabilite", "accounts", "journals", "accounting-entries", "accounting-expenses", "accounting-revenues", "accounting-payments", "cash", "banks", "statements"];
+      if (stockAccountingViews.includes(activeView) && session.role === "STOCK") {
+        return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
+      }
 
-      const stockViews = ["stocks", "stock", "products", "depots", "entries", "transfers", "outputs", "inventories", "alerts", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "expenses", "reports", "sales-report", "profit-report", "server-report", "financial-report"];
+      if (activeView === "alerts" && session.role === "MANAGER") {
+        return <RoleWorkspacePage role={session.role} view={activeView} overrides={overrides} />;
+      }
+
+      const stockViews = ["stocks", "stock", "products", "depots", "entries", "transfers", "outputs", "inventories", "alerts", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "stock-report"];
 
       if (["staff", "create-user", "user-detail"].includes(activeView) && session.role === "ADMIN") {
         return (
@@ -573,6 +553,10 @@ export default function App() {
             onMessage={setMessage}
             onThemeChange={setRestaurantTheme}
             showCreateOnMount={activeView === "create-user"}
+            onNavigate={(view) => {
+              setActiveView(view);
+              pushAppRoute(session, view);
+            }}
           />
         );
       }
@@ -626,11 +610,23 @@ export default function App() {
         return <OrdersAdmin apiBaseUrl={apiBaseUrl} currentUser={session} onMessage={setMessage} />;
       }
 
+      if (activeView === "server-performance" && ["ADMIN", "MANAGER"].includes(session.role)) {
+        return <PerformanceAdmin type="server" onMessage={setMessage} />;
+      }
+
+      if (activeView === "cashier-performance" && ["ADMIN", "MANAGER"].includes(session.role)) {
+        return <PerformanceAdmin type="cashier" onMessage={setMessage} />;
+      }
+
+      if (activeView === "online-dispatch" && ["ADMIN", "MANAGER"].includes(session.role)) {
+        return <OnlineOrderDispatchAdmin onMessage={setMessage} />;
+      }
+
       if (activeView === "products" && session.role === "ADMIN") {
         return <CatalogAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
-      if (["cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation", "receipts", "print-receipt", "cancel-payment", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView) && ["ADMIN", "CAISSE"].includes(session.role)) {
+      if (["cashier", "payments", "completed-payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation", "receipts", "print-receipt", "cancel-payment", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView) && ["ADMIN", "CAISSE"].includes(session.role)) {
         return <RoleDashboard role="CAISSE" overrides={{ ...overrides, __activeView: activeView, __currentUser: session, __adminReviewOnly: session.role === "ADMIN" }} />;
       }
 
@@ -652,13 +648,13 @@ export default function App() {
         return <AuditLogsAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
-      if (["menu-categories", "create-category"].includes(activeView) && ["ADMIN", "CUISINE"].includes(session.role)) {
-        return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={activeView === "create-category"} />;
+      if (["menu-categories", "create-category"].includes(activeView) && ["ADMIN", "CUISINE", "STOCK"].includes(session.role)) {
+        return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={session.role !== "STOCK" && activeView === "create-category"} />;
       }
 
-      if (["menu-dishes", "create-dish", "availability", "dish-unavailable"].includes(activeView) && ["ADMIN", "CUISINE"].includes(session.role)) {
+      if (["menu-dishes", "create-dish", "availability", "dish-unavailable"].includes(activeView) && ["ADMIN", "CUISINE", "STOCK"].includes(session.role)) {
         const initialAvailabilityFilter = activeView === "dish-unavailable" ? "UNAVAILABLE" : "ALL";
-        return <DishesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={activeView === "create-dish"} initialAvailabilityFilter={initialAvailabilityFilter} />;
+        return <DishesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={session.role !== "STOCK" && activeView === "create-dish"} initialAvailabilityFilter={initialAvailabilityFilter} />;
       }
 
       if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
@@ -679,6 +675,9 @@ export default function App() {
           "create-stock-product": "stock",
           transfer: "movements",
           damages: "inventory",
+          purchases: "entries",
+          accounting: "reports",
+          "stock-report": "reports",
         };
         return (
           <StockOperations
@@ -687,6 +686,17 @@ export default function App() {
             mode={stockModeMap[activeView] || activeView}
             onMessage={setMessage}
             focusCreate={activeView === "create-stock-product"}
+          />
+        );
+      }
+
+      if (activeView === "reports" && session.role === "STOCK") {
+        return (
+          <StockOperations
+            apiBaseUrl={apiBaseUrl}
+            role={session.role}
+            mode="reports"
+            onMessage={setMessage}
           />
         );
       }

@@ -33,25 +33,31 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
   const [restaurant, setRestaurant] = useState(null);
   const [form, setForm] = useState(emptySettings);
   const [isLoading, setIsLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [deliveryAreas, setDeliveryAreas] = useState([]);
+  const [areaForm, setAreaForm] = useState({ name: "", delivery_fee: "", average_delivery_minutes: "" });
 
   const token = localStorage.getItem("access_token");
   const canUpdate = currentUser?.is_owner;
+  const fieldsDisabled = !canUpdate || !isEditing || isLoading;
 
   useEffect(() => {
     loadSettings();
   }, []);
 
   async function api(path, options = {}) {
+    const fallback = options.fallback || "Action de configuration impossible.";
+    const { fallback: _fallback, ...requestOptions } = options;
     const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
+      ...requestOptions,
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        ...(options.headers ?? {}),
+        ...(requestOptions.headers ?? {}),
       },
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(formatApiError(data.detail, "Opération impossible."));
+    if (!response.ok) throw new Error(formatApiError(data.detail ?? data.message ?? data.error, fallback));
     return data;
   }
 
@@ -89,6 +95,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         primary: data.primary_color ?? "#E4572E",
         secondary: data.secondary_color ?? "#1F2937",
       });
+      loadDeliveryAreas();
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -99,6 +106,58 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
   function updateField(event) {
     const { name, type, checked, value } = event.target;
     setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
+  }
+
+  function updateAreaField(event) {
+    const { name, value } = event.target;
+    setAreaForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function loadDeliveryAreas() {
+    try {
+      setDeliveryAreas(await api("/api/v1/branches/delivery-areas"));
+    } catch {
+      setDeliveryAreas([]);
+    }
+  }
+
+  async function createDeliveryArea(event) {
+    event?.preventDefault?.();
+    setIsLoading(true);
+    try {
+      const created = await api("/api/v1/branches/delivery-areas", {
+        method: "POST",
+        body: JSON.stringify({
+          name: areaForm.name.trim(),
+          delivery_fee: Number(areaForm.delivery_fee || 0),
+          average_delivery_minutes: areaForm.average_delivery_minutes ? Number(areaForm.average_delivery_minutes) : null,
+          is_active: true,
+        }),
+      });
+      setDeliveryAreas((current) => [created, ...current]);
+      setAreaForm({ name: "", delivery_fee: "", average_delivery_minutes: "" });
+      onMessage("Quartier de livraison ajouté.");
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function toggleDeliveryArea(area) {
+    setIsLoading(true);
+    try {
+      const updated = await api(`/api/v1/branches/delivery-areas/${area.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: !area.is_active }),
+      });
+      setDeliveryAreas((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      onMessage("Statut du quartier mis à jour.");
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   async function saveSettings(event) {
@@ -134,6 +193,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         body: JSON.stringify(payload),
       });
       setRestaurant(updated);
+      setIsEditing(false);
       onThemeChange?.({
         name: updated.name,
         primary: updated.primary_color ?? "#E4572E",
@@ -197,20 +257,27 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
               Ces valeurs alimentent l’identité, les reçus et l’espace restaurant.
             </p>
           </div>
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#f04438] text-white">
-            <DashboardIcon name="Settings" size={19} />
-          </div>
+          {canUpdate && !isEditing ? (
+            <button type="button" onClick={() => setIsEditing(true)} className="lte-btn lte-btn-primary">
+              <DashboardIcon name="Pencil" size={17} />
+              Modifier
+            </button>
+          ) : (
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#f04438] text-white">
+              <DashboardIcon name="Settings" size={19} />
+            </div>
+          )}
         </div>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="grid gap-5 lg:grid-cols-2">
             <SettingsGroup title="Identité">
               <div className="grid gap-4 md:grid-cols-2">
-                <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={!canUpdate || isLoading} />
-                <Field name="legal_name" label="Raison sociale" value={form.legal_name} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="nui" label="NUI (Numéro d’identifiant unique)" value={form.nui} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="tax_id" label="Registre de commerce / autre identifiant" value={form.tax_id} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="currency" label="Devise" value={form.currency} onChange={updateField} maxLength={3} required disabled={!canUpdate || isLoading} />
+                <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={fieldsDisabled} />
+                <Field name="legal_name" label="Raison sociale" value={form.legal_name} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="nui" label="NUI (Numéro d’identifiant unique)" value={form.nui} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="tax_id" label="Registre de commerce / autre identifiant" value={form.tax_id} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="currency" label="Devise" value={form.currency} onChange={updateField} maxLength={3} required disabled={fieldsDisabled} />
               </div>
               <label className="mt-4 block">
                 <span className="text-xs font-black text-[#070528]">Description</span>
@@ -219,7 +286,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
                   value={form.description}
                   onChange={updateField}
                   rows={3}
-                  disabled={!canUpdate || isLoading}
+                  disabled={fieldsDisabled}
                   placeholder="Présentation courte du restaurant, spécialités, ambiance..."
                   className="mt-2 form-control disabled:bg-slate-50 disabled:text-slate-400"
                 />
@@ -228,26 +295,26 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
 
             <SettingsGroup title="Localisation">
               <div className="grid gap-4 md:grid-cols-2">
-                <Field name="address" label="Adresse" value={form.address} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="city" label="Ville" value={form.city} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="country" label="Pays" value={form.country} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="postal_box" label="Boîte postale" value={form.postal_box} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="address" label="Adresse" value={form.address} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="city" label="Ville" value={form.city} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="country" label="Pays" value={form.country} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="postal_box" label="Boîte postale" value={form.postal_box} onChange={updateField} disabled={fieldsDisabled} />
                 <div className="md:col-span-2">
-                  <Field name="timezone" label="Fuseau horaire" value={form.timezone} onChange={updateField} required disabled={!canUpdate || isLoading} />
+                  <Field name="timezone" label="Fuseau horaire" value={form.timezone} onChange={updateField} required disabled={fieldsDisabled} />
                 </div>
               </div>
             </SettingsGroup>
 
             <SettingsGroup title="Contacts & vente">
               <div className="grid gap-4 md:grid-cols-2">
-                <Field name="phone" label="Téléphone" value={form.phone} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="whatsapp_phone" label="WhatsApp" value={form.whatsapp_phone} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="email" label="Email public" type="email" value={form.email} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="website_url" label="Site web" value={form.website_url} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <Field name="opening_hours" label="Horaires d'ouverture" value={form.opening_hours} onChange={updateField} placeholder="Ex: Lun-Dim 09:00 - 22:00" disabled={!canUpdate || isLoading} />
-                <Field name="delivery_fee" label="Frais de livraison" type="number" min="0" value={form.delivery_fee} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="phone" label="Téléphone" value={form.phone} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="whatsapp_phone" label="WhatsApp" value={form.whatsapp_phone} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="email" label="Email public" type="email" value={form.email} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="website_url" label="Site web" value={form.website_url} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="opening_hours" label="Horaires d'ouverture" value={form.opening_hours} onChange={updateField} placeholder="Ex: Lun-Dim 09:00 - 22:00" disabled={fieldsDisabled} />
+                <Field name="delivery_fee" label="Frais de livraison" type="number" min="0" value={form.delivery_fee} onChange={updateField} disabled={fieldsDisabled} />
                 <div className="md:col-span-2">
-                  <Field name="payment_methods" label="Modes de paiement" value={form.payment_methods} onChange={updateField} placeholder="Ex: Orange Money, MTN MoMo, Cash" disabled={!canUpdate || isLoading} />
+                  <Field name="payment_methods" label="Modes de paiement" value={form.payment_methods} onChange={updateField} placeholder="Ex: Orange Money, MTN MoMo, Cash" disabled={fieldsDisabled} />
                 </div>
               </div>
               <label className="mt-4 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
@@ -256,7 +323,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
                   type="checkbox"
                   checked={form.is_open}
                   onChange={updateField}
-                  disabled={!canUpdate || isLoading}
+                  disabled={fieldsDisabled}
                   className="h-5 w-5 accent-[#f04438]"
                 />
                 <span className="text-sm font-black text-[#070528]">
@@ -265,12 +332,37 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
               </label>
             </SettingsGroup>
 
+            <SettingsGroup title="Quartiers de livraison">
+              <div className="grid gap-3 md:grid-cols-[1fr_140px_140px_auto]">
+                <Field name="name" label="Quartier" value={areaForm.name} onChange={updateAreaField} disabled={!canUpdate || isLoading} required />
+                <Field name="delivery_fee" label="Frais" type="number" min="0" value={areaForm.delivery_fee} onChange={updateAreaField} disabled={!canUpdate || isLoading} required />
+                <Field name="average_delivery_minutes" label="Délai min." type="number" min="1" value={areaForm.average_delivery_minutes} onChange={updateAreaField} disabled={!canUpdate || isLoading} />
+                <button type="button" onClick={createDeliveryArea} disabled={!canUpdate || isLoading || !areaForm.name.trim()} className="mt-6 h-11 rounded bg-[#f04438] px-4 text-sm font-black text-white disabled:opacity-60">
+                  Ajouter
+                </button>
+              </div>
+              <div className="mt-4 divide-y divide-slate-200 border border-slate-200 bg-white">
+                {deliveryAreas.map((area) => (
+                  <div key={area.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-black text-[#070528]">{area.name}</p>
+                      <p className="text-xs font-semibold text-slate-500">{Number(area.delivery_fee || 0).toLocaleString("fr-FR")} FCFA · {area.average_delivery_minutes || "-"} min</p>
+                    </div>
+                    <button type="button" onClick={() => toggleDeliveryArea(area)} disabled={!canUpdate || isLoading} className="rounded border border-slate-200 px-3 py-2 text-xs font-black text-slate-700">
+                      {area.is_active ? "Désactiver" : "Activer"}
+                    </button>
+                  </div>
+                ))}
+                {!deliveryAreas.length && <p className="px-4 py-6 text-center text-sm font-semibold text-slate-500">Aucun quartier configuré.</p>}
+              </div>
+            </SettingsGroup>
+
             <SettingsGroup title="Marque">
               <div className="grid gap-4 md:grid-cols-2">
-                <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <LogoUpload onChange={uploadLogo} disabled={!canUpdate || isLoading} />
-                <ColorField name="primary_color" label="Couleur principale" value={form.primary_color} onChange={updateField} disabled={!canUpdate || isLoading} />
-                <ColorField name="secondary_color" label="Couleur secondaire" value={form.secondary_color} onChange={updateField} disabled={!canUpdate || isLoading} />
+                <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={fieldsDisabled} />
+                <LogoUpload onChange={uploadLogo} disabled={fieldsDisabled} />
+                <ColorField name="primary_color" label="Couleur principale" value={form.primary_color} onChange={updateField} disabled={fieldsDisabled} />
+                <ColorField name="secondary_color" label="Couleur secondaire" value={form.secondary_color} onChange={updateField} disabled={fieldsDisabled} />
               </div>
             </SettingsGroup>
           </div>
@@ -323,7 +415,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
 
             <button
               type="submit"
-              disabled={!canUpdate || isLoading}
+              disabled={fieldsDisabled}
               className="lte-btn lte-btn-primary"
             >
               <DashboardIcon name="CheckCircle2" size={17} />

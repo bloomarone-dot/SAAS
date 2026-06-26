@@ -3,9 +3,22 @@ import { apiFetch } from "@/config/http";
 const request = (path, options = {}) =>
   apiFetch(path, { ...options, fallback: "Requete menu impossible." });
 
+function browserImageUrl(url) {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
+  } catch {
+    return url;
+  }
+  return url;
+}
+
 export const menuApi = {
   getCategories: (restaurantId) =>
-    request(`/api/v1/menu/categories/restaurant/${restaurantId}`),
+    request(`/api/v1/menu/categories/restaurant/${restaurantId}`).then((rows) =>
+      rows.map((row) => ({ ...row, image_url: browserImageUrl(row.image_url) }))
+    ),
 
   createCategory: (categoryData) =>
     request("/api/v1/menu/categories", {
@@ -21,7 +34,7 @@ export const menuApi = {
       body,
       fallback: "Import de l'image impossible.",
     });
-    return data?.image_url;
+    return browserImageUrl(data?.image_url);
   },
 
   deleteCategory: (categoryId) =>
@@ -30,7 +43,9 @@ export const menuApi = {
     }),
 
   getDishesByCategory: (categoryId, includeUnavailable = true) =>
-    request(`/api/v1/menu/categories/${categoryId}/dishes?include_unavailable=${includeUnavailable}`),
+    request(`/api/v1/menu/categories/${categoryId}/dishes?include_unavailable=${includeUnavailable}`).then((rows) =>
+      rows.map((row) => ({ ...row, image_url: browserImageUrl(row.image_url) }))
+    ),
 
   createDish: (dishData) =>
     request("/api/v1/menu/dishes", {

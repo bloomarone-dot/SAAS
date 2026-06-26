@@ -18,6 +18,7 @@ class PublicOrderCreateIn(BaseModel):
     notes: Optional[str] = None
     fulfillment_type: str = Field(default="Livraison", max_length=40)
     payment_method: str = Field(default="Paiement à la livraison", max_length=40)
+    delivery_area_id: Optional[str] = None
     items: list[PublicOrderItemIn] = Field(min_length=1)
 
 
@@ -33,6 +34,7 @@ class OrderStatusUpdateIn(BaseModel):
 class CashierPaymentIn(BaseModel):
     payment_method: str = Field(min_length=2, max_length=40)
     discount_amount: Optional[float] = Field(default=None, ge=0)
+    cash_register_id: Optional[str] = None
 
 
 class OrderReopenIn(BaseModel):
@@ -54,7 +56,17 @@ class OrderUpdateIn(BaseModel):
     payment_method: Optional[str] = Field(default=None, max_length=40)
     discount_amount: Optional[float] = Field(default=None, ge=0)
     delivery_fee: Optional[float] = Field(default=None, ge=0)
+    delivery_area_id: Optional[str] = None
     items: Optional[list[OrderItemUpdateIn]] = None
+
+
+class OrderDeleteIn(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=255)
+
+
+class OrderCashAssignmentIn(BaseModel):
+    cash_register_id: str
+    assigned_cashier_id: Optional[str] = None
 
 
 class OrderItemPublic(OrmModel):
@@ -75,6 +87,12 @@ class OrderPublic(OrmModel):
     table_id: Optional[int] = None
     server_id: Optional[str] = None
     cashier_id: Optional[str] = None
+    cash_register_id: Optional[str] = None
+    assigned_cashier_id: Optional[str] = None
+    assignment_status: str = "UNASSIGNED"
+    assigned_at: Optional[datetime] = None
+    delivery_area_id: Optional[str] = None
+    delivery_area_name: Optional[str] = None
     party_size: int = 1
     order_number: str
     customer_name: str
@@ -98,6 +116,12 @@ class OrderPublic(OrmModel):
     delivery_fee: float
     total_amount: float
     cancelled_at: Optional[datetime] = None
+    paid_at: Optional[datetime] = None
+    printed_at: Optional[datetime] = None
+    print_count: int = 0
+    deleted_at: Optional[datetime] = None
+    deleted_by: Optional[str] = None
+    delete_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     items: list[OrderItemPublic] = Field(default_factory=list)

@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "./icons";
+import { apiFetch } from "@/config/http";
 import { EmptyState, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
 
 const money = (value, currency = "FCFA") => `${Number(value || 0).toLocaleString("fr-FR")} ${currency}`;
@@ -38,6 +39,7 @@ const pageMeta = {
   receipts: ["Reçus / factures", "Retrouvez les reçus imprimables, factures et exports.", "Imprimer"],
   expenses: ["Dépenses", "Suivez charges, fournisseurs, salaires, loyers et dépenses variables.", "Nouvelle dépense"],
   purchases: ["Achats", "Planifiez et contrôlez les achats liés au restaurant.", "Nouvel achat"],
+  reports: ["Vue rapports", "Centralisez les ventes, bénéfices, équipes et indicateurs du restaurant.", "Exporter"],
   "sales-report": ["Rapports ventes", "Analysez le chiffre d’affaires, les commandes et le panier moyen.", "Exporter"],
   "profit-report": ["Rapports bénéfices", "Comparez recettes, coûts, marges et bénéfices par période.", "Exporter"],
   "server-report": ["Rapports serveurs", "Mesurez les performances par serveur, table et période.", "Exporter"],
@@ -120,59 +122,49 @@ const pageMeta = {
   export: ["Export rapport", "Choisissez période, format PDF / Excel et aperçu.", "Exporter"],
 };
 
-const tableRows = [
-  ["#CMD-1258", "Table 8", "En préparation", money(36500), "12:45"],
-  ["#CMD-1257", "Livraison", "En livraison", money(42000), "12:30"],
-  ["#CMD-1256", "Table 2", "Terminée", money(18000), "12:05"],
-  ["#CMD-1255", "À emporter", "Payée", money(27000), "11:50"],
-  ["#CMD-1254", "Table 10", "Annulée", money(9200), "11:35"],
-];
-
-const stockRows = [
-  ["Boeuf haché", "Viandes", "7,2 kg", "Faible", money(86400)],
-  ["Poulet fermier", "Viandes", "12,5 kg", "OK", money(87500)],
-  ["Saumon frais", "Poissons", "4,3 kg", "Faible", money(68800)],
-  ["Tomates pelées", "Épicerie", "28 boîtes", "OK", money(33600)],
-  ["Huile d’olive", "Épicerie", "3,2 L", "Faible", money(51200)],
-];
-
-const financeRows = [
-  ["RC-2024-0529", "Vente sur place", "Espèces", money(85000), "Reçu"],
-  ["RC-2024-0528", "Livraison", "Mobile Money", money(62000), "Reçu"],
-  ["DEP-2024-0419", "Boissons", "Carte bancaire", money(42000), "Payé"],
-  ["DEP-2024-0418", "Énergie", "Prélèvement", money(32000), "Payé"],
-  ["AV-2024-0112", "Avarie saumon", "Stock", money(18400), "Comptabilisé"],
-];
-
-const teamRows = [
-  ["Sophie Martin", "Manager", "Actif", "Service soir", "20/05/2024"],
-  ["Julien Bernard", "Serveur", "Actif", "Salle principale", "20/05/2024"],
-  ["Camille Durand", "Caissier", "Actif", "Caisse 01", "20/05/2024"],
-  ["Thomas Leroy", "Cuisine", "Inactif", "Repos", "19/05/2024"],
-  ["Alexandre Petit", "Livreur", "Actif", "Livraison", "18/05/2024"],
-];
-
-const activityRows = [
-  ["31/05/2026 09:45", "Admin", "Connexion", "Connexion réussie", "192.168.1.10"],
-  ["31/05/2026 09:30", "Julie Bernard", "Création commande", "Commande #CMD-1258", "192.168.1.15"],
-  ["31/05/2026 09:15", "Camille Durand", "Paiement", "Paiement espèces validé", "192.168.1.12"],
-  ["31/05/2026 08:50", "Alexis", "Stock", "Plat signalé indisponible", "192.168.1.18"],
-  ["31/05/2026 08:35", "Admin", "Export", "Rapport ventes PDF", "192.168.1.10"],
-];
-
-const restaurantsRows = [
-  ["Bistro Gourmet", "Premium", "Actif", "20/06/2026", "Paris"],
-  ["Pizza House", "Pro", "Actif", "15/06/2026", "Lyon"],
-  ["Sushi Zen", "Business", "Actif", "10/07/2026", "Marseille"],
-  ["Burger Corner", "Pro", "Expiré", "18/06/2026", "Douala"],
-  ["Tacos City", "Premium", "En pause", "22/06/2026", "Yaoundé"],
-];
-
 export function RoleWorkspacePage({ role, view, overrides = {} }) {
   const [query, setQuery] = useState("");
+  const [apiRows, setApiRows] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
   const meta = pageMeta[view] ?? [`${roleCopy[role] ?? "Espace"} · ${view}`, "Interface prête à connecter aux API du module.", "Action"];
   const pageType = getPageType(view);
-  const rows = useMemo(() => filterRows(getRows(role, view), query), [role, view, query]);
+  const resource = useMemo(() => getResourceConfig(role, view, overrides), [role, view, overrides]);
+  const rows = useMemo(() => filterRows(apiRows, query), [apiRows, query]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadRows() {
+      if (!resource) {
+        setApiRows([]);
+        return;
+      }
+      if (resource.staticRows) {
+        setApiRows(resource.staticRows);
+        return;
+      }
+
+      setIsLoading(true);
+      setError("");
+      try {
+        const data = await apiFetch(resource.path, { fallback: resource.fallback });
+        if (!ignore) setApiRows(resource.map(data));
+      } catch (err) {
+        if (!ignore) {
+          setApiRows([]);
+          setError(err.message || resource.fallback);
+        }
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    }
+
+    loadRows();
+    return () => {
+      ignore = true;
+    };
+  }, [resource]);
 
   if (["denied", "network", "offline"].includes(view)) {
     return <StateScreen view={view} meta={meta} />;
@@ -194,6 +186,7 @@ export function RoleWorkspacePage({ role, view, overrides = {} }) {
     <section className="space-y-5">
       <PageHero role={role} title={meta[0]} subtitle={meta[1]} action={meta[2]} />
       <KpiStrip role={role} view={view} overrides={overrides} />
+      {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-bold text-red-600">{error}</div>}
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <SearchBox value={query} onChange={setQuery} placeholder="Rechercher par référence, statut, client, produit..." />
@@ -204,7 +197,7 @@ export function RoleWorkspacePage({ role, view, overrides = {} }) {
           </div>
         </div>
       </div>
-      <ResponsiveTable rows={rows} />
+      {isLoading ? <LoadingPanel /> : <ResponsiveTable rows={rows} />}
     </section>
   );
 }
@@ -316,7 +309,7 @@ function FormMock({ role, view, meta }) {
               <DashboardIcon name="Store" size={24} />
             </div>
             <p className="mt-4 text-xl font-black text-slate-950">Le Bon Coin</p>
-            <p className="mt-2 text-sm font-medium text-slate-500">Les données saisies alimenteront cette fiche. Les validations API pourront remplacer ces champs mockés.</p>
+            <p className="mt-2 text-sm font-medium text-slate-500">Les données saisies seront envoyées au module métier correspondant lorsqu’une action dédiée est disponible.</p>
           </div>
         </div>
       </div>
@@ -420,19 +413,200 @@ function StateScreen({ view, meta }) {
   );
 }
 
-function getRows(role, view) {
-  if (role === "SUPERADMIN" || ["create-restaurant", "restaurant-detail", "activation", "stats"].includes(view)) return restaurantsRows;
-  if (role === "STOCK" || view.includes("stock") || ["suppliers", "production", "ingredients", "rotation", "low-stock", "thresholds", "damages"].includes(view)) return stockRows;
-  if (role === "COMPTABLE" || ["revenue", "expenses", "margins", "profits", "received-payments", "cash-collections", "income", "cashflow", "balance", "ledger", "financial-report"].includes(view)) return financeRows;
-  if (["users", "roles", "team", "table-assignment", "server-report", "service-performance"].includes(view)) return teamRows;
-  if (["activity", "activity-log", "notifications", "search"].includes(view)) return activityRows;
-  return tableRows;
-}
-
 function filterRows(rows, query) {
   const value = query.trim().toLowerCase();
   if (!value) return rows;
   return rows.filter((row) => row.join(" ").toLowerCase().includes(value));
+}
+
+function LoadingPanel() {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
+    </div>
+  );
+}
+
+function getResourceConfig(role, view, overrides) {
+  if (role === "SUPERADMIN" || ["restaurant-detail", "activation", "stats"].includes(view)) {
+    if (Array.isArray(overrides.__restaurants)) {
+      return { staticRows: mapRestaurants(overrides.__restaurants) };
+    }
+    return {
+      path: "/api/v1/restaurants",
+      fallback: "Impossible de charger les restaurants.",
+      map: mapRestaurants,
+    };
+  }
+
+  if (["activity", "activity-log", "search"].includes(view)) {
+    return {
+      path: "/api/v1/audit-logs?limit=50",
+      fallback: "Impossible de charger le journal d'activité.",
+      map: mapAuditLogs,
+    };
+  }
+
+  if (view === "notifications") {
+    return {
+      path: "/api/v1/notifications?limit=50",
+      fallback: "Impossible de charger les notifications.",
+      map: mapNotifications,
+    };
+  }
+
+  if (["users", "roles", "team", "server-report", "service-performance"].includes(view)) {
+    return {
+      path: "/api/v1/users",
+      fallback: "Impossible de charger les utilisateurs.",
+      map: mapUsers,
+    };
+  }
+
+  if (role === "STOCK" || view.includes("stock") || ["suppliers", "production", "ingredients", "rotation", "low-stock", "thresholds", "damages"].includes(view)) {
+    const pathByView = {
+      suppliers: "/api/v1/stock/suppliers",
+      damages: "/api/v1/stock/damages",
+      movements: "/api/v1/stock/movements",
+      "low-stock": "/api/v1/stock/low-stock",
+      rotation: "/api/v1/finance/stock-rotation",
+      production: "/api/v1/stock/production-sheets",
+      ingredients: "/api/v1/stock/recipes",
+    };
+    return {
+      path: pathByView[view] ?? "/api/v1/stock/items",
+      fallback: "Impossible de charger les données stock.",
+      map: mapStockRows,
+    };
+  }
+
+  if (role === "COMPTABLE" || ["revenue", "expenses", "margins", "profits", "received-payments", "cash-collections", "income", "cashflow", "balance", "ledger", "financial-report"].includes(view)) {
+    const pathByView = {
+      revenue: "/api/v1/finance/revenues",
+      expenses: "/api/v1/finance/expenses",
+      margins: "/api/v1/finance/dish-margins",
+      profits: "/api/v1/finance/reports/monthly-result",
+      "received-payments": "/api/v1/finance/payments",
+      "cash-collections": "/api/v1/finance/reports/cash-flow",
+      income: "/api/v1/finance/reports/income-statement",
+      cashflow: "/api/v1/finance/reports/cash-flow",
+      balance: "/api/v1/finance/reports/balance-sheet",
+      ledger: "/api/v1/finance/reports/ledger",
+      "financial-report": "/api/v1/finance/summary",
+    };
+    return {
+      path: pathByView[view] ?? "/api/v1/finance/entries",
+      fallback: "Impossible de charger les données financières.",
+      map: mapFinanceRows,
+    };
+  }
+
+  return {
+    path: "/api/v1/orders?limit=50",
+    fallback: "Impossible de charger les commandes.",
+    map: mapOrders,
+  };
+}
+
+function asArray(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.rows)) return data.rows;
+  if (Array.isArray(data?.entries)) return data.entries;
+  if (data && typeof data === "object") return Object.entries(data).map(([key, value]) => ({ key, value }));
+  return [];
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function quantity(item) {
+  return Number(item?.quantity || 0) + Number(item?.kitchen_quantity || 0) + Number(item?.drink_quantity || 0);
+}
+
+function mapOrders(data) {
+  return asArray(data).map((order) => [
+    order.order_number ?? `Commande ${String(order.id ?? "").slice(0, 8)}`,
+    order.table_name || order.fulfillment_type || order.order_source || "Commande",
+    order.status ?? "-",
+    money(order.total_amount),
+    formatDate(order.created_at),
+  ]);
+}
+
+function mapRestaurants(data) {
+  return asArray(data).map((restaurant) => [
+    restaurant.name ?? restaurant.slug ?? "Restaurant",
+    restaurant.plan || restaurant.subscription_plan || restaurant.currency || "-",
+    restaurant.is_active === false ? "Inactif" : "Actif",
+    formatDate(restaurant.created_at || restaurant.subscription_ends_at),
+    restaurant.city || restaurant.country || restaurant.slug || "-",
+  ]);
+}
+
+function mapUsers(data) {
+  return asArray(data).map((user) => [
+    [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || user.email || "Utilisateur",
+    user.role ?? "-",
+    user.is_active === false ? "Inactif" : "Actif",
+    user.branch_name || user.phone || user.email || "-",
+    formatDate(user.created_at || user.updated_at),
+  ]);
+}
+
+function mapAuditLogs(data) {
+  return asArray(data).map((log) => [
+    formatDate(log.created_at || log.timestamp),
+    log.actor_name || log.username || log.user_email || "Système",
+    log.action || log.event || "-",
+    log.description || log.target || log.resource_type || "-",
+    log.ip_address || log.ip || "-",
+  ]);
+}
+
+function mapNotifications(data) {
+  return asArray(data).map((notification) => [
+    notification.title || notification.type || "Notification",
+    notification.message || notification.body || "-",
+    notification.read_at || notification.is_read ? "Lu" : "Non lu",
+    notification.priority || notification.level || "-",
+    formatDate(notification.created_at),
+  ]);
+}
+
+function mapStockRows(data) {
+  return asArray(data).map((item) => {
+    const currentQuantity = quantity(item);
+    const threshold = Number(item.alert_threshold || item.min_quantity || 0);
+    const status = item.status || (threshold && currentQuantity <= threshold ? "Faible" : "OK");
+    return [
+      item.name || item.product_name || item.supplier_name || item.key || "Stock",
+      item.category_name || item.product_type || item.location || item.type || "-",
+      status,
+      money(item.stock_value ?? item.value ?? currentQuantity * Number(item.purchase_price || item.unit_price || 0)),
+      item.created_at ? formatDate(item.created_at) : `${currentQuantity.toLocaleString("fr-FR")} ${item.unit || ""}`.trim(),
+    ];
+  });
+}
+
+function mapFinanceRows(data) {
+  return asArray(data).map((item) => [
+    item.reference || item.entry_number || item.code || item.key || "Finance",
+    item.label || item.description || item.account_name || item.journal_name || "-",
+    item.status || (item.validated_at ? "Validé" : "Brouillon"),
+    money(item.amount ?? item.balance ?? item.value ?? item.debit ?? item.credit),
+    formatDate(item.created_at || item.date || item.period),
+  ]);
 }
 
 function statusTone(status) {

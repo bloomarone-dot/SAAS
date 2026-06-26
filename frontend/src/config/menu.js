@@ -210,9 +210,7 @@ export const APP_MENUS = {
       icon: "UtensilsCrossed",
       children: [
         { key: "menu-categories", label: "Catégories", icon: "ClipboardList" },
-        { key: "create-category", label: "Création catégorie", icon: "Plus" },
-        { key: "menu-dishes", label: "Plats", icon: "UtensilsCrossed" },
-        { key: "create-dish", label: "Création plat", icon: "Plus" },
+        { key: "menu-dishes", label: "Plats / boissons", icon: "UtensilsCrossed" },
         { key: "availability", label: "Disponibilités", icon: "CheckCircle2" },
       ],
     },
@@ -222,6 +220,16 @@ export const APP_MENUS = {
       icon: "ClipboardList",
       children: [
         { key: "orders", label: "Liste commandes", icon: "ClipboardList" },
+        { key: "online-dispatch", label: "Dispatch commandes en ligne", icon: "SplitSquareHorizontal" },
+      ],
+    },
+    {
+      key: "performance",
+      label: "Performances",
+      icon: "BarChart3",
+      children: [
+        { key: "server-performance", label: "Performance serveurs", icon: "Users" },
+        { key: "cashier-performance", label: "Performance caissiers", icon: "CreditCard" },
       ],
     },
     {
@@ -230,7 +238,8 @@ export const APP_MENUS = {
       icon: "CreditCard",
       children: [
         { key: "cashier", label: "Encaissements", icon: "CreditCard" },
-        { key: "payments", label: "Paiements", icon: "Wallet" },
+        { key: "payments", label: "Tous les paiements", icon: "Wallet" },
+        { key: "completed-payments", label: "Paiements effectués", icon: "CheckCircle2" },
         { key: "receipts", label: "Reçus / factures", icon: "ReceiptText" },
         { key: "discounts", label: "Codes promo", icon: "BadgePercent" },
         { key: "expenses", label: "Dépenses", icon: "TrendingDown" },
@@ -247,7 +256,7 @@ export const APP_MENUS = {
         { key: "inventory", label: "Inventaires", icon: "FileText" },
         { key: "purchases", label: "Achats stock", icon: "ShoppingCart" },
         { key: "accounting", label: "Comptabilité stock", icon: "FileText" },
-        { key: "reports", label: "Rapports stock", icon: "BarChart3" },
+        { key: "stock-report", label: "Rapports stock", icon: "BarChart3" },
       ],
     },
     {
@@ -336,15 +345,42 @@ export const APP_MENUS = {
   CUISINE: [{ key: "dashboard", label: "Production cuisine", icon: "ChefHat" }],
   STOCK: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    { key: "products", label: "Produits", icon: "Box" },
+    {
+      key: "menu-categories",
+      label: "Catalogue",
+      icon: "UtensilsCrossed",
+      children: [
+        { key: "menu-categories", label: "Catégories", icon: "ClipboardList" },
+        { key: "menu-dishes", label: "Plats / boissons", icon: "UtensilsCrossed" },
+        { key: "availability", label: "Disponibilités", icon: "CheckCircle2" },
+      ],
+    },
+    { key: "tables", label: "Tables", icon: "Table2" },
     { key: "depots", label: "Dépôts", icon: "Building2" },
+    { key: "products", label: "Produits", icon: "Box" },
     { key: "entries", label: "Entrées", icon: "Truck" },
     { key: "transfers", label: "Transferts", icon: "Activity" },
     { key: "outputs", label: "Sorties", icon: "Package" },
     { key: "inventories", label: "Inventaires", icon: "ClipboardList" },
-    { key: "tables", label: "Tables", icon: "Table2" },
     { key: "reports", label: "Rapports", icon: "BarChart3" },
     { key: "alerts", label: "Alertes stock faible", icon: "AlertTriangle" },
+    {
+      key: "comptabilite",
+      label: "Comptabilité",
+      icon: "Calculator",
+      children: [
+        { key: "comptabilite", label: "Tableau de bord", icon: "LayoutDashboard" },
+        { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
+        { key: "journals", label: "Journaux", icon: "ReceiptText" },
+        { key: "accounting-entries", label: "Écritures", icon: "Calculator" },
+        { key: "accounting-expenses", label: "Dépenses", icon: "TrendingDown" },
+        { key: "accounting-revenues", label: "Recettes", icon: "Wallet" },
+        { key: "accounting-payments", label: "Paiements", icon: "CreditCard" },
+        { key: "cash", label: "Caisses", icon: "Wallet" },
+        { key: "banks", label: "Banques", icon: "Building2" },
+        { key: "statements", label: "États financiers", icon: "BarChart3" },
+      ],
+    },
   ],
   COMPTABLE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
@@ -362,9 +398,11 @@ export const APP_MENUS = {
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
     {
       key: "payments",
-      label: "Paiements",
+      label: "Tous les paiements",
       icon: "Wallet",
       children: [
+        { key: "payments", label: "Tous les paiements", icon: "Wallet" },
+        { key: "completed-payments", label: "Paiements effectués", icon: "CheckCircle2" },
         {
           key: "unpaid-orders",
           label: "Commandes non payées",

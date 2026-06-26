@@ -36,6 +36,8 @@ class TableOrderResponse(BaseModel):
     table_name: str
     server_id: str
     server_name: str
+    customer_name: str | None = None
+    customer_phone: str | None = None
     party_size: int
     status: str
     total_amount: float
@@ -44,6 +46,8 @@ class TableOrderResponse(BaseModel):
 
 class TableOrderCreateIn(BaseModel):
     party_size: int = Field(default=1, ge=1, le=100)
+    customer_name: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    customer_phone: Optional[str] = Field(default=None, min_length=5, max_length=40)
 
 
 class TableOrderCreateResponse(BaseModel):

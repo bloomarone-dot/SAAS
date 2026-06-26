@@ -17,7 +17,7 @@ from app.modules.dashboard.schemas import (
     AdminDashboardWeeklyPoint,
 )
 from app.modules.orders.models import CustomerOrder
-from app.modules.permissions.models import Permission
+from app.modules.permissions.models import Permission, Role
 from app.modules.stock.models import StockItem, StockRecipeIngredient
 from app.modules.users.models import User
 
@@ -33,6 +33,7 @@ REVENUE_COLUMN_CANDIDATES = (
     "paid_amount",
 )
 PAID_STATUSES = {"Payée", "Payee"}
+EXCLUDED_ACTIVE_STATUSES = {"Annulée", "Annulee", "Archivée", "Archivee"}
 CASH_REGISTERS = {
     "REPAS": "Caisse repas",
     "BOISSON": "Caisse boisson",
@@ -175,8 +176,9 @@ def _paid_orders(db: Session, restaurant_id: str, start: datetime, end: datetime
         .filter(
             CustomerOrder.restaurant_id == restaurant_id,
             CustomerOrder.status.in_(PAID_STATUSES),
-            CustomerOrder.updated_at >= start,
-            CustomerOrder.updated_at <= end,
+            CustomerOrder.deleted_at.is_(None),
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start,
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end,
         )
     )
     if branch_id:
@@ -242,6 +244,8 @@ def compute_realtime_orders(db: Session, restaurant_id: str) -> dict:
     rows = (
         db.query(CustomerOrder.status, func.count())
         .filter(CustomerOrder.restaurant_id == restaurant_id)
+        .filter(CustomerOrder.deleted_at.is_(None))
+        .filter(~CustomerOrder.status.in_({"Archivée", "Archivee"}))
         .group_by(CustomerOrder.status)
         .all()
     )
@@ -351,6 +355,58 @@ def dashboard_analytics(
     }
 
 
+@router.get("/server-performance")
+def server_performance(
+    period: str = Query(default="week", pattern="^(week|month)$"),
+    server_id: str | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in {Role.ADMIN, Role.MANAGER}:
+        assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    start, end = performance_period(period)
+    prev_start, prev_end = previous_period(start, end)
+    rows = aggregate_server_performance(db, current_user.restaurant_id, start, end, server_id, branch_id)
+    prev_rows = aggregate_server_performance(db, current_user.restaurant_id, prev_start, prev_end, server_id, branch_id)
+    previous_by_id = {row["server_id"]: row for row in prev_rows}
+    for index, row in enumerate(rows, start=1):
+        previous = previous_by_id.get(row["server_id"], {})
+        row["rank"] = index
+        row["revenue_variation"] = _variation(row["revenue"], previous.get("revenue", 0))
+        row["orders_variation"] = _variation(row["orders_taken"], previous.get("orders_taken", 0))
+    totals = performance_totals(rows, revenue_key="revenue", count_key="orders_taken")
+    return {"period": {"type": period, "start": start.isoformat(), "end": end.isoformat()}, "kpis": totals, "ranking": rows}
+
+
+@router.get("/cashier-performance")
+def cashier_performance(
+    period: str = Query(default="week", pattern="^(week|month)$"),
+    cashier_id: str | None = Query(default=None),
+    branch_id: str | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in {Role.ADMIN, Role.MANAGER}:
+        assert_permission(current_user, Permission.CASHIER_READ)
+    start, end = performance_period(period)
+    prev_start, prev_end = previous_period(start, end)
+    rows = aggregate_cashier_performance(db, current_user.restaurant_id, start, end, cashier_id, branch_id)
+    prev_rows = aggregate_cashier_performance(db, current_user.restaurant_id, prev_start, prev_end, cashier_id, branch_id)
+    previous_by_id = {row["cashier_id"]: row for row in prev_rows}
+    for index, row in enumerate(rows, start=1):
+        previous = previous_by_id.get(row["cashier_id"], {})
+        row["rank"] = index
+        row["collected_variation"] = _variation(row["total_collected"], previous.get("total_collected", 0))
+        row["payments_variation"] = _variation(row["payments_validated"], previous.get("payments_validated", 0))
+    totals = performance_totals(rows, revenue_key="total_collected", count_key="payments_validated")
+    payment_modes: dict[str, float] = {}
+    for row in rows:
+        for method, amount in row["by_payment_method"].items():
+            payment_modes[method] = payment_modes.get(method, 0) + amount
+    return {"period": {"type": period, "start": start.isoformat(), "end": end.isoformat()}, "kpis": totals, "payment_modes": payment_modes, "ranking": rows}
+
+
 def dashboard_period(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime | None, datetime | None]:
     if not start_date and not end_date:
         return None, None
@@ -359,17 +415,167 @@ def dashboard_period(start_date: datetime | None, end_date: datetime | None) -> 
     return start, end
 
 
+def performance_period(period: str) -> tuple[datetime, datetime]:
+    now = datetime.utcnow()
+    if period == "month":
+        start = datetime(now.year, now.month, 1)
+    else:
+        start_day = now.date() - timedelta(days=now.weekday())
+        start = datetime.combine(start_day, datetime.min.time())
+    return start, now
+
+
+def previous_period(start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    duration = end - start
+    return start - duration, start
+
+
+def performance_totals(rows: list[dict], revenue_key: str, count_key: str) -> dict:
+    revenue = sum(float(row.get(revenue_key, 0) or 0) for row in rows)
+    count = sum(int(row.get(count_key, 0) or 0) for row in rows)
+    return {
+        revenue_key: round(revenue, 2),
+        count_key: count,
+        "average_ticket": round(revenue / count, 0) if count else 0,
+        "people_count": sum(int(row.get("clients_served", 0) or 0) for row in rows),
+    }
+
+
+def aggregate_server_performance(
+    db: Session,
+    restaurant_id: str,
+    start: datetime,
+    end: datetime,
+    server_id: str | None = None,
+    branch_id: str | None = None,
+) -> list[dict]:
+    query = (
+        db.query(CustomerOrder)
+        .filter(
+            CustomerOrder.restaurant_id == restaurant_id,
+            CustomerOrder.deleted_at.is_(None),
+            CustomerOrder.server_id.isnot(None),
+            CustomerOrder.created_at >= start,
+            CustomerOrder.created_at <= end,
+        )
+    )
+    if server_id:
+        query = query.filter(CustomerOrder.server_id == server_id)
+    if branch_id:
+        query = query.filter(CustomerOrder.branch_id == branch_id)
+    orders = query.all()
+    names = user_name_map(db, restaurant_id)
+    rows: dict[str, dict] = {}
+    for order in orders:
+        row = rows.setdefault(order.server_id, {
+            "server_id": order.server_id,
+            "name": names.get(order.server_id, "Serveur"),
+            "orders_taken": 0,
+            "orders_served": 0,
+            "revenue": 0.0,
+            "clients_served": 0,
+            "tables_count": set(),
+            "cancelled_orders": 0,
+            "avg_service_minutes": 0,
+        })
+        row["orders_taken"] += 1
+        row["clients_served"] += int(order.party_size or 1)
+        if order.table_id:
+            row["tables_count"].add(order.table_id)
+        if order.status in PAID_STATUSES:
+            row["orders_served"] += 1
+            row["revenue"] += float(order.total_amount or 0)
+        if order.status in {"Annulée", "Annulee"} or order.cancelled_at:
+            row["cancelled_orders"] += 1
+    result = []
+    for row in rows.values():
+        row["tables_count"] = len(row["tables_count"])
+        row["average_ticket"] = round(row["revenue"] / row["orders_served"], 0) if row["orders_served"] else 0
+        row["revenue"] = round(row["revenue"], 2)
+        result.append(row)
+    return sorted(result, key=lambda item: (item["revenue"], item["orders_served"]), reverse=True)
+
+
+def aggregate_cashier_performance(
+    db: Session,
+    restaurant_id: str,
+    start: datetime,
+    end: datetime,
+    cashier_id: str | None = None,
+    branch_id: str | None = None,
+) -> list[dict]:
+    query = (
+        db.query(CustomerOrder)
+        .filter(
+            CustomerOrder.restaurant_id == restaurant_id,
+            CustomerOrder.deleted_at.is_(None),
+            CustomerOrder.status.in_(PAID_STATUSES),
+            CustomerOrder.cashier_id.isnot(None),
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start,
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end,
+        )
+    )
+    if cashier_id:
+        query = query.filter(CustomerOrder.cashier_id == cashier_id)
+    if branch_id:
+        query = query.filter(CustomerOrder.branch_id == branch_id)
+    orders = query.all()
+    names = user_name_map(db, restaurant_id)
+    rows: dict[str, dict] = {}
+    for order in orders:
+        row = rows.setdefault(order.cashier_id, {
+            "cashier_id": order.cashier_id,
+            "name": names.get(order.cashier_id, "Caissier"),
+            "total_collected": 0.0,
+            "payments_validated": 0,
+            "cash_payments": 0.0,
+            "mobile_money_payments": 0.0,
+            "card_payments": 0.0,
+            "printed_receipts": 0,
+            "payment_cancellations": 0,
+            "cash_gap": 0,
+            "by_payment_method": {},
+        })
+        amount = float(order.total_amount or 0)
+        method = (order.payment_method or "Non renseigné").strip() or "Non renseigné"
+        method_lower = method.lower()
+        row["total_collected"] += amount
+        row["payments_validated"] += 1
+        row["printed_receipts"] += int(order.print_count or 0)
+        row["by_payment_method"][method] = row["by_payment_method"].get(method, 0.0) + amount
+        if "cash" in method_lower or "esp" in method_lower:
+            row["cash_payments"] += amount
+        elif "card" in method_lower or "carte" in method_lower:
+            row["card_payments"] += amount
+        elif "momo" in method_lower or "money" in method_lower or "orange" in method_lower or "mtn" in method_lower:
+            row["mobile_money_payments"] += amount
+    result = []
+    for row in rows.values():
+        row["average_ticket"] = round(row["total_collected"] / row["payments_validated"], 0) if row["payments_validated"] else 0
+        row["total_collected"] = round(row["total_collected"], 2)
+        result.append(row)
+    return sorted(result, key=lambda item: (item["total_collected"], item["payments_validated"]), reverse=True)
+
+
+def user_name_map(db: Session, restaurant_id: str) -> dict[str, str]:
+    return {
+        user.id: f"{user.first_name} {user.last_name}".strip() or user.username
+        for user in db.query(User).filter(User.restaurant_id == restaurant_id).all()
+    }
+
+
 def build_sales_metrics(db: Session, restaurant_id: str, start_date: datetime | None = None, end_date: datetime | None = None) -> dict:
     query = (
         db.query(CustomerOrder)
         .options(selectinload(CustomerOrder.items))
         .filter(CustomerOrder.restaurant_id == restaurant_id)
         .filter(CustomerOrder.status.in_(PAID_STATUSES))
+        .filter(CustomerOrder.deleted_at.is_(None))
     )
     if start_date:
-        query = query.filter(CustomerOrder.updated_at >= start_date)
+        query = query.filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start_date)
     if end_date:
-        query = query.filter(CustomerOrder.updated_at <= end_date)
+        query = query.filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end_date)
     orders = (
         query.all()
     )
