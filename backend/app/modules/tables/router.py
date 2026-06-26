@@ -1,4 +1,5 @@
 from datetime import datetime
+from app.modules.shared.models import utcnow
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -271,4 +272,4 @@ def count_occupied_seats(active_orders: list[CustomerOrder]) -> int:
 
 def make_table_order_number(table_name: str) -> str:
     clean_table = "".join(char for char in table_name.upper() if char.isalnum())[:8] or "TABLE"
-    return f"{clean_table}-{datetime.utcnow().strftime('%y%m%d%H%M%S%f')[-12:]}"
+    return f"{clean_table}-{utcnow().strftime('%y%m%d%H%M%S%f')[-12:]}"

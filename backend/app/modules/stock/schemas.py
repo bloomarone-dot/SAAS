@@ -192,6 +192,7 @@ class StockMovementPublic(OrmModel):
     quantity: float
     unit_price: Optional[float] = None
     total_amount: Optional[float] = None
+    production_cost: Optional[float] = None
     supplier_id: Optional[str] = None
     reason: Optional[str] = None
     reference: Optional[str] = None
@@ -221,6 +222,7 @@ class StockMovementIn(BaseModel):
     destination_location: Optional[StockLocation] = None
     quantity: float = Field(gt=0)
     unit_price: Optional[float] = Field(default=None, ge=0)
+    production_cost: Optional[float] = Field(default=None, ge=0)
     supplier_id: Optional[str] = None
     reason: Optional[str] = None
     reference: Optional[str] = None
@@ -246,6 +248,8 @@ class StockEntryIn(BaseModel):
     # Si vrai, quantity/unit_price sont exprimés en unité d'ACHAT (sac, casier) :
     # convertis en unité de stock via le facteur du produit.
     in_purchase_unit: bool = False
+    lot_number: Optional[str] = Field(default=None, max_length=80)
+    expiry_date: Optional[datetime] = None
     supplier_id: Optional[str] = None
     reason: Optional[str] = None
     reference: Optional[str] = None
@@ -257,6 +261,7 @@ class StockTransferIn(BaseModel):
     source_depot_id: str
     destination_depot_id: str
     quantity: float = Field(gt=0)
+    production_cost: Optional[float] = Field(default=None, ge=0)
     reason: Optional[str] = None
     reference: Optional[str] = None
 
@@ -273,6 +278,7 @@ class StockOutputIn(BaseModel):
 class InventoryDetailIn(BaseModel):
     product_id: str
     real_quantity: float = Field(ge=0)
+    justification: Optional[str] = None
 
 
 class InventoryCreateIn(BaseModel):
@@ -291,6 +297,10 @@ class InventoryDetailPublic(OrmModel):
     theoretical_quantity: float
     real_quantity: float
     gap_quantity: float
+    value_gap: float = 0
+    exceeds_tolerance: bool = False
+    tolerance_threshold: float = 0
+    justification: Optional[str] = None
     created_at: datetime
 
 
@@ -310,7 +320,17 @@ class InventoryPublic(OrmModel):
 
 
 class InventoryLineUpdateIn(BaseModel):
-    real_stock: float = Field(ge=0)
+    real_stock: Optional[float] = Field(default=None, ge=0)
+    real_quantity: Optional[float] = Field(default=None, ge=0)
+    justification: Optional[str] = None
+
+    @model_validator(mode="after")
+    def normalize_real_quantity(self):
+        if self.real_stock is None and self.real_quantity is not None:
+            self.real_stock = self.real_quantity
+        if self.real_stock is None:
+            raise ValueError("Stock reel obligatoire")
+        return self
 
 
 class StockSummaryOut(BaseModel):
@@ -356,6 +376,11 @@ class StockReportOut(BaseModel):
     low_stock_count: int
     movement_count: int
     movements: list[StockMovementPublic] = Field(default_factory=list)
+
+
+class ExportAuditIn(BaseModel):
+    report_type: str = Field(min_length=2, max_length=120)
+    format: str = Field(pattern="^(pdf|excel|xlsx|xls|csv)$")
 
 
 class PackagingLinkPublic(OrmModel):

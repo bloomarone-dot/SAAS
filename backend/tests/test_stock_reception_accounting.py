@@ -5,6 +5,7 @@ Débit 607 Achats / Crédit 401 Fournisseur, idempotente, scopée par tenant.
 """
 import unittest
 from datetime import datetime
+from app.modules.shared.models import utcnow
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -42,7 +43,7 @@ def fake_movement(amount, *, mid="mv-1", supplier="sup-1", ref="BL-001"):
         total_amount=amount,
         supplier_id=supplier,
         reference=ref,
-        movement_date=datetime.utcnow(),
+        movement_date=utcnow(),
         created_by=USER,
     )
 

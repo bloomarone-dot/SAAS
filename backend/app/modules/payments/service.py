@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
+from app.modules.shared.models import utcnow
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.exc import IntegrityError
@@ -164,7 +165,7 @@ def release_failed_payment(
     tx.status = status
     tx.failure_reason = reason
     tx.active_order_key = None
-    tx.completed_at = datetime.utcnow()
+    tx.completed_at = utcnow()
     order = db.get(CustomerOrder, tx.order_id) if tx.order_id else None
     if order and order.transaction_id == tx.id:
         order.status = order.payment_previous_status or "Livrée"
@@ -202,7 +203,7 @@ def apply_webhook(
         db.commit()
         return False
 
-    now = datetime.utcnow()
+    now = utcnow()
     tx.webhook_received_at = now
     tx.raw_webhook = safe_json(body)
     tx.provider_tx_id = body.get("txnid") or body.get("transaction_id") or tx.provider_tx_id
@@ -236,9 +237,16 @@ def apply_webhook(
             order.payment_previous_status = None
             order.transaction_id = tx.id
             order.payment_method = "Orange Money" if tx.provider == "ORANGE_CM" else "MTN Mobile Money"
-            from app.modules.finance.router import PaymentMethod, post_order_sale_entry_safe
+            from app.modules.finance.router import PaymentMethod, post_order_sale_entry_safe, post_payment_fees_entry_safe
 
             post_order_sale_entry_safe(db, order, getattr(order, "cashier_id", None), payment_method=PaymentMethod.MOBILE_MONEY)
+            # Frais opérateur + commission plateforme : Débit 627 / Crédit trésorerie (brut -> net).
+            fees = Decimal(str(aggregator_fee or 0)) + Decimal(str(bloomar_commission or 0))
+            post_payment_fees_entry_safe(
+                db, tx.restaurant_id,
+                source_id=tx.id, reference=getattr(order, "order_number", None) or tx.id,
+                amount=fees, user_id=getattr(order, "cashier_id", None),
+            )
         add_payment_audit(
             db,
             tx,
@@ -309,7 +317,7 @@ async def reconcile_pending_transactions() -> int:
     expiry_seconds = max(60, int(os.getenv("PAYMENT_EXPIRY_SECONDS", "300")))
     failed_events: list[tuple[PaymentTransaction, str]] = []
     try:
-        now = datetime.utcnow()
+        now = utcnow()
         cutoff = now - timedelta(seconds=15)
         expiry_cutoff = now - timedelta(seconds=expiry_seconds)
         transactions = (
@@ -334,7 +342,7 @@ async def reconcile_pending_transactions() -> int:
                 else:
                     continue
                 previous_reconciliation_status = tx.reconciliation_status
-                tx.last_reconciled_at = datetime.utcnow()
+                tx.last_reconciled_at = utcnow()
                 tx.reconciliation_status = provider_status
                 tx.raw_response = safe_json(result)
                 checked += 1

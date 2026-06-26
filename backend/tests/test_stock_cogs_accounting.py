@@ -1,6 +1,7 @@
 """P0-2b : COGS au déstockage (Débit 6037 / Crédit 37 au CMUP, inventaire permanent)."""
 import unittest
 from datetime import datetime
+from app.modules.shared.models import utcnow
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -13,7 +14,7 @@ from app.modules.permissions.models import Role
 from app.modules.finance import models as fmodels
 from app.modules.finance.models import AccountingAccount, AccountingEntry, AccountingEntryLine
 from app.modules.finance.router import money, post_stock_cogs_entry
-from app.modules.stock.models import Depot, DepotType, Product, StockMovement, StockMovementType
+from app.modules.stock.models import Depot, DepotType, Product, StockLot, StockMovement, StockMovementType
 from app.modules.stock.router import add_movement
 from app.modules.users.models import User
 
@@ -27,12 +28,12 @@ FINANCE_TABLES = [
         fmodels.ExpenseCategory, fmodels.AccountingPeriodClose,
     )
 ]
-STOCK_TABLES = [Product.__table__, StockMovement.__table__, Depot.__table__, User.__table__]
+STOCK_TABLES = [Product.__table__, StockMovement.__table__, Depot.__table__, StockLot.__table__, User.__table__]
 
 
 def fake_movement(amount, mid="mv-1"):
     return SimpleNamespace(id=mid, restaurant_id=RESTO, total_amount=amount,
-                           reference="BS-1", movement_date=datetime.utcnow(), created_by=USER)
+                           reference="BS-1", movement_date=utcnow(), created_by=USER)
 
 
 class CogsHelperTests(unittest.TestCase):
@@ -82,7 +83,7 @@ class CogsIntegrationTests(unittest.TestCase):
         self.db.add_all([
             self.main, self.kitchen, self.product,
             User(id=USER, username="u", first_name="A", last_name="B", password_hash="x",
-                 role=Role.ADMIN, restaurant_id=RESTO, is_owner=True, is_active=True, created_at=datetime.utcnow()),
+                 role=Role.ADMIN, restaurant_id=RESTO, is_owner=True, is_active=True, created_at=utcnow()),
         ])
         self.db.commit()
         add_movement(self.db, restaurant_id=RESTO, user_id=USER, movement_type=StockMovementType.ENTRY,

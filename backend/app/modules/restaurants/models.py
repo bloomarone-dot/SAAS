@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.modules.shared.models import new_id
+from app.modules.shared.models import new_id, utcnow
 
 
 class Restaurant(Base):
@@ -45,9 +45,9 @@ class Restaurant(Base):
         nullable=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
     )
 
     branches = relationship("Branch", back_populates="restaurant", cascade="all, delete-orphan")

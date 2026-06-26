@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, Uniqu
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.modules.shared.models import new_id
+from app.modules.shared.models import new_id, utcnow
 
 
 class PaymentTransaction(Base):
@@ -46,9 +46,9 @@ class PaymentTransaction(Base):
     last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reconciliation_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
     )
 
 
@@ -73,7 +73,7 @@ class PaymentWebhookEvent(Base):
     status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     signature_valid: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     raw_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
-    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
 class PaymentRequest(Base):
@@ -104,7 +104,7 @@ class PaymentRequest(Base):
     validated_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     transaction_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("payment_transactions.id"), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
     )

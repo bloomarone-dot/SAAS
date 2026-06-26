@@ -1,6 +1,7 @@
 """P2-2 : conversions multi-unités (réception en unité d'achat -> unité de stock)."""
 import unittest
 from datetime import datetime
+from app.modules.shared.models import utcnow
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -33,7 +34,7 @@ class StockUnitConversionTests(unittest.TestCase):
         self.db.add_all([
             self.main, self.product,
             User(id=USER, username="u", first_name="A", last_name="B", password_hash="x",
-                 role=Role.ADMIN, restaurant_id=RESTO, is_owner=True, is_active=True, created_at=datetime.utcnow()),
+                 role=Role.ADMIN, restaurant_id=RESTO, is_owner=True, is_active=True, created_at=utcnow()),
         ])
         self.db.commit()
         self.user = SimpleNamespace(id=USER, restaurant_id=RESTO)

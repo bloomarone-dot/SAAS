@@ -10,10 +10,10 @@ def new_id() -> str:
 
 
 def utcnow() -> datetime:
-    """Horodatage UTC **naïf** : équivalent de l'ancien datetime.utcnow() sans la
+    """Horodatage UTC **naïf** : remplaçant non déprécié de l'ancien helper standard.
 
-    déprédation Python 3.12. On reste naïf pour rester compatible avec les colonnes
-    DateTime naïves et toutes les comparaisons du code.
+    On reste naïf (sans tzinfo) pour rester compatible avec les colonnes DateTime
+    naïves et toutes les comparaisons de dates du code.
     """
     return datetime.now(timezone.utc).replace(tzinfo=None)
 

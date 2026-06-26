@@ -5,6 +5,7 @@ Excédent => Débit 37 Stock / Crédit 6037 ; Manquant => Débit 6037 / Crédit 
 """
 import unittest
 from datetime import datetime
+from app.modules.shared.models import utcnow
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -47,7 +48,7 @@ class InventoryAdjustmentAccountingTests(unittest.TestCase):
         return post_inventory_adjustment_entry(
             self.db, RESTO,
             source_id=source_id, reference=source_id,
-            entry_date=datetime.utcnow(), net_amount=net, user_id=USER,
+            entry_date=utcnow(), net_amount=net, user_id=USER,
         )
 
     def _code(self, account_id):

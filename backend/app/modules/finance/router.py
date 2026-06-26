@@ -1,9 +1,10 @@
 import logging
 from datetime import datetime, timedelta
+from app.modules.shared.models import new_id, utcnow
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
@@ -29,9 +30,11 @@ from app.modules.finance.models import (
     OperationStatus,
     Payment,
     PaymentMethod,
+    PaymentSchedule,
     PaymentStatus,
     PaymentType,
     PromotionCode,
+    ThirdPartyType,
     Revenue,
     Tax,
     TaxType,
@@ -61,7 +64,7 @@ def money(value) -> Decimal:
 
 
 def report_range(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime, datetime]:
-    end = end_date or datetime.utcnow()
+    end = end_date or utcnow()
     start = start_date or (end - timedelta(days=30))
     return start, end
 
@@ -129,6 +132,7 @@ class ExpenseIn(BaseModel):
     category_id: Optional[str] = None
     supplier_id: Optional[str] = None
     amount: Decimal = Field(gt=0)
+    tax_rate: Decimal = Decimal("0.00")
     tax_amount: Decimal = Decimal("0.00")
     total_amount: Optional[Decimal] = None
     apply_vat: bool = False
@@ -142,6 +146,9 @@ class ExpenseIn(BaseModel):
     @model_validator(mode="after")
     def normalize_total(self):
         self.amount = money(self.amount)
+        self.tax_rate = Decimal(str(self.tax_rate or 0)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+        if self.tax_rate and self.tax_amount == 0:
+            self.tax_amount = money(self.amount * self.tax_rate / Decimal("100"))
         self.tax_amount = money(self.tax_amount)
         if self.apply_vat and self.tax_amount == 0:
             self.tax_amount = money(self.amount * VAT_RATE)
@@ -153,6 +160,7 @@ class RevenueIn(BaseModel):
     revenue_date: Optional[datetime] = None
     customer_id: Optional[str] = None
     amount: Decimal = Field(gt=0)
+    tax_rate: Decimal = Decimal("0.00")
     tax_amount: Decimal = Decimal("0.00")
     total_amount: Optional[Decimal] = None
     apply_vat: bool = False
@@ -166,11 +174,34 @@ class RevenueIn(BaseModel):
     @model_validator(mode="after")
     def normalize_total(self):
         self.amount = money(self.amount)
+        self.tax_rate = Decimal(str(self.tax_rate or 0)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+        if self.tax_rate and self.tax_amount == 0:
+            self.tax_amount = money(self.amount * self.tax_rate / Decimal("100"))
         self.tax_amount = money(self.tax_amount)
         if self.apply_vat and self.tax_amount == 0:
             self.tax_amount = money(self.amount * VAT_RATE)
         self.total_amount = money(self.total_amount if self.total_amount is not None else self.amount + self.tax_amount)
         return self
+
+
+class CreditNoteIn(BaseModel):
+    """Avoir fournisseur ou client (montants HT + TVA)."""
+    third_party_id: Optional[str] = None
+    amount: Decimal = Field(gt=0)
+    tax_amount: Decimal = Decimal("0.00")
+    reference: Optional[str] = None
+    description: str = Field(min_length=2)
+
+
+class PaymentScheduleIn(BaseModel):
+    """Échéance à payer (payable/fournisseur) ou à encaisser (receivable/client)."""
+    direction: str = Field(pattern="^(payable|receivable)$")
+    third_party_id: Optional[str] = None
+    label: str = Field(min_length=2, max_length=255)
+    due_date: datetime
+    amount: Decimal = Field(gt=0)
+    source_type: Optional[str] = None
+    source_id: Optional[str] = None
 
 
 class PaymentIn(BaseModel):
@@ -220,6 +251,11 @@ class TaxIn(BaseModel):
     type: TaxType
     account_id: Optional[str] = None
     is_active: bool = True
+
+
+class ExportAuditIn(BaseModel):
+    report_type: str = Field(min_length=2, max_length=120)
+    format: str = Field(pattern="^(pdf|excel|xlsx|xls|csv)$")
 
 
 class ClosePeriodIn(BaseModel):
@@ -272,6 +308,7 @@ DEFAULT_ACCOUNTS = [
     ("6037", "Variation stock marchandises", AccountType.EXPENSE, "stock_adjustment"),
     ("37", "Stock marchandises", AccountType.ASSET, "stock"),
     ("606", "Charges diverses", AccountType.EXPENSE, "misc_expense"),
+    ("627", "Frais Mobile Money / commissions", AccountType.EXPENSE, "operator_fees"),
     ("701", "Ventes", AccountType.INCOME, "sales"),
 ]
 DEFAULT_JOURNALS = [
@@ -343,7 +380,7 @@ def account_or_404(db: Session, account_id: str, restaurant_id: str) -> Accounti
 
 
 def generate_entry_number(db: Session, restaurant_id: str, entry_date: datetime | None = None) -> str:
-    value = entry_date or datetime.utcnow()
+    value = entry_date or utcnow()
     prefix = value.strftime("EC%Y%m")
     count = (
         db.query(func.count(AccountingEntry.id))
@@ -381,7 +418,7 @@ def assert_period_open(db: Session, restaurant_id: str, entry_date: datetime) ->
 
 
 def create_accounting_entry(db: Session, restaurant_id: str, user_id: str, payload: EntryIn, *, status: EntryStatus = EntryStatus.DRAFT) -> AccountingEntry:
-    assert_period_open(db, restaurant_id, payload.entry_date or datetime.utcnow())
+    assert_period_open(db, restaurant_id, payload.entry_date or utcnow())
     journal = db.get(AccountingJournal, payload.journal_id)
     if not journal or journal.restaurant_id != restaurant_id or not journal.is_active:
         raise HTTPException(status_code=404, detail="Journal comptable introuvable ou inactif")
@@ -394,7 +431,7 @@ def create_accounting_entry(db: Session, restaurant_id: str, user_id: str, paylo
     entry = AccountingEntry(
         restaurant_id=restaurant_id,
         entry_number=generate_entry_number(db, restaurant_id, payload.entry_date),
-        entry_date=payload.entry_date or datetime.utcnow(),
+        entry_date=payload.entry_date or utcnow(),
         journal_id=payload.journal_id,
         reference=payload.reference,
         description=payload.description,
@@ -403,7 +440,7 @@ def create_accounting_entry(db: Session, restaurant_id: str, user_id: str, paylo
         source_id=payload.source_id,
         created_by=user_id,
         posted_by=user_id if status == EntryStatus.POSTED else None,
-        posted_at=datetime.utcnow() if status == EntryStatus.POSTED else None,
+        posted_at=utcnow() if status == EntryStatus.POSTED else None,
     )
     db.add(entry)
     db.flush()
@@ -442,7 +479,7 @@ def validate_accounting_entry(db: Session, entry: AccountingEntry, user: User) -
     check_entry_balance(entry_lines(db, entry.id))
     entry.status = EntryStatus.POSTED
     entry.posted_by = user.id
-    entry.posted_at = datetime.utcnow()
+    entry.posted_at = utcnow()
     return entry
 
 
@@ -452,7 +489,7 @@ def cancel_accounting_entry(db: Session, entry: AccountingEntry, user: User) -> 
     assert_period_open(db, entry.restaurant_id, entry.entry_date)
     original_lines = entry_lines(db, entry.id)
     reverse_payload = EntryIn(
-        entry_date=datetime.utcnow(),
+        entry_date=utcnow(),
         journal_id=entry.journal_id,
         reference=f"ANN-{entry.entry_number}",
         description=f"Annulation de {entry.entry_number}: {entry.description}",
@@ -466,7 +503,7 @@ def cancel_accounting_entry(db: Session, entry: AccountingEntry, user: User) -> 
     create_accounting_entry(db, entry.restaurant_id, user.id, reverse_payload, status=EntryStatus.POSTED)
     entry.status = EntryStatus.CANCELLED
     entry.cancelled_by = user.id
-    entry.cancelled_at = datetime.utcnow()
+    entry.cancelled_at = utcnow()
     return entry
 
 
@@ -627,7 +664,7 @@ def post_order_sale_entry(
     if tva > 0:
         lines.append(EntryLineIn(account_id=defaults["vat_collected"].id, label=f"TVA collectée {order_number}", debit=0, credit=tva))
     payload = EntryIn(
-        entry_date=datetime.utcnow(),
+        entry_date=utcnow(),
         journal_id=journal.id,
         reference=str(order_number),
         description=f"Vente commande {order_number}",
@@ -668,7 +705,7 @@ def post_stock_reception_entry(db: Session, restaurant_id: str, movement, user_i
     label = f"Réception {reference}"
     # Inventaire permanent : la réception entre à l'actif Stock (37), pas en charge (607).
     payload = EntryIn(
-        entry_date=getattr(movement, "movement_date", None) or datetime.utcnow(),
+        entry_date=getattr(movement, "movement_date", None) or utcnow(),
         journal_id=journal.id,
         reference=str(reference),
         description=f"Réception marchandises {reference}",
@@ -709,7 +746,7 @@ def post_stock_cogs_entry(db: Session, restaurant_id: str, movement, user_id: st
     reference = getattr(movement, "reference", None) or movement.id
     label = f"Sortie stock {reference}"
     payload = EntryIn(
-        entry_date=getattr(movement, "movement_date", None) or datetime.utcnow(),
+        entry_date=getattr(movement, "movement_date", None) or utcnow(),
         journal_id=journal.id,
         reference=str(reference),
         description=f"COGS / consommation {reference}",
@@ -742,6 +779,126 @@ def post_stock_cogs_entry_safe(db: Session, movement, user_id: str | None) -> No
             post_stock_cogs_entry(db, movement.restaurant_id, movement, resolved_user)
     except Exception:  # noqa: BLE001 - l'opération stock prime sur la comptabilisation
         logger.warning("Echec comptabilisation COGS %s", getattr(movement, "id", "?"), exc_info=True)
+
+
+def post_payment_fees_entry(db: Session, restaurant_id: str, *, source_id: str, reference, amount, user_id: str) -> AccountingEntry | None:
+    """Frais d'encaissement Mobile Money (commission opérateur + plateforme).
+
+    Débit 627 Frais / Crédit 512 Trésorerie. Idempotent (source_type='payment_fees').
+    Réduit la trésorerie du brut au net effectivement reçu. Ne commit pas.
+    """
+    total = money(amount)
+    if total <= 0:
+        return None
+    existing = (
+        db.query(AccountingEntry)
+        .filter(
+            AccountingEntry.restaurant_id == restaurant_id,
+            AccountingEntry.source_type == "payment_fees",
+            AccountingEntry.source_id == source_id,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    defaults = ensure_default_accounting(db, restaurant_id)
+    asset_account_id = payment_asset_account(db, restaurant_id, PaymentMethod.MOBILE_MONEY, None, None)
+    journal = journal_by_type(db, restaurant_id, JournalType.BANK)
+    label = f"Frais Mobile Money {reference}"
+    payload = EntryIn(
+        entry_date=utcnow(),
+        journal_id=journal.id,
+        reference=str(reference),
+        description=f"Frais encaissement {reference}",
+        source_type="payment_fees",
+        source_id=source_id,
+        lines=[
+            EntryLineIn(account_id=defaults["operator_fees"].id, label=label, debit=total, credit=0),
+            EntryLineIn(account_id=asset_account_id, label=label, debit=0, credit=total),
+        ],
+    )
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def _credit_note_existing(db: Session, restaurant_id: str, source_type: str, reference: str | None):
+    if not reference:
+        return None
+    return (
+        db.query(AccountingEntry)
+        .filter(
+            AccountingEntry.restaurant_id == restaurant_id,
+            AccountingEntry.source_type == source_type,
+            AccountingEntry.reference == reference,
+        )
+        .first()
+    )
+
+
+def post_supplier_credit_note(db: Session, restaurant_id: str, user_id: str, *, third_party_id, amount, tax_amount, reference, description) -> AccountingEntry:
+    """Avoir fournisseur (retour marchandise) : Débit 401 / Crédit 37 (+ 4456 TVA)."""
+    ht = money(amount)
+    tva = money(tax_amount)
+    ttc = ht + tva
+    if ttc <= 0:
+        raise HTTPException(status_code=400, detail="Montant d'avoir invalide")
+    existing = _credit_note_existing(db, restaurant_id, "credit_note_supplier", reference)
+    if existing:
+        return existing
+    defaults = ensure_default_accounting(db, restaurant_id)
+    journal = journal_by_type(db, restaurant_id, JournalType.PURCHASE)
+    lines = [
+        EntryLineIn(account_id=defaults["suppliers"].id, label=description, debit=ttc, credit=0, third_party_type="supplier", third_party_id=third_party_id),
+        EntryLineIn(account_id=defaults["stock"].id, label=description, debit=0, credit=ht),
+    ]
+    if tva > 0:
+        lines.append(EntryLineIn(account_id=defaults["vat_deductible"].id, label=f"TVA - {description}", debit=0, credit=tva))
+    payload = EntryIn(entry_date=utcnow(), journal_id=journal.id, reference=reference, description=f"Avoir fournisseur - {description}",
+                      source_type="credit_note_supplier", source_id=reference or new_id(), lines=lines)
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def post_customer_credit_note(db: Session, restaurant_id: str, user_id: str, *, third_party_id, amount, tax_amount, reference, description) -> AccountingEntry:
+    """Avoir client (annulation/geste) : Débit 701 (+ 4457 TVA) / Crédit 411."""
+    ht = money(amount)
+    tva = money(tax_amount)
+    ttc = ht + tva
+    if ttc <= 0:
+        raise HTTPException(status_code=400, detail="Montant d'avoir invalide")
+    existing = _credit_note_existing(db, restaurant_id, "credit_note_customer", reference)
+    if existing:
+        return existing
+    defaults = ensure_default_accounting(db, restaurant_id)
+    journal = journal_by_type(db, restaurant_id, JournalType.SALE)
+    lines = [
+        EntryLineIn(account_id=defaults["sales"].id, label=description, debit=ht, credit=0),
+    ]
+    if tva > 0:
+        lines.append(EntryLineIn(account_id=defaults["vat_collected"].id, label=f"TVA - {description}", debit=tva, credit=0))
+    lines.append(EntryLineIn(account_id=defaults["customers"].id, label=description, debit=0, credit=ttc, third_party_type="customer", third_party_id=third_party_id))
+    payload = EntryIn(entry_date=utcnow(), journal_id=journal.id, reference=reference, description=f"Avoir client - {description}",
+                      source_type="credit_note_customer", source_id=reference or new_id(), lines=lines)
+    return create_accounting_entry(db, restaurant_id, user_id, payload, status=EntryStatus.POSTED)
+
+
+def post_payment_fees_entry_safe(db: Session, restaurant_id: str, *, source_id, reference, amount, user_id) -> None:
+    """Comptabilise les frais d'encaissement sans bloquer le paiement (savepoint isolé)."""
+    try:
+        if not restaurant_id or money(amount) <= 0:
+            return
+        resolved_user = user_id
+        if not resolved_user:
+            resolved_user = (
+                db.query(User.id)
+                .filter(User.restaurant_id == restaurant_id)
+                .order_by(User.created_at.asc())
+                .scalar()
+            )
+        if not resolved_user:
+            return
+        with db.begin_nested():
+            post_payment_fees_entry(db, restaurant_id, source_id=source_id, reference=reference, amount=amount, user_id=resolved_user)
+    except Exception:  # noqa: BLE001 - le paiement prime sur la comptabilisation
+        logger.warning("Echec comptabilisation frais %s", source_id, exc_info=True)
 
 
 def post_stock_reception_entry_safe(db: Session, movement, user_id: str | None) -> None:
@@ -812,7 +969,7 @@ def post_inventory_adjustment_entry(
             EntryLineIn(account_id=stock_account_id, label=label, debit=0, credit=amount),
         ]
     payload = EntryIn(
-        entry_date=entry_date or datetime.utcnow(),
+        entry_date=entry_date or utcnow(),
         journal_id=journal.id,
         reference=str(reference),
         description=f"Écart d'inventaire {reference}",
@@ -1055,10 +1212,11 @@ def create_expense(payload: ExpenseIn, current_user: User = Depends(require_tena
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
     expense = Expense(
         restaurant_id=current_user.restaurant_id,
-        expense_date=payload.expense_date or datetime.utcnow(),
+        expense_date=payload.expense_date or utcnow(),
         category_id=payload.category_id,
         supplier_id=payload.supplier_id,
         amount=payload.amount,
+        tax_rate=payload.tax_rate,
         tax_amount=payload.tax_amount,
         total_amount=payload.total_amount,
         payment_status=payload.payment_status,
@@ -1067,6 +1225,8 @@ def create_expense(payload: ExpenseIn, current_user: User = Depends(require_tena
         created_by=current_user.id,
     )
     db.add(expense)
+    db.flush()
+    log_action(db, current_user, "finance.expense_create", "expense", expense.id, f"Dépense enregistrée: {expense.description}")
     db.commit()
     db.refresh(expense)
     return expense
@@ -1084,7 +1244,8 @@ def validate_expense(expense_id: str, payment_method: PaymentMethod = PaymentMet
     expense.accounting_entry_id = entry.id
     expense.status = OperationStatus.VALIDATED
     expense.validated_by = current_user.id
-    expense.validated_at = datetime.utcnow()
+    expense.validated_at = utcnow()
+    log_action(db, current_user, "finance.expense_validate", "expense", expense.id, f"Dépense validée: {expense.description}")
     db.commit()
     db.refresh(expense)
     return expense
@@ -1102,9 +1263,10 @@ def create_revenue(payload: RevenueIn, current_user: User = Depends(require_tena
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
     revenue = Revenue(
         restaurant_id=current_user.restaurant_id,
-        revenue_date=payload.revenue_date or datetime.utcnow(),
+        revenue_date=payload.revenue_date or utcnow(),
         customer_id=payload.customer_id,
         amount=payload.amount,
+        tax_rate=payload.tax_rate,
         tax_amount=payload.tax_amount,
         total_amount=payload.total_amount,
         payment_status=payload.payment_status,
@@ -1113,6 +1275,8 @@ def create_revenue(payload: RevenueIn, current_user: User = Depends(require_tena
         created_by=current_user.id,
     )
     db.add(revenue)
+    db.flush()
+    log_action(db, current_user, "finance.revenue_create", "revenue", revenue.id, f"Recette enregistrée: {revenue.description}")
     db.commit()
     db.refresh(revenue)
     return revenue
@@ -1130,10 +1294,172 @@ def validate_revenue(revenue_id: str, payment_method: PaymentMethod = PaymentMet
     revenue.accounting_entry_id = entry.id
     revenue.status = OperationStatus.VALIDATED
     revenue.validated_by = current_user.id
-    revenue.validated_at = datetime.utcnow()
+    revenue.validated_at = utcnow()
+    log_action(db, current_user, "finance.revenue_validate", "revenue", revenue.id, f"Recette validée: {revenue.description}")
     db.commit()
     db.refresh(revenue)
     return revenue
+
+
+@router.post("/credit-notes/supplier", status_code=201)
+def create_supplier_credit_note(payload: CreditNoteIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    """Avoir fournisseur (retour de marchandise)."""
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    entry = post_supplier_credit_note(
+        db, current_user.restaurant_id, current_user.id,
+        third_party_id=payload.third_party_id, amount=payload.amount, tax_amount=payload.tax_amount,
+        reference=payload.reference, description=payload.description,
+    )
+    db.commit()
+    return entry_public(db, entry)
+
+
+@router.post("/credit-notes/customer", status_code=201)
+def create_customer_credit_note(payload: CreditNoteIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    """Avoir client (annulation / geste commercial)."""
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    entry = post_customer_credit_note(
+        db, current_user.restaurant_id, current_user.id,
+        third_party_id=payload.third_party_id, amount=payload.amount, tax_amount=payload.tax_amount,
+        reference=payload.reference, description=payload.description,
+    )
+    db.commit()
+    return entry_public(db, entry)
+
+
+@router.post("/payment-schedules", status_code=201)
+def create_payment_schedule(payload: PaymentScheduleIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    schedule = PaymentSchedule(
+        restaurant_id=current_user.restaurant_id,
+        direction=payload.direction,
+        third_party_type=ThirdPartyType.SUPPLIER if payload.direction == "payable" else ThirdPartyType.CUSTOMER,
+        third_party_id=payload.third_party_id,
+        label=payload.label,
+        due_date=payload.due_date,
+        amount=money(payload.amount),
+        source_type=payload.source_type,
+        source_id=payload.source_id,
+        created_by=current_user.id,
+    )
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+    return schedule
+
+
+@router.get("/payment-schedules")
+def list_payment_schedules(status: str | None = None, direction: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    query = db.query(PaymentSchedule).filter(PaymentSchedule.restaurant_id == current_user.restaurant_id)
+    if status:
+        query = query.filter(PaymentSchedule.status == status)
+    if direction:
+        query = query.filter(PaymentSchedule.direction == direction)
+    return query.order_by(PaymentSchedule.due_date.asc()).limit(500).all()
+
+
+@router.patch("/payment-schedules/{schedule_id}/pay")
+def pay_payment_schedule(schedule_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    schedule = db.get(PaymentSchedule, schedule_id)
+    if not schedule or schedule.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Échéance introuvable")
+    if schedule.status != "pending":
+        raise HTTPException(status_code=400, detail="Échéance déjà traitée")
+    schedule.status = "paid"
+    schedule.paid_at = utcnow()
+    db.commit()
+    db.refresh(schedule)
+    return schedule
+
+
+def payment_schedule_summary(db: Session, restaurant_id: str, now: datetime | None = None) -> dict:
+    """Échéances en attente regroupées par sens, avec total et total en retard."""
+    now = now or utcnow()
+    empty = lambda: {"items": [], "total": Decimal("0.00"), "overdue_total": Decimal("0.00")}
+    result = {"payable": empty(), "receivable": empty()}
+    schedules = (
+        db.query(PaymentSchedule)
+        .filter(PaymentSchedule.restaurant_id == restaurant_id, PaymentSchedule.status == "pending")
+        .order_by(PaymentSchedule.due_date.asc())
+        .all()
+    )
+    for schedule in schedules:
+        bucket = result.get(schedule.direction)
+        if bucket is None:
+            continue
+        overdue = schedule.due_date < now
+        amount = money(schedule.amount)
+        bucket["items"].append({
+            "id": schedule.id, "label": schedule.label, "third_party_id": schedule.third_party_id,
+            "due_date": schedule.due_date, "amount": amount, "overdue": overdue,
+        })
+        bucket["total"] += amount
+        if overdue:
+            bucket["overdue_total"] += amount
+    return result
+
+
+@router.get("/reports/payment-schedule")
+def payment_schedule_report(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    return payment_schedule_summary(db, current_user.restaurant_id)
+
+
+@router.patch("/entry-lines/{line_id}/reconcile")
+def reconcile_entry_line(line_id: str, reconciled: bool = True, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    """Pointe (ou dépointe) une ligne d'écriture contre le relevé bancaire."""
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    line = db.get(AccountingEntryLine, line_id)
+    if not line or line.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Ligne d'écriture introuvable")
+    line.reconciled = reconciled
+    line.reconciled_at = utcnow() if reconciled else None
+    db.commit()
+    db.refresh(line)
+    return line
+
+
+def bank_reconciliation(db: Session, restaurant_id: str, account_id: str, statement_balance=None) -> dict:
+    """Rapprochement d'un compte de trésorerie : solde comptable, pointé, et écart vs relevé."""
+    account = account_or_404(db, account_id, restaurant_id)
+    rows = posted_lines_query(db, restaurant_id).filter(AccountingAccount.id == account_id).all()
+    book_balance = Decimal("0.00")
+    reconciled_balance = Decimal("0.00")
+    unreconciled_lines = []
+    for line, entry, _account in sorted(rows, key=lambda r: r[1].entry_date):
+        signed = money(line.debit) - money(line.credit)
+        book_balance += signed
+        if line.reconciled:
+            reconciled_balance += signed
+        else:
+            unreconciled_lines.append({
+                "line_id": line.id,
+                "entry_date": entry.entry_date,
+                "entry_number": entry.entry_number,
+                "label": line.label,
+                "debit": money(line.debit),
+                "credit": money(line.credit),
+            })
+    statement = money(statement_balance) if statement_balance is not None else None
+    return {
+        "account_id": account.id,
+        "account_code": account.code,
+        "account_name": account.name,
+        "book_balance": book_balance,
+        "reconciled_balance": reconciled_balance,
+        "unreconciled_total": book_balance - reconciled_balance,
+        "statement_balance": statement,
+        "gap": (statement - reconciled_balance) if statement is not None else None,
+        "unreconciled_lines": unreconciled_lines,
+    }
+
+
+@router.get("/reports/bank-reconciliation")
+def bank_reconciliation_report(account_id: str, statement_balance: Decimal | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    return bank_reconciliation(db, current_user.restaurant_id, account_id, statement_balance)
 
 
 @router.get("/payments")
@@ -1146,8 +1472,10 @@ def list_payments(start_date: datetime | None = None, end_date: datetime | None 
 @router.post("/payments", status_code=201)
 def create_payment(payload: PaymentIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    payment = Payment(restaurant_id=current_user.restaurant_id, created_by=current_user.id, payment_date=payload.payment_date or datetime.utcnow(), **payload.dict(exclude={"payment_date"}))
+    payment = Payment(restaurant_id=current_user.restaurant_id, created_by=current_user.id, payment_date=payload.payment_date or utcnow(), **payload.dict(exclude={"payment_date"}))
     db.add(payment)
+    db.flush()
+    log_action(db, current_user, "finance.payment_create", "payment", payment.id, "Encaissement / décaissement enregistré")
     db.commit()
     db.refresh(payment)
     return payment
@@ -1165,7 +1493,8 @@ def validate_payment(payment_id: str, current_user: User = Depends(require_tenan
     payment.accounting_entry_id = entry.id
     payment.status = OperationStatus.VALIDATED
     payment.validated_by = current_user.id
-    payment.validated_at = datetime.utcnow()
+    payment.validated_at = utcnow()
+    log_action(db, current_user, "finance.payment_validate", "payment", payment.id, "Paiement validé")
     db.commit()
     db.refresh(payment)
     return payment
@@ -1299,7 +1628,7 @@ def get_income_statement(start_date: datetime | None = None, end_date: datetime 
 @router.get("/reports/balance-sheet")
 def get_balance_sheet(end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_READ)
-    end = end_date or datetime.utcnow()
+    end = end_date or utcnow()
     rows = trial_balance_rows(db, current_user.restaurant_id, None, end)
     assets = [row for row in rows if row["type"] == AccountType.ASSET.value]
     liabilities = [row for row in rows if row["type"] in {AccountType.LIABILITY.value, AccountType.EQUITY.value}]
@@ -1506,6 +1835,14 @@ def financial_statements(start_date: datetime | None = None, end_date: datetime 
     return {"income_statement": get_income_statement(start_date, end_date, current_user, db), "cash_flow": get_cash_report(start_date, end_date, current_user, db), "balance_sheet": get_balance_sheet(end_date, current_user, db), "trial_balance": get_trial_balance(start_date, end_date, None, current_user, db)}
 
 
+@router.post("/reports/export-audit", status_code=204)
+def audit_finance_export(payload: ExportAuditIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    log_action(db, current_user, "finance.report_export", "finance_report", payload.report_type, f"Export {payload.format} - {payload.report_type}")
+    db.commit()
+    return None
+
+
 # Compatibilite: anciennes routes analytiques, maintenant derivees des ecritures ou des commandes.
 @router.get("/dish-margins")
 def dish_margins(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
@@ -1586,6 +1923,77 @@ def food_cost_report(start_date: datetime | None = None, end_date: datetime | No
         "food_cost_rate": round(float(total_cost / total_revenue * 100), 2) if total_revenue else 0,
         "by_category": sorted(by_category.values(), key=lambda row: row["category"]),
     }
+
+
+# Colonnes normalisées du Fichier des Écritures Comptables (FEC), séparées par tabulation.
+FEC_HEADER = [
+    "JournalCode", "JournalLib", "EcritureNum", "EcritureDate", "CompteNum", "CompteLib",
+    "CompAuxNum", "CompAuxLib", "PieceRef", "PieceDate", "EcritureLib", "Debit", "Credit",
+    "EcritureLet", "DateLet", "ValidDate", "Montantdevise", "Idevise",
+]
+
+
+def _fec_amount(value) -> str:
+    # FEC : séparateur décimal virgule.
+    return f"{money(value):.2f}".replace(".", ",")
+
+
+def _fec_date(value) -> str:
+    return value.strftime("%Y%m%d") if value else ""
+
+
+def _fec_clean(value) -> str:
+    # Aucune tabulation / saut de ligne dans une cellule (sinon le TSV est cassé).
+    return str(value or "").replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+
+
+def build_fec_rows(db: Session, restaurant_id: str, start: datetime, end: datetime) -> list[list[str]]:
+    """Construit les lignes FEC (en-tête + écritures POSTÉES) sur une période."""
+    journals = {j.id: j for j in db.query(AccountingJournal).filter(AccountingJournal.restaurant_id == restaurant_id).all()}
+    query = posted_lines_query(db, restaurant_id, start, end).order_by(
+        AccountingEntry.entry_date.asc(), AccountingEntry.entry_number.asc(), AccountingEntryLine.created_at.asc()
+    )
+    rows = [list(FEC_HEADER)]
+    for line, entry, account in query.all():
+        journal = journals.get(entry.journal_id)
+        rows.append([
+            _fec_clean(journal.code if journal else ""),
+            _fec_clean(journal.name if journal else ""),
+            _fec_clean(entry.entry_number),
+            _fec_date(entry.entry_date),
+            _fec_clean(account.code),
+            _fec_clean(account.name),
+            _fec_clean(line.third_party_id or ""),
+            _fec_clean(line.third_party_type.value if line.third_party_type else ""),
+            _fec_clean(entry.reference or entry.entry_number),
+            _fec_date(entry.entry_date),
+            _fec_clean(line.label),
+            _fec_amount(line.debit),
+            _fec_amount(line.credit),
+            "",  # EcritureLet (lettrage non géré)
+            "",  # DateLet
+            _fec_date(entry.posted_at or entry.entry_date),
+            "",  # Montantdevise
+            "",  # Idevise
+        ])
+    return rows
+
+
+@router.get("/reports/fec")
+def export_fec(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    """Export FEC (Fichier des Écritures Comptables) — texte tabulé, ouvrable dans Excel."""
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    start, end = report_range(start_date, end_date)
+    rows = build_fec_rows(db, current_user.restaurant_id, start, end)
+    content = "\n".join("\t".join(row) for row in rows)
+    filename = f"FEC_{start:%Y%m%d}_{end:%Y%m%d}.txt"
+    log_action(db, current_user, "finance.report_export", "finance_report", "fec", "Export FEC")
+    db.commit()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/stock-rotation")
@@ -1674,7 +2082,7 @@ def migrate_legacy_finance(current_user: User = Depends(require_tenant_user), db
         expense = Expense(
             id=row["id"],
             restaurant_id=current_user.restaurant_id,
-            expense_date=row["expense_date"] or datetime.utcnow(),
+            expense_date=row["expense_date"] or utcnow(),
             category_id=category.id if category else None,
             amount=money(row["amount"]),
             tax_amount=Decimal("0.00"),

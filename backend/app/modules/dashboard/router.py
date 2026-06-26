@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from app.modules.shared.models import utcnow
 
 from sqlalchemy import MetaData, Table, func, inspect, select
 from sqlalchemy.orm import Session, selectinload
@@ -144,7 +145,7 @@ REALTIME_STATUS_KEYS = {
 
 def _analytics_bounds(start_date, end_date):
     """Période par défaut = aujourd'hui ; sinon respecte start/end fournis."""
-    now = datetime.utcnow()
+    now = utcnow()
     if not start_date and not end_date:
         start = datetime.combine(now.date(), datetime.min.time())
         end = datetime.combine(now.date(), datetime.max.time())
@@ -410,13 +411,13 @@ def cashier_performance(
 def dashboard_period(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime | None, datetime | None]:
     if not start_date and not end_date:
         return None, None
-    end = end_date or datetime.utcnow()
+    end = end_date or utcnow()
     start = start_date or (end - timedelta(days=30))
     return start, end
 
 
 def performance_period(period: str) -> tuple[datetime, datetime]:
-    now = datetime.utcnow()
+    now = utcnow()
     if period == "month":
         start = datetime(now.year, now.month, 1)
     else:
@@ -695,7 +696,7 @@ def build_weekly_revenue(
     start_date: datetime | None = None,
     end_date: datetime | None = None,
 ) -> list[AdminDashboardWeeklyPoint]:
-    end_day = (end_date or datetime.utcnow()).date()
+    end_day = (end_date or utcnow()).date()
     days = [end_day - timedelta(days=offset) for offset in range(6, -1, -1)]
     labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
     totals = {day: {"revenue": 0.0, "orders_count": 0} for day in days}
@@ -882,7 +883,7 @@ def stock_low_stock_columns_available(db: Session) -> bool:
 
 
 def format_activity_time(value: datetime) -> str:
-    delta = datetime.utcnow() - value
+    delta = utcnow() - value
     if delta.days > 0:
         return f"Il y a {delta.days} j"
     minutes = max(0, int(delta.total_seconds() // 60))

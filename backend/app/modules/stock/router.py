@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
+from app.modules.shared.models import utcnow
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import inspect, text
+from sqlalchemy import and_, case, func, inspect, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,7 @@ from app.modules.stock.models import (
     StockMovementStatus,
     StockMovementType,
     StockProductType,
+    StockLot,
     StockProductionSheet,
     StockRecipeIngredient,
     Supplier,
@@ -40,6 +42,7 @@ from app.modules.stock.schemas import (
     DepotPublic,
     DepotStockRow,
     DepotUpdateIn,
+    ExportAuditIn,
     InventoryCreateIn,
     InventoryDetailPublic,
     InventoryLineUpdateIn,
@@ -79,9 +82,11 @@ DEFAULT_DEPOTS = [
 DEFAULT_UNITS = [
     ("piece", "piece"),
     ("kg", "kg"),
+    ("1/4 kg", "1/4 kg"),
     ("litre", "L"),
     ("bouteille", "btle"),
     ("carton", "ctn"),
+    ("paquet", "paquet"),
 ]
 LOCATION_DEPOT_CODE = {
     StockLocation.MAGASIN: "MAIN",
@@ -90,6 +95,9 @@ LOCATION_DEPOT_CODE = {
 }
 IN_TYPES = {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS}
 OUT_TYPES = {StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS}
+# Inclut les valeurs legacy normalisées par normalize_type (IN->ENTRY, OUT->OUTPUT, ADJUSTMENT->INVENTORY_PLUS).
+SQL_IN_TYPES = [StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS, StockMovementType.IN, StockMovementType.ADJUSTMENT]
+SQL_OUT_TYPES = [StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS, StockMovementType.OUT]
 
 
 def ensure_default_data(db: Session, restaurant_id: str | None) -> None:
@@ -154,7 +162,7 @@ def migrate_legacy_stock_items(db: Session, restaurant_id: str) -> None:
             packaging_sale_price=float(row.get("packaging_sale_price") or 0),
             sale_margin_rate=float(row.get("sale_margin_rate") or 0),
             is_active=bool(row.get("is_active", True)),
-            created_at=row.get("created_at") or datetime.utcnow(),
+            created_at=row.get("created_at") or utcnow(),
         )
         db.add(product)
         for quantity, depot_code in [
@@ -174,7 +182,7 @@ def migrate_legacy_stock_items(db: Session, restaurant_id: str) -> None:
                     unit_price=product.purchase_price,
                     reason="Migration ancien stock: depot estime depuis les anciennes colonnes",
                     reference="legacy-stock-migration",
-                    movement_date=datetime.utcnow(),
+                    movement_date=utcnow(),
                 )
 
 
@@ -268,18 +276,44 @@ def signed_quantity(movement: StockMovement, depot_id: str | None = None) -> Dec
     return Decimal("0")
 
 
+def _stock_quantity_expr(depot_id: str | None):
+    """Expression SQL signée (équivalent de signed_quantity) pour SUM côté base."""
+    if depot_id is None:
+        # Tous dépôts : les transferts (+dest -source) se compensent -> ignorés.
+        return case(
+            (StockMovement.movement_type.in_(SQL_IN_TYPES), StockMovement.quantity),
+            (StockMovement.movement_type.in_(SQL_OUT_TYPES), -StockMovement.quantity),
+            else_=0,
+        )
+    return case(
+        (and_(StockMovement.movement_type.in_(SQL_IN_TYPES), StockMovement.destination_depot_id == depot_id), StockMovement.quantity),
+        (and_(StockMovement.movement_type.in_(SQL_OUT_TYPES), StockMovement.source_depot_id == depot_id), -StockMovement.quantity),
+        (and_(StockMovement.movement_type == StockMovementType.TRANSFER, StockMovement.destination_depot_id == depot_id), StockMovement.quantity),
+        (and_(StockMovement.movement_type == StockMovementType.TRANSFER, StockMovement.source_depot_id == depot_id), -StockMovement.quantity),
+        else_=0,
+    )
+
+
 def get_current_stock(db: Session, product_id: str, depot_id: str | None = None, restaurant_id: str | None = None) -> Decimal:
-    query = db.query(StockMovement).filter(
+    """Stock courant d'un produit, calculé par **agrégation SQL** (pas de scan Python)."""
+    query = db.query(func.coalesce(func.sum(_stock_quantity_expr(depot_id)), 0)).filter(
         StockMovement.product_id == product_id,
         StockMovement.status == StockMovementStatus.VALIDATED,
     )
     if restaurant_id:
         query = query.filter(StockMovement.restaurant_id == restaurant_id)
-    if depot_id:
-        query = query.filter(
-            (StockMovement.source_depot_id == depot_id) | (StockMovement.destination_depot_id == depot_id)
-        )
-    return sum((signed_quantity(movement, depot_id) for movement in query.all()), Decimal("0"))
+    return dec(query.scalar())
+
+
+def stock_totals_map(db: Session, restaurant_id: str) -> dict[str, Decimal]:
+    """Stock courant (tous dépôts) de TOUS les produits du restaurant en une requête (anti N+1)."""
+    rows = (
+        db.query(StockMovement.product_id, func.coalesce(func.sum(_stock_quantity_expr(None)), 0))
+        .filter(StockMovement.restaurant_id == restaurant_id, StockMovement.status == StockMovementStatus.VALIDATED)
+        .group_by(StockMovement.product_id)
+        .all()
+    )
+    return {product_id: dec(total) for product_id, total in rows}
 
 
 def get_product_stock_by_depot(db: Session, product: Product) -> list[ProductStockByDepot]:
@@ -298,11 +332,11 @@ def get_product_stock_by_depot(db: Session, product: Product) -> list[ProductSto
     return rows
 
 
-def product_public(db: Session, product: Product) -> dict:
+def product_public(db: Session, product: Product, *, total_stock: Decimal | None = None) -> dict:
     unit = db.get(Unit, product.unit_id)
     purchase_unit = db.get(Unit, product.purchase_unit_id) if product.purchase_unit_id else None
     stock_by_depot = get_product_stock_by_depot(db, product)
-    current_stock = get_current_stock(db, product.id, restaurant_id=product.restaurant_id)
+    current_stock = total_stock if total_stock is not None else get_current_stock(db, product.id, restaurant_id=product.restaurant_id)
     return {
         "id": product.id,
         "restaurant_id": product.restaurant_id,
@@ -374,6 +408,7 @@ def add_movement(
     source_depot_id: str | None = None,
     destination_depot_id: str | None = None,
     unit_price: float | None = None,
+    production_cost: float | None = None,
     supplier_id: str | None = None,
     reason: str | None = None,
     reference: str | None = None,
@@ -413,7 +448,7 @@ def add_movement(
         price = product.cmup if product.cmup else dec(product.purchase_price)
     movement = StockMovement(
         restaurant_id=restaurant_id,
-        movement_date=movement_date or datetime.utcnow(),
+        movement_date=movement_date or utcnow(),
         movement_type=movement_type,
         product_id=product.id,
         source_depot_id=source_depot_id,
@@ -421,13 +456,14 @@ def add_movement(
         quantity=qty,
         unit_price=price,
         total_amount=qty * price,
+        production_cost=dec(production_cost) if production_cost is not None else None,
         supplier_id=supplier_id,
         reason=reason,
         reference=reference,
         status=status,
         created_by=user_id,
         validated_by=user_id if status == StockMovementStatus.VALIDATED else None,
-        validated_at=datetime.utcnow() if status == StockMovementStatus.VALIDATED else None,
+        validated_at=utcnow() if status == StockMovementStatus.VALIDATED else None,
     )
     db.add(movement)
     db.flush()
@@ -437,6 +473,8 @@ def add_movement(
         from app.modules.finance.router import post_stock_cogs_entry_safe
 
         post_stock_cogs_entry_safe(db, movement, user_id)
+        # FEFO : décharge les lots du dépôt source (no-op si produit non suivi par lots).
+        consume_lots_fefo(db, restaurant_id, product.id, source_depot_id, qty)
     return movement
 
 
@@ -552,7 +590,8 @@ def list_products(current_user: User = Depends(require_tenant_user), db: Session
     ensure_default_data(db, current_user.restaurant_id)
     db.commit()
     products = db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id).order_by(Product.created_at.desc()).all()
-    return [product_public(db, product) for product in products]
+    totals = stock_totals_map(db, current_user.restaurant_id)
+    return [product_public(db, product, total_stock=totals.get(product.id, Decimal("0"))) for product in products]
 
 
 @router.post("/products", response_model=ProductPublic, status_code=201)
@@ -571,8 +610,8 @@ def create_product(payload: ProductIn, current_user: User = Depends(require_tena
         unit_id=unit.id,
         purchase_unit_id=purchase_unit.id if purchase_unit else None,
         purchase_factor=payload.purchase_factor,
-        purchase_price=payload.purchase_price,
-        cmup=payload.purchase_price,
+        purchase_price=0,
+        cmup=0,
         minimum_stock=payload.minimum_stock,
         packaging_sale_price=payload.packaging_sale_price,
         sale_margin_rate=payload.sale_margin_rate,
@@ -731,6 +770,8 @@ def create_supplier(payload: SupplierIn, current_user: User = Depends(require_te
     assert_permission(current_user, Permission.STOCK_UPDATE)
     supplier = Supplier(restaurant_id=current_user.restaurant_id, **payload.dict())
     db.add(supplier)
+    db.flush()
+    log_action(db, current_user, "stock.supplier_create", "supplier", supplier.id, f"Fournisseur créé: {supplier.name}")
     db.commit()
     db.refresh(supplier)
     return supplier
@@ -767,6 +808,53 @@ def compute_dish_costs(db: Session, restaurant_id: str) -> dict[str, Decimal]:
     return costs
 
 
+def create_stock_lot(db: Session, movement: StockMovement, *, depot_id: str, quantity, unit_cost, lot_number=None, expiry_date=None) -> StockLot:
+    lot = StockLot(
+        restaurant_id=movement.restaurant_id,
+        product_id=movement.product_id,
+        depot_id=depot_id,
+        lot_number=lot_number,
+        expiry_date=expiry_date,
+        quantity_initial=dec(quantity),
+        quantity_remaining=dec(quantity),
+        unit_cost=dec(unit_cost),
+        movement_id=movement.id,
+    )
+    db.add(lot)
+    return lot
+
+
+def consume_lots_fefo(db: Session, restaurant_id: str, product_id: str, depot_id: str | None, quantity) -> None:
+    """Décrémente les lots du dépôt en **FEFO** (péremption la plus proche d'abord).
+
+    No-op si le produit n'est pas suivi par lots (aucun lot) -> le ledger reste la source
+    de vérité des quantités. Les lots non datés sont consommés après les lots datés.
+    """
+    remaining = dec(quantity)
+    if remaining <= 0 or not depot_id:
+        return
+    lots = (
+        db.query(StockLot)
+        .filter(
+            StockLot.restaurant_id == restaurant_id,
+            StockLot.product_id == product_id,
+            StockLot.depot_id == depot_id,
+            StockLot.quantity_remaining > 0,
+        )
+        .order_by(StockLot.expiry_date.is_(None).asc(), StockLot.expiry_date.asc(), StockLot.created_at.asc())
+        .all()
+    )
+    if not lots:
+        return
+    for lot in lots:
+        if remaining <= 0:
+            break
+        available = dec(lot.quantity_remaining)
+        take = available if available <= remaining else remaining
+        lot.quantity_remaining = available - take
+        remaining -= take
+
+
 def create_stock_entry(payload: StockEntryIn, current_user: User, db: Session, movement_type: StockMovementType) -> StockMovement:
     previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
     quantity = dec(payload.quantity)
@@ -792,10 +880,20 @@ def create_stock_entry(payload: StockEntryIn, current_user: User, db: Session, m
         reference=payload.reference,
         movement_date=payload.movement_date,
     )
+    if payload.lot_number or payload.expiry_date:
+        create_stock_lot(
+            db, movement,
+            depot_id=payload.destination_depot_id,
+            quantity=movement.quantity,
+            unit_cost=movement.unit_price,
+            lot_number=payload.lot_number,
+            expiry_date=payload.expiry_date,
+        )
     notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
     from app.modules.finance.router import post_stock_reception_entry_safe
 
     post_stock_reception_entry_safe(db, movement, current_user.id)
+    log_action(db, current_user, "stock.entry_create", "stock_movement", movement.id, "Entrée de stock")
     db.commit()
     db.refresh(movement)
     return movement
@@ -817,6 +915,7 @@ def create_direct_entry(payload: StockEntryIn, current_user: User = Depends(requ
 def create_transfer(payload: StockTransferIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
     movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.TRANSFER, **payload.dict())
+    log_action(db, current_user, "stock.transfer_create", "stock_movement", movement.id, "Transfert de stock")
     db.commit()
     db.refresh(movement)
     return movement
@@ -827,6 +926,7 @@ def create_output(payload: StockOutputIn, current_user: User = Depends(require_t
     assert_permission(current_user, Permission.STOCK_UPDATE)
     previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
     movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.OUTPUT, unit_price=None, **payload.dict())
+    log_action(db, current_user, "stock.output_create", "stock_movement", movement.id, "Sortie de stock")
     notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
     db.commit()
     db.refresh(movement)
@@ -839,6 +939,7 @@ def create_loss(payload: StockOutputIn, current_user: User = Depends(require_ten
     assert_permission(current_user, Permission.STOCK_UPDATE)
     previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
     movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.LOSS, **payload.dict())
+    log_action(db, current_user, "stock.loss_create", "stock_movement", movement.id, "Avarie / perte de stock")
     notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
     db.commit()
     db.refresh(movement)
@@ -870,12 +971,14 @@ def create_movement(payload: StockMovementIn, current_user: User = Depends(requi
         source_depot_id=source_depot_id,
         destination_depot_id=destination_depot_id,
         unit_price=payload.unit_price,
+        production_cost=payload.production_cost,
         supplier_id=payload.supplier_id,
         reason=payload.reason,
         reference=payload.reference,
         movement_date=payload.movement_date,
         status=payload.status,
     )
+    log_action(db, current_user, "stock.movement_create", "stock_movement", movement.id, "Mouvement de stock")
     db.commit()
     db.refresh(movement)
     return movement
@@ -936,7 +1039,7 @@ def cancel_stock_movement(movement_id: str, reason: str | None = None, current_u
     movement.status = StockMovementStatus.CANCELLED
     movement.reason = f"{movement.reason or ''}\nAnnulation controlee: {reason or 'sans motif'}".strip()
     movement.validated_by = current_user.id
-    movement.validated_at = datetime.utcnow()
+    movement.validated_at = utcnow()
     db.commit()
     db.refresh(movement)
     return movement
@@ -958,7 +1061,10 @@ def get_depot_stock(depot_id: str, current_user: User = Depends(require_tenant_u
     for product in products:
         unit = db.get(Unit, product.unit_id)
         quantity = get_current_stock(db, product.id, depot.id, current_user.restaurant_id)
-        rows.append(DepotStockRow(product_id=product.id, product_name=product.name, unit=unit.symbol if unit else "", quantity=quantity, value=quantity * product.purchase_price, minimum_stock=product.minimum_stock))
+        if quantity <= 0:
+            continue
+        unit_cost = product.cmup if product.cmup else dec(product.purchase_price)
+        rows.append(DepotStockRow(product_id=product.id, product_name=product.name, unit=unit.symbol if unit else "", quantity=quantity, value=quantity * unit_cost, minimum_stock=product.minimum_stock))
     return rows
 
 
@@ -967,6 +1073,49 @@ def get_low_stock_products(current_user: User = Depends(require_tenant_user), db
     assert_permission(current_user, Permission.STOCK_READ)
     products = [product_public(db, p) for p in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()]
     return [product for product in products if product["current_stock"] <= product["minimum_stock"]]
+
+
+@router.get("/lots")
+def list_lots(product_id: str | None = None, depot_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    """Lots de stock encore disponibles (quantité restante > 0)."""
+    assert_permission(current_user, Permission.STOCK_READ)
+    query = db.query(StockLot).filter(StockLot.restaurant_id == current_user.restaurant_id, StockLot.quantity_remaining > 0)
+    if product_id:
+        query = query.filter(StockLot.product_id == product_id)
+    if depot_id:
+        query = query.filter(StockLot.depot_id == depot_id)
+    return query.order_by(StockLot.expiry_date.is_(None).asc(), StockLot.expiry_date.asc()).limit(500).all()
+
+
+@router.get("/lots/expiring")
+def get_expiring_lots(days: int = Query(default=7, ge=0, le=365), current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    """Lots périmés ou périmant dans les `days` jours (quantité restante > 0)."""
+    assert_permission(current_user, Permission.STOCK_READ)
+    now = utcnow()
+    limit_date = now + timedelta(days=days)
+    lots = (
+        db.query(StockLot)
+        .filter(
+            StockLot.restaurant_id == current_user.restaurant_id,
+            StockLot.quantity_remaining > 0,
+            StockLot.expiry_date.isnot(None),
+            StockLot.expiry_date <= limit_date,
+        )
+        .order_by(StockLot.expiry_date.asc())
+        .all()
+    )
+    return [
+        {
+            "id": lot.id,
+            "product_id": lot.product_id,
+            "depot_id": lot.depot_id,
+            "lot_number": lot.lot_number,
+            "expiry_date": lot.expiry_date,
+            "quantity_remaining": lot.quantity_remaining,
+            "expired": lot.expiry_date < now,
+        }
+        for lot in lots
+    ]
 
 
 @router.post("/inventories", response_model=InventoryPublic, status_code=201)
@@ -979,7 +1128,7 @@ def create_inventory(payload: InventoryCreateIn, current_user: User = Depends(re
         raise HTTPException(status_code=404, detail="Depot introuvable")
     inventory = Inventory(
         restaurant_id=current_user.restaurant_id,
-        inventory_date=payload.inventory_date or datetime.utcnow(),
+        inventory_date=payload.inventory_date or utcnow(),
         depot_id=depot.id,
         observation=payload.observation or payload.period,
         created_by=current_user.id,
@@ -988,14 +1137,39 @@ def create_inventory(payload: InventoryCreateIn, current_user: User = Depends(re
     db.flush()
     details = payload.details
     if not details:
+        products_in_depot = []
+        for product in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all():
+            quantity = get_current_stock(db, product.id, depot.id, current_user.restaurant_id)
+            if quantity > 0:
+                products_in_depot.append(type("Detail", (), {"product_id": product.id, "real_quantity": quantity, "justification": None}))
         details = [
-            type("Detail", (), {"product_id": product.id, "real_quantity": get_current_stock(db, product.id, depot.id, current_user.restaurant_id)})
-            for product in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()
+            detail
+            for detail in products_in_depot
         ]
     for detail in details:
         theoretical = get_current_stock(db, detail.product_id, depot.id, current_user.restaurant_id)
         real = dec(detail.real_quantity)
-        db.add(InventoryDetail(restaurant_id=current_user.restaurant_id, inventory_id=inventory.id, product_id=detail.product_id, theoretical_quantity=theoretical, real_quantity=real, gap_quantity=real - theoretical))
+        gap = theoretical - real
+        tolerance = Decimal("0")
+        exceeds = abs(gap) > tolerance
+        justification = (getattr(detail, "justification", None) or "").strip() or None
+        if exceeds and not justification:
+            raise HTTPException(status_code=400, detail="Une justification est obligatoire pour chaque écart d'inventaire.")
+        product = get_product_or_404(db, detail.product_id, current_user.restaurant_id)
+        unit_cost = product.cmup if product.cmup else dec(product.purchase_price)
+        db.add(InventoryDetail(
+            restaurant_id=current_user.restaurant_id,
+            inventory_id=inventory.id,
+            product_id=detail.product_id,
+            theoretical_quantity=theoretical,
+            real_quantity=real,
+            gap_quantity=gap,
+            value_gap=gap * unit_cost,
+            exceeds_tolerance=exceeds,
+            tolerance_threshold=tolerance,
+            justification=justification,
+        ))
+    log_action(db, current_user, "stock.inventory_create", "inventory", inventory.id, "Inventaire créé")
     db.commit()
     db.refresh(inventory)
     return inventory_public(db, inventory)
@@ -1036,7 +1210,14 @@ def update_inventory_line(inventory_id: str, line_id: str, payload: InventoryLin
     if not line or line.inventory_id != inventory.id:
         raise HTTPException(status_code=404, detail="Ligne inventaire introuvable")
     line.real_quantity = dec(payload.real_stock)
-    line.gap_quantity = dec(payload.real_stock) - dec(line.theoretical_quantity)
+    line.gap_quantity = dec(line.theoretical_quantity) - dec(payload.real_stock)
+    product = get_product_or_404(db, line.product_id, current_user.restaurant_id)
+    unit_cost = product.cmup if product.cmup else dec(product.purchase_price)
+    line.value_gap = dec(line.gap_quantity) * unit_cost
+    line.exceeds_tolerance = abs(dec(line.gap_quantity)) > dec(line.tolerance_threshold)
+    line.justification = (payload.justification or "").strip() or None
+    if line.exceeds_tolerance and not line.justification:
+        raise HTTPException(status_code=400, detail="Justification obligatoire pour un écart d'inventaire.")
     db.commit()
     db.refresh(line)
     return line
@@ -1053,13 +1234,15 @@ def validate_inventory(inventory_id: str, current_user: User = Depends(require_t
         raise HTTPException(status_code=400, detail="Inventaire deja traite")
     details = db.query(InventoryDetail).filter(InventoryDetail.inventory_id == inventory.id).all()
     for detail in details:
-        if detail.gap_quantity > 0:
-            add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.INVENTORY_PLUS, product_id=detail.product_id, destination_depot_id=inventory.depot_id, quantity=detail.gap_quantity, reason=f"Ajustement inventaire {inventory.id}", reference=inventory.id)
-        elif detail.gap_quantity < 0:
-            add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.INVENTORY_MINUS, product_id=detail.product_id, source_depot_id=inventory.depot_id, quantity=abs(detail.gap_quantity), reason=f"Ajustement inventaire {inventory.id}", reference=inventory.id)
+        if detail.exceeds_tolerance and not (detail.justification or "").strip():
+            raise HTTPException(status_code=400, detail="Justification obligatoire avant clôture pour les écarts d'inventaire.")
+        if detail.gap_quantity < 0:
+            add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.INVENTORY_PLUS, product_id=detail.product_id, destination_depot_id=inventory.depot_id, quantity=abs(detail.gap_quantity), reason=f"Ajustement inventaire {inventory.id}", reference=inventory.id)
+        elif detail.gap_quantity > 0:
+            add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.INVENTORY_MINUS, product_id=detail.product_id, source_depot_id=inventory.depot_id, quantity=detail.gap_quantity, reason=f"Ajustement inventaire {inventory.id}", reference=inventory.id)
     inventory.status = InventoryStatus.VALIDATED
     inventory.validated_by = current_user.id
-    inventory.validated_at = datetime.utcnow()
+    inventory.validated_at = utcnow()
 
     from decimal import Decimal
 
@@ -1067,11 +1250,11 @@ def validate_inventory(inventory_id: str, current_user: User = Depends(require_t
 
     product_ids = [detail.product_id for detail in details]
     costs = {
-        product.id: product.purchase_price
+        product.id: (product.cmup if product.cmup else product.purchase_price)
         for product in db.query(Product).filter(Product.id.in_(product_ids)).all()
     } if product_ids else {}
     net_amount = sum(
-        (Decimal(str(detail.gap_quantity or 0)) * Decimal(str(costs.get(detail.product_id, 0) or 0)) for detail in details),
+        (-Decimal(str(detail.gap_quantity or 0)) * Decimal(str(costs.get(detail.product_id, 0) or 0)) for detail in details),
         Decimal("0"),
     )
     post_inventory_adjustment_entry_safe(
@@ -1084,6 +1267,7 @@ def validate_inventory(inventory_id: str, current_user: User = Depends(require_t
         user_id=current_user.id,
     )
 
+    log_action(db, current_user, "stock.inventory_close", "inventory", inventory.id, "Inventaire clôturé")
     db.commit()
     db.refresh(inventory)
     return inventory_public(db, inventory)
@@ -1101,7 +1285,7 @@ def get_stock_movements_report(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.STOCK_READ)
-    end = end_date or datetime.utcnow()
+    end = end_date or utcnow()
     start = start_date or (end - timedelta(days=7))
     query = db.query(StockMovement).join(Product, Product.id == StockMovement.product_id).filter(StockMovement.restaurant_id == current_user.restaurant_id, StockMovement.movement_date >= start, StockMovement.movement_date <= end)
     if depot_id:
@@ -1113,8 +1297,19 @@ def get_stock_movements_report(
     if movement_type:
         query = query.filter(StockMovement.movement_type == movement_type)
     movements = query.order_by(StockMovement.movement_date.desc()).all()
-    products = [product_public(db, p) for p in db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id).all()]
-    stock_value = sum(product["stock_value"] for product in products)
+    all_products = db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()
+    if depot_id:
+        depot_rows = get_depot_stock(depot_id, current_user, db)
+        depot_quantities = {row.product_id: dec(row.quantity) for row in depot_rows}
+        products = [
+            product_public(db, product, total_stock=depot_quantities.get(product.id, Decimal("0")))
+            for product in all_products
+            if product.id in depot_quantities
+        ]
+        stock_value = sum(dec(row.value) for row in depot_rows)
+    else:
+        products = [product_public(db, p) for p in all_products]
+        stock_value = sum(product["stock_value"] for product in products)
     entries = sum((dec(m.total_amount) for m in movements if normalize_type(m.movement_type) in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY, StockMovementType.INVENTORY_PLUS}), Decimal("0"))
     outputs = sum((dec(m.total_amount) for m in movements if normalize_type(m.movement_type) in OUT_TYPES), Decimal("0"))
     return StockReportOut(
@@ -1130,6 +1325,14 @@ def get_stock_movements_report(
         movement_count=len(movements),
         movements=movements,
     )
+
+
+@router.post("/reports/export-audit", status_code=204)
+def audit_stock_export(payload: ExportAuditIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.STOCK_READ)
+    log_action(db, current_user, "stock.report_export", "stock_report", payload.report_type, f"Export {payload.format} - {payload.report_type}")
+    db.commit()
+    return None
 
 
 @router.get("/menu-items", response_model=list[StockMenuItemOut])
@@ -1214,11 +1417,8 @@ def create_production_sheet(payload: ProductionSheetIn, current_user: User = Dep
         consume_fifo(db, product, link.location, link.quantity_per_dish * payload.quantity, StockMovementType.OUTPUT, current_user.id, "Production cuisine", f"Fiche production: {payload.quantity} x {dish.name}")
     sheet = StockProductionSheet(restaurant_id=current_user.restaurant_id, menu_item_id=payload.menu_item_id, quantity=payload.quantity, note=payload.note, created_by_id=current_user.id)
     db.add(sheet)
+    db.flush()
+    log_action(db, current_user, "stock.production_sheet_create", "production_sheet", sheet.id, "Fiche de production créée")
     db.commit()
     db.refresh(sheet)
     return sheet
-
-
-@router.get("/lots", response_model=list)
-def list_lots():
-    return []

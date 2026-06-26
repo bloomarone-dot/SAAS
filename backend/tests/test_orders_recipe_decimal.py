@@ -5,6 +5,7 @@ float (TypeError) avant la conversion.
 """
 import unittest
 from datetime import datetime
+from app.modules.shared.models import utcnow
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -47,7 +48,7 @@ class OrdersRecipeDecimalTests(unittest.TestCase):
         self.db.add(User(
             id=USER, username="resto-user", first_name="Resto", last_name="User",
             password_hash="x", role=Role.ADMIN, restaurant_id=RESTO,
-            is_owner=True, is_active=True, created_at=datetime.utcnow(),
+            is_owner=True, is_active=True, created_at=utcnow(),
         ))
         self.kitchen = self.db.query(Depot).filter(Depot.code == "KITCHEN").one()
         self.ingredient = Product(restaurant_id=RESTO, name="Tomate", unit_id="u1", purchase_price=Decimal("80.00"))

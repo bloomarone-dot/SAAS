@@ -1,6 +1,7 @@
 """Tests TVA 19,25 % (P1-4) : auto-calcul HT->TVA et déclaration mensuelle."""
 import unittest
 from datetime import datetime, timedelta
+from app.modules.shared.models import utcnow
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -76,7 +77,7 @@ class VatDeclarationTests(unittest.TestCase):
         accounts = ensure_default_accounting(self.db, RESTO)
         journal = journal_by_type(self.db, RESTO, JournalType.PURCHASE)
         payload = EntryIn(
-            entry_date=datetime.utcnow(),
+            entry_date=utcnow(),
             journal_id=journal.id,
             description="Achat avec TVA",
             lines=[
@@ -96,8 +97,8 @@ class VatDeclarationTests(unittest.TestCase):
         self._post_deductible(Decimal("1000"))
         self.db.commit()
 
-        start = datetime.utcnow() - timedelta(days=1)
-        end = datetime.utcnow() + timedelta(days=1)
+        start = utcnow() - timedelta(days=1)
+        end = utcnow() + timedelta(days=1)
         totals = vat_declaration_totals(self.db, RESTO, start, end)
         self.assertEqual(totals["vat_collected"], Decimal("1925.00"))
         self.assertEqual(totals["vat_deductible"], Decimal("1000.00"))
@@ -107,8 +108,8 @@ class VatDeclarationTests(unittest.TestCase):
     def test_declaration_credit_when_deductible_exceeds(self):
         self._post_deductible(Decimal("3000"))
         self.db.commit()
-        start = datetime.utcnow() - timedelta(days=1)
-        end = datetime.utcnow() + timedelta(days=1)
+        start = utcnow() - timedelta(days=1)
+        end = utcnow() + timedelta(days=1)
         totals = vat_declaration_totals(self.db, RESTO, start, end)
         self.assertEqual(totals["net_vat_due"], Decimal("0.00"))
         self.assertEqual(totals["vat_credit"], Decimal("3000.00"))

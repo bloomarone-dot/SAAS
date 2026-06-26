@@ -4,8 +4,10 @@ import {
   ArrowLeftRight,
   BarChart3,
   Boxes,
+  CalendarClock,
   ClipboardCheck,
   ClipboardList,
+  Download,
   Factory,
   PackagePlus,
   PackageX,
@@ -24,6 +26,7 @@ const tabs = [
   { key: "transfers", label: "Transferts", icon: ArrowLeftRight },
   { key: "outputs", label: "Sorties", icon: PackageX },
   { key: "inventories", label: "Inventaires", icon: ClipboardCheck },
+  { key: "lots", label: "Lots / DLC", icon: CalendarClock },
   { key: "reports", label: "Rapports", icon: ClipboardList },
   { key: "alerts", label: "Alertes", icon: AlertTriangle },
 ];
@@ -55,7 +58,6 @@ const emptyProduct = {
   name: "",
   product_type: "INGREDIENT",
   unit_id: "",
-  purchase_price: "",
   minimum_stock: "",
 };
 
@@ -67,6 +69,9 @@ const emptyEntry = {
   destination_depot_id: "",
   quantity: "",
   unit_price: "",
+  in_purchase_unit: false,
+  lot_number: "",
+  expiry_date: "",
   supplier_id: "",
   reason: "",
   reference: "",
@@ -78,7 +83,9 @@ const emptyTransfer = {
   source_depot_id: "",
   destination_depot_id: "",
   quantity: "",
+  production_cost: "",
   reason: "",
+  reference: "",
 };
 
 const emptyOutput = {
@@ -99,9 +106,11 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   const [suppliers, setSuppliers] = useState([]);
   const [movements, setMovements] = useState([]);
   const [inventories, setInventories] = useState([]);
+  const [lots, setLots] = useState([]);
   const [report, setReport] = useState(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isReportLoading, setIsReportLoading] = useState(false);
   const [productForm, setProductForm] = useState(emptyProduct);
   const [depotForm, setDepotForm] = useState(emptyDepot);
   const [entryForm, setEntryForm] = useState(emptyEntry);
@@ -162,18 +171,13 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
 
   useEffect(() => {
     if (!inventoryDepotId) return;
-    setInventoryRows(
-      products.map((product) => {
-        const depotStock = product.stock_by_depot?.find((row) => row.depot_id === inventoryDepotId);
-        return {
-          product_id: product.id,
-          name: product.name,
-          theoretical_quantity: Number(depotStock?.quantity || 0),
-          real_quantity: Number(depotStock?.quantity || 0),
-        };
-      })
-    );
-  }, [inventoryDepotId, products]);
+    loadInventoryRows(inventoryDepotId);
+  }, [inventoryDepotId]);
+
+  useEffect(() => {
+    if (!filters.depot_id) return;
+    loadReport();
+  }, [filters.depot_id]);
 
   async function api(path, options = {}) {
     const fallback = options.fallback || "Action stock impossible.";
@@ -204,6 +208,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       ["suppliers", () => api("/api/v1/stock/suppliers", { fallback: "Chargement des fournisseurs impossible." }), setSuppliers, []],
       ["movements", () => api("/api/v1/stock/movements", { fallback: "Chargement des mouvements impossible." }), setMovements, []],
       ["inventories", () => api("/api/v1/stock/inventories", { fallback: "Chargement des inventaires impossible." }), setInventories, []],
+      ["lots", () => api("/api/v1/stock/lots", { fallback: "Chargement des lots impossible." }), setLots, []],
       ["report", () => api("/api/v1/stock/reports", { fallback: "Rapport stock indisponible." }), setReport, null],
     ];
     const results = await Promise.allSettled(resources.map(([, load]) => load()));
@@ -219,6 +224,24 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     });
     if (errors.length) emit([...new Set(errors)].join(" "));
     setIsLoading(false);
+  }
+
+  async function loadInventoryRows(depotId) {
+    try {
+      const rows = await api(`/api/v1/stock/depots/${depotId}/stock`, { fallback: "Chargement du stock du dépôt impossible." });
+      setInventoryRows(
+        rows.map((row) => ({
+          product_id: row.product_id,
+          name: row.product_name,
+          theoretical_quantity: Number(row.quantity || 0),
+          real_quantity: Number(row.quantity || 0),
+          justification: "",
+        }))
+      );
+    } catch (error) {
+      setInventoryRows([]);
+      emit(error.message || "Stock du dépôt indisponible.");
+    }
   }
 
   function emit(message) {
@@ -241,8 +264,9 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
 
   async function submitProduct(event) {
     event.preventDefault();
-    await submit("/api/v1/stock/products", numericPayload(productForm, ["purchase_price", "minimum_stock"]), () => {
+    await submit("/api/v1/stock/products", numericPayload(productForm, ["minimum_stock"]), () => {
       setProductForm({ ...emptyProduct, unit_id: units[0]?.id || "" });
+      setActiveTab("products");
       emit("Produit stock créé.");
     });
   }
@@ -258,16 +282,24 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   async function submitEntry(event) {
     event.preventDefault();
     const path = directEntry ? "/api/v1/stock/direct-entries" : "/api/v1/stock/entries";
-    await submit(path, numericPayload(entryForm, ["quantity", "unit_price"]), () => {
+    const payload = {
+      ...numericPayload(entryForm, ["quantity", "unit_price"]),
+      in_purchase_unit: !!entryForm.in_purchase_unit,
+      lot_number: entryForm.lot_number || null,
+      expiry_date: entryForm.expiry_date || null,
+    };
+    await submit(path, payload, () => {
       setEntryForm({ ...emptyEntry, product_id: products[0]?.id || "", destination_depot_id: depots[0]?.id || "" });
+      setActiveTab("entries");
       emit(directEntry ? "Entrée directe validée." : "Entrée stock validée.");
     });
   }
 
   async function submitTransfer(event) {
     event.preventDefault();
-    await submit("/api/v1/stock/transfers", numericPayload(transferForm, ["quantity"]), () => {
+    await submit("/api/v1/stock/transfers", numericPayload(transferForm, ["quantity", "production_cost"]), () => {
       setTransferForm({ ...emptyTransfer, product_id: products[0]?.id || "", source_depot_id: depots[0]?.id || "" });
+      setActiveTab("transfers");
       emit("Transfert validé.");
     });
   }
@@ -277,6 +309,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     const path = isLoss ? "/api/v1/stock/losses" : "/api/v1/stock/outputs";
     await submit(path, numericPayload(outputForm, ["quantity"]), () => {
       setOutputForm({ ...emptyOutput, product_id: products[0]?.id || "", source_depot_id: depots[0]?.id || "" });
+      setActiveTab("outputs");
       emit(isLoss ? "Perte enregistrée." : "Sortie validée.");
     });
   }
@@ -289,10 +322,11 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
         depot_id: inventoryDepotId,
         inventory_date: new Date().toISOString(),
         observation: "Inventaire saisi depuis l'interface stock",
-        details: inventoryRows.map((row) => ({ product_id: row.product_id, real_quantity: Number(row.real_quantity || 0) })),
+        details: inventoryRows.map((row) => ({ product_id: row.product_id, real_quantity: Number(row.real_quantity || 0), justification: row.justification || null })),
       },
       async (inventory) => {
         await api(`/api/v1/stock/inventories/${inventory.id}/validate`, { method: "PATCH" });
+        setActiveTab("inventories");
         emit("Inventaire validé et ajustements générés.");
       }
     );
@@ -305,9 +339,12 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       if (value) params.set(key, value);
     });
     try {
+      setIsReportLoading(true);
       setReport(await api(`/api/v1/stock/reports?${params.toString()}`));
     } catch (error) {
       emit(error.message || "Rapport indisponible.");
+    } finally {
+      setIsReportLoading(false);
     }
   }
 
@@ -318,6 +355,18 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       await loadAll();
     } catch (error) {
       emit(error.message || fallback);
+    }
+  }
+
+  async function auditExport(reportType, format) {
+    try {
+      await api("/api/v1/stock/reports/export-audit", {
+        method: "POST",
+        body: JSON.stringify({ report_type: reportType, format }),
+        fallback: "Journalisation de l'export impossible.",
+      });
+    } catch (error) {
+      emit(error.message || "Journalisation de l'export impossible.");
     }
   }
 
@@ -386,6 +435,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
           rows={inventoryRows}
           setRows={setInventoryRows}
           onSubmit={submitInventory}
+          onExport={auditExport}
           inventories={inventories}
         />
       )}
@@ -398,12 +448,53 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
           report={report}
           movements={movements}
           onSubmit={loadReport}
+          isLoading={isReportLoading}
+          onExport={auditExport}
           productName={productName}
           depotName={depotName}
         />
       )}
+      {activeTab === "lots" && <Lots lots={lots} productName={productName} depotName={depotName} />}
       {activeTab === "alerts" && <Alerts products={lowStock} />}
     </div>
+  );
+}
+
+function Lots({ lots, productName, depotName }) {
+  const now = Date.now();
+  const soon = now + 7 * 24 * 3600 * 1000;
+  const status = (lot) => {
+    if (!lot.expiry_date) return null;
+    const t = new Date(lot.expiry_date).getTime();
+    if (t < now) return { label: "Périmé", cls: "bg-red-100 text-red-700" };
+    if (t <= soon) return { label: "Périme bientôt", cls: "bg-amber-100 text-amber-700" };
+    return { label: "OK", cls: "bg-emerald-100 text-emerald-700" };
+  };
+  const sorted = [...lots].sort((a, b) => new Date(a.expiry_date || "2999-01-01") - new Date(b.expiry_date || "2999-01-01"));
+  return (
+    <Panel title="Lots & péremption (FEFO)">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-left text-sm">
+          <thead><tr className="border-b border-slate-200 text-slate-500"><th className="px-3 py-2">Produit</th><th className="px-3 py-2">Dépôt</th><th className="px-3 py-2">N° lot</th><th className="px-3 py-2">Péremption</th><th className="px-3 py-2">Restant</th><th className="px-3 py-2">État</th></tr></thead>
+          <tbody>
+            {sorted.map((lot) => {
+              const s = status(lot);
+              return (
+                <tr key={lot.id} className="border-b border-slate-100">
+                  <td className="px-3 py-2">{productName ? productName(lot.product_id) : lot.product_id}</td>
+                  <td className="px-3 py-2">{depotName ? depotName(lot.depot_id) : lot.depot_id}</td>
+                  <td className="px-3 py-2">{lot.lot_number || "-"}</td>
+                  <td className="px-3 py-2">{lot.expiry_date ? String(lot.expiry_date).slice(0, 10) : "—"}</td>
+                  <td className="px-3 py-2 font-semibold">{qty(lot.quantity_remaining)}</td>
+                  <td className="px-3 py-2">{s ? <span className={`rounded px-2 py-1 text-xs font-bold ${s.cls}`}>{s.label}</span> : <span className="text-slate-400">non daté</span>}</td>
+                </tr>
+              );
+            })}
+            {!sorted.length && <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">Aucun lot suivi. Renseignez un n° de lot / date de péremption à la réception.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
@@ -475,7 +566,6 @@ function Products({ products, units, query, setQuery, form, setForm, onSubmit })
           <Input label="Nom" required value={form.name} onChange={(name) => setForm({ ...form, name })} />
           <Select label="Unité" value={form.unit_id} onChange={(unit_id) => setForm({ ...form, unit_id })} options={units.map((unit) => [unit.id, `${unit.name} (${unit.symbol})`])} />
           <Select label="Type" value={form.product_type} onChange={(product_type) => setForm({ ...form, product_type })} options={[["INGREDIENT", "Ingrédient"], ["BOISSON", "Boisson"], ["EMBALLAGE", "Emballage"]]} />
-          <Input label="Prix d'achat" type="number" value={form.purchase_price} onChange={(purchase_price) => setForm({ ...form, purchase_price })} />
           <Input label="Seuil minimum" type="number" value={form.minimum_stock} onChange={(minimum_stock) => setForm({ ...form, minimum_stock })} />
           <Submit label="Créer" />
         </form>
@@ -528,9 +618,12 @@ function EntryForm({ form, setForm, products, depots, suppliers, directEntry, se
         <Select label="Produit" value={form.product_id} onChange={(product_id) => setForm({ ...form, product_id })} options={products.map((p) => [p.id, p.name])} />
         <Select label="Dépôt destination" value={form.destination_depot_id} onChange={(destination_depot_id) => setForm({ ...form, destination_depot_id })} options={depots.map((d) => [d.id, d.name])} />
         <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
-        <Input label="Prix unitaire" type="number" value={form.unit_price} onChange={(unit_price) => setForm({ ...form, unit_price })} />
+        <Input label="Prix d'achat" type="number" value={form.unit_price} onChange={(unit_price) => setForm({ ...form, unit_price })} />
         <Select label="Fournisseur" value={form.supplier_id} onChange={(supplier_id) => setForm({ ...form, supplier_id })} options={[["", "Non renseigné"], ...suppliers.map((s) => [s.id, s.name])]} />
+        <Input label="N° de lot (optionnel)" value={form.lot_number} onChange={(lot_number) => setForm({ ...form, lot_number })} />
+        <Input label="Date de péremption (DLC/DLUO)" type="date" value={form.expiry_date} onChange={(expiry_date) => setForm({ ...form, expiry_date })} />
         <Input label="Observation" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} />
+        <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={form.in_purchase_unit} onChange={(event) => setForm({ ...form, in_purchase_unit: event.target.checked })} /> Saisie en unité d'achat (sac, casier…)</label>
         <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={directEntry} onChange={(event) => setDirectEntry(event.target.checked)} /> Entrée directe</label>
         <Submit label="Valider l'entrée" />
       </form>
@@ -547,7 +640,9 @@ function TransferForm({ form, setForm, products, depots, onSubmit }) {
         <Select label="Dépôt source" value={form.source_depot_id} onChange={(source_depot_id) => setForm({ ...form, source_depot_id })} options={depots.map((d) => [d.id, d.name])} />
         <Select label="Dépôt destination" value={form.destination_depot_id} onChange={(destination_depot_id) => setForm({ ...form, destination_depot_id })} options={depots.map((d) => [d.id, d.name])} />
         <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
+        <Input label="Coût de production" type="number" value={form.production_cost} onChange={(production_cost) => setForm({ ...form, production_cost })} />
         <Input label="Motif" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} />
+        <Input label="Référence" value={form.reference} onChange={(reference) => setForm({ ...form, reference })} />
         <Submit label="Valider le transfert" />
       </form>
     </Panel>
@@ -570,14 +665,29 @@ function OutputForm({ form, setForm, products, depots, isLoss, setIsLoss, onSubm
   );
 }
 
-function InventoryForm({ depots, depotId, setDepotId, rows, setRows, onSubmit, inventories }) {
+function InventoryForm({ depots, depotId, setDepotId, rows, setRows, onSubmit, onExport, inventories }) {
+  const exportRows = rows.map((row) => ({
+    product: row.name,
+    theoretical: qty(row.theoretical_quantity),
+    real: qty(row.real_quantity),
+    gap: qty(Number(row.theoretical_quantity || 0) - Number(row.real_quantity || 0)),
+    justification: row.justification || "",
+  }));
+  const exportColumns = [
+    ["product", "Produit"],
+    ["theoretical", "Stock théorique"],
+    ["real", "Stock réel"],
+    ["gap", "Écart"],
+    ["justification", "Justification"],
+  ];
   return (
     <section className="space-y-4">
       <Panel title="Inventaire">
         <form onSubmit={onSubmit} className="space-y-3">
           <Select label="Dépôt" value={depotId} onChange={setDepotId} options={depots.map((d) => [d.id, d.name])} />
+          <ExportActions title="Inventaire" filename="inventaire" rows={exportRows} columns={exportColumns} onExport={(format) => onExport?.("inventory", format)} />
           <Table
-            columns={["Produit", "Théorique", "Réel", "Écart"]}
+            columns={["Produit", "Théorique", "Réel", "Écart", "Justification"]}
             rows={rows.map((row, index) => [
               row.name,
               qty(row.theoretical_quantity),
@@ -586,7 +696,12 @@ function InventoryForm({ depots, depotId, setDepotId, rows, setRows, onSubmit, i
                 next[index] = { ...row, real_quantity: event.target.value };
                 setRows(next);
               }} />,
-              qty(Number(row.real_quantity || 0) - Number(row.theoretical_quantity || 0)),
+              qty(Number(row.theoretical_quantity || 0) - Number(row.real_quantity || 0)),
+              <input key={`${row.product_id}-justification`} className="min-h-9 w-64 rounded-md border border-slate-200 px-2" value={row.justification || ""} onChange={(event) => {
+                const next = [...rows];
+                next[index] = { ...row, justification: event.target.value };
+                setRows(next);
+              }} placeholder="Motif de l'écart" />,
             ])}
           />
           <Submit label="Valider l'inventaire" />
@@ -599,8 +714,28 @@ function InventoryForm({ depots, depotId, setDepotId, rows, setRows, onSubmit, i
   );
 }
 
-function Reports({ filters, setFilters, depots, products, report, movements, onSubmit, productName, depotName }) {
+function Reports({ filters, setFilters, depots, products, report, movements, onSubmit, isLoading, onExport, productName, depotName }) {
   const rows = report?.movements || movements;
+  const exportRows = rows.map((movement) => ({
+    date: new Date(movement.movement_date || movement.created_at).toLocaleDateString("fr-FR"),
+    type: movementLabels[movement.movement_type] || movement.movement_type,
+    product: productName(movement.product_id),
+    source: depotName(movement.source_depot_id),
+    destination: depotName(movement.destination_depot_id),
+    quantity: qty(movement.quantity),
+    amount: money(movement.total_amount),
+    production_cost: money(movement.production_cost),
+  }));
+  const exportColumns = [
+    ["date", "Date"],
+    ["type", "Type"],
+    ["product", "Produit"],
+    ["source", "Source"],
+    ["destination", "Destination"],
+    ["quantity", "Quantité"],
+    ["amount", "Montant"],
+    ["production_cost", "Coût production"],
+  ];
   return (
     <Panel title="Rapports de stock">
       <form onSubmit={onSubmit} className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -611,6 +746,13 @@ function Reports({ filters, setFilters, depots, products, report, movements, onS
         <Select label="Type" value={filters.movement_type} onChange={(movement_type) => setFilters({ ...filters, movement_type })} options={[["", "Tous"], ...Object.entries(movementLabels)]} />
         <Submit label="Filtrer" />
       </form>
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <p className="text-sm text-slate-500">
+          Période {filters.start_date || "-"} au {filters.end_date || "-"} · Dépôt {filters.depot_id ? depotName(filters.depot_id) : "Tous"}
+        </p>
+        <ExportActions title="Rapport stock" filename="rapport-stock" rows={exportRows} columns={exportColumns} onExport={(format) => onExport?.("stock-report", format)} />
+      </div>
+      {isLoading && <div className="mb-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-500">Chargement du rapport...</div>}
       <div className="mb-4 grid gap-3 md:grid-cols-4">
         <MiniStat label="Valeur stock" value={money(report?.stock_value)} />
         <MiniStat label="Entrées" value={money(report?.entries_value)} />
@@ -618,7 +760,7 @@ function Reports({ filters, setFilters, depots, products, report, movements, onS
         <MiniStat label="Stock faible" value={report?.low_stock_count || 0} />
       </div>
       <Table
-        columns={["Date", "Type", "Produit", "Source", "Destination", "Quantité", "Montant"]}
+        columns={["Date", "Type", "Produit", "Source", "Destination", "Quantité", "Montant", "Coût production"]}
         rows={rows.map((movement) => [
           new Date(movement.movement_date || movement.created_at).toLocaleDateString("fr-FR"),
           movementLabels[movement.movement_type] || movement.movement_type,
@@ -627,6 +769,7 @@ function Reports({ filters, setFilters, depots, products, report, movements, onS
           depotName(movement.destination_depot_id),
           qty(movement.quantity),
           money(movement.total_amount),
+          money(movement.production_cost),
         ])}
       />
     </Panel>
@@ -657,6 +800,87 @@ function MiniStat({ label, value }) {
       <strong className="mt-1 block text-lg text-slate-950">{value}</strong>
     </div>
   );
+}
+
+function ExportActions({ title, filename, rows, columns, onExport }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" onClick={async () => { await onExport?.("excel"); exportExcel(`${filename}-${today()}.xls`, title, rows, columns); }} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700">
+        <Download size={16} />
+        Exporter Excel
+      </button>
+      <button type="button" onClick={async () => { await onExport?.("pdf"); exportPdf(title, rows, columns); }} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700">
+        <Download size={16} />
+        Exporter PDF
+      </button>
+    </div>
+  );
+}
+
+function exportExcel(filename, title, rows, columns) {
+  const blob = new Blob([buildExportDocument(title, rows, columns)], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportPdf(title, rows, columns) {
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    window.alert("Export PDF bloqué par le navigateur.");
+    return;
+  }
+  printWindow.document.open();
+  printWindow.document.write(buildExportDocument(title, rows, columns, true));
+  printWindow.document.close();
+  setTimeout(() => {
+    printWindow.focus();
+    printWindow.print();
+  }, 250);
+}
+
+function buildExportDocument(title, rows, columns, printable = false) {
+  const exportedAt = new Date().toLocaleString("fr-FR");
+  return `
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #172033; padding: ${printable ? "28px" : "12px"}; }
+          h1 { margin: 0 0 6px; color: #0f172a; }
+          p { margin: 0 0 16px; color: #475569; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th { background: #0f172a; color: white; text-align: left; }
+          th, td { border: 1px solid #d8dee9; padding: 8px; }
+          tr:nth-child(even) td { background: #f8fafc; }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(title)}</h1>
+        <p>Exporté le ${escapeHtml(exportedAt)}</p>
+        <table>
+          <thead><tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${rows.map((row) => `<tr>${columns.map(([key]) => `<td>${escapeHtml(row[key])}</td>`).join("")}</tr>`).join("")}
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function Input({ label, value, onChange, type = "text", required = false }) {

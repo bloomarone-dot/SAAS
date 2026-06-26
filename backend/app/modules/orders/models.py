@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.modules.shared.models import new_id
+from app.modules.shared.models import new_id, utcnow
 
 
 class CustomerOrder(Base):
@@ -51,9 +51,9 @@ class CustomerOrder(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     deleted_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     delete_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
     )
 
     items = relationship("CustomerOrderItem", back_populates="order", cascade="all, delete-orphan")

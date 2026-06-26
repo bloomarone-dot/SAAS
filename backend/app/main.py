@@ -153,11 +153,14 @@ def create_tables() -> None:
     ensure_order_columns()
     ensure_stock_columns()
     ensure_finance_columns()
+    ensure_reconciliation_columns()
     ensure_user_columns()
     ensure_payment_transactions_table()
     ensure_payment_requests_table()
     ensure_payment_webhook_events_table()
     ensure_instance_requests_table()
+    ensure_payment_schedules_table()
+    ensure_stock_lots_table()
     ensure_performance_indexes()
     ensure_french_status_values()
     seed_superadmin()
@@ -373,6 +376,7 @@ def ensure_stock_columns() -> None:
         movement_columns = {
             "cost_center_id": "VARCHAR(36) NULL",
             "lot_id": "VARCHAR(36) NULL",
+            "production_cost": "DECIMAL(14,2) NULL",
             "value": "FLOAT NOT NULL DEFAULT 0",
             "valuation_delta": "FLOAT NOT NULL DEFAULT 0",
             "reference": "VARCHAR(120) NULL",
@@ -418,6 +422,20 @@ def ensure_stock_columns() -> None:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE products ADD COLUMN purchase_factor DECIMAL(14,4) NOT NULL DEFAULT 1"))
 
+    if "inventory_details" in inspector.get_table_names():
+        existing_inventory_details = {column["name"] for column in inspector.get_columns("inventory_details")}
+        inventory_detail_columns = {
+            "justification": "TEXT NULL",
+            "value_gap": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+            "exceeds_tolerance": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "tolerance_threshold": "DECIMAL(14,3) NOT NULL DEFAULT 0",
+        }
+        missing_inventory_detail = [(name, definition) for name, definition in inventory_detail_columns.items() if name not in existing_inventory_details]
+        if missing_inventory_detail:
+            with engine.begin() as connection:
+                for name, definition in missing_inventory_detail:
+                    connection.execute(text(f"ALTER TABLE inventory_details ADD COLUMN {name} {definition}"))
+
     # P0-1 : montants/quantités du stock en DECIMAL (jamais FLOAT). Conversion idempotente
     # des bases existantes (sautée si la colonne est déjà en decimal/numeric).
     if engine.dialect.name == "mysql":
@@ -429,6 +447,7 @@ def ensure_stock_columns() -> None:
             ("stock_movements", "quantity", "DECIMAL(14,3) NOT NULL"),
             ("stock_movements", "unit_price", "DECIMAL(14,2) NULL"),
             ("stock_movements", "total_amount", "DECIMAL(14,2) NULL"),
+            ("stock_movements", "production_cost", "DECIMAL(14,2) NULL"),
             ("stock_movements", "value", "DECIMAL(14,2) NOT NULL DEFAULT 0"),
             ("stock_movements", "valuation_delta", "DECIMAL(14,2) NOT NULL DEFAULT 0"),
             ("inventory_details", "theoretical_quantity", "DECIMAL(14,3) NOT NULL"),
@@ -453,6 +472,24 @@ def ensure_stock_columns() -> None:
 def ensure_finance_columns() -> None:
     """Ajoute les champs d'archivage finance sans attendre Alembic."""
     inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    finance_columns = {
+        "expenses": {
+            "tax_rate": "DECIMAL(6,3) NOT NULL DEFAULT 0",
+        },
+        "revenues": {
+            "tax_rate": "DECIMAL(6,3) NOT NULL DEFAULT 0",
+        },
+    }
+    with engine.begin() as connection:
+        for table, columns in finance_columns.items():
+            if table not in tables:
+                continue
+            existing_table_columns = {column["name"] for column in inspector.get_columns(table)}
+            for name, definition in columns.items():
+                if name not in existing_table_columns:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
+
     if "restaurant_expenses" not in inspector.get_table_names():
         return
     existing = {column["name"] for column in inspector.get_columns("restaurant_expenses")}
@@ -466,6 +503,19 @@ def ensure_finance_columns() -> None:
     with engine.begin() as connection:
         for name, definition in missing:
             connection.execute(text(f"ALTER TABLE restaurant_expenses ADD COLUMN {name} {definition}"))
+
+
+def ensure_reconciliation_columns() -> None:
+    """Champs de rapprochement bancaire (pointage) sur les lignes d'ecriture."""
+    inspector = inspect(engine)
+    if "accounting_entry_lines" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("accounting_entry_lines")}
+    with engine.begin() as connection:
+        if "reconciled" not in existing:
+            connection.execute(text("ALTER TABLE accounting_entry_lines ADD COLUMN reconciled BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "reconciled_at" not in existing:
+            connection.execute(text("ALTER TABLE accounting_entry_lines ADD COLUMN reconciled_at DATETIME NULL"))
 
 
 def ensure_payment_transactions_table() -> None:
@@ -521,6 +571,18 @@ def ensure_instance_requests_table() -> None:
     """Cree la table des demandes publiques de creation d'instance restaurant."""
     from app.modules.platform.models import InstanceRequest  # noqa: F401
     Base.metadata.create_all(bind=engine, tables=[InstanceRequest.__table__])
+
+
+def ensure_payment_schedules_table() -> None:
+    """Cree la table des echeances (a payer / a encaisser)."""
+    from app.modules.finance.models import PaymentSchedule  # noqa: F401
+    Base.metadata.create_all(bind=engine, tables=[PaymentSchedule.__table__])
+
+
+def ensure_stock_lots_table() -> None:
+    """Cree la table des lots de stock (peremption / FEFO)."""
+    from app.modules.stock.models import StockLot  # noqa: F401
+    Base.metadata.create_all(bind=engine, tables=[StockLot.__table__])
 
 
 def ensure_user_columns() -> None:
@@ -585,8 +647,20 @@ def ensure_performance_indexes() -> None:
         "stock_movements": [
             ("idx_stock_movements_restaurant_created", ("restaurant_id", "created_at")),
             ("idx_stock_movements_restaurant_type", ("restaurant_id", "movement_type")),
+            ("idx_stock_movements_restaurant_date", ("restaurant_id", "movement_date")),
+            ("idx_stock_movements_product_status", ("product_id", "status")),
+            ("idx_stock_movements_source_depot", ("source_depot_id",)),
+            ("idx_stock_movements_destination_depot", ("destination_depot_id",)),
             ("idx_stock_movements_item_center", ("item_id", "cost_center_id")),
             ("idx_stock_movements_lot", ("lot_id",)),
+        ],
+        "products": [
+            ("idx_products_restaurant_active", ("restaurant_id", "is_active")),
+            ("idx_products_restaurant_created", ("restaurant_id", "created_at")),
+        ],
+        "depots": [
+            ("idx_depots_restaurant_active", ("restaurant_id", "is_active")),
+            ("idx_depots_restaurant_code", ("restaurant_id", "code")),
         ],
         "stock_damages": [
             ("idx_stock_damages_restaurant_created", ("restaurant_id", "created_at")),
@@ -611,6 +685,25 @@ def ensure_performance_indexes() -> None:
         "stock_inventory_lines": [
             ("idx_stock_inventory_lines_inventory", ("inventory_id",)),
             ("idx_stock_inventory_lines_item_center", ("item_id", "cost_center_id")),
+        ],
+        "inventories": [
+            ("idx_inventories_restaurant_status", ("restaurant_id", "status")),
+            ("idx_inventories_depot_date", ("depot_id", "inventory_date")),
+        ],
+        "inventory_details": [
+            ("idx_inventory_details_inventory", ("inventory_id",)),
+            ("idx_inventory_details_product", ("product_id",)),
+            ("idx_inventory_details_restaurant_inventory", ("restaurant_id", "inventory_id")),
+        ],
+        "expenses": [
+            ("idx_expenses_restaurant_date", ("restaurant_id", "expense_date")),
+            ("idx_expenses_restaurant_status", ("restaurant_id", "status")),
+            ("idx_expenses_payment_status", ("payment_status",)),
+        ],
+        "payments": [
+            ("idx_payments_restaurant_date", ("restaurant_id", "payment_date")),
+            ("idx_payments_restaurant_status", ("restaurant_id", "status")),
+            ("idx_payments_type_status", ("payment_type", "status")),
         ],
         "stock_recipe_ingredients": [
             ("idx_recipe_restaurant_menu", ("restaurant_id", "menu_item_id")),

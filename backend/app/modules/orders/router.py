@@ -1,4 +1,5 @@
 from datetime import datetime
+from app.modules.shared.models import utcnow
 from datetime import time
 from decimal import Decimal
 
@@ -445,7 +446,7 @@ def update_order_status(
     if payload.status == "Payée" and previous_status not in PAID_STATUSES:
         order.payment_status = "SUCCESS"
         order.cashier_id = current_user.id
-        order.paid_at = datetime.utcnow()
+        order.paid_at = utcnow()
         from app.modules.finance.router import post_order_sale_entry_safe
 
         post_order_sale_entry_safe(db, order, current_user.id)
@@ -515,7 +516,7 @@ def update_order(
         previous_status = order.status
         order.status = payload.status
         if payload.status == "Annulée" and order.cancelled_at is None:
-            order.cancelled_at = datetime.utcnow()
+            order.cancelled_at = utcnow()
             if previous_status != "Annulée":
                 notify_order_cancelled(db, current_user, order, previous_status)
         sync_table_status(db, order)
@@ -553,7 +554,7 @@ def close_order(
     if order.is_closed:
         return get_order_or_404(db, order.id, current_user.restaurant_id)
     order.is_closed = True
-    order.closed_at = datetime.utcnow()
+    order.closed_at = utcnow()
     order.closed_by_id = current_user.id
     log_action(
         db,
@@ -644,7 +645,7 @@ def assign_cash_register(
     order.cash_register_id = cash_register.id
     order.assigned_cashier_id = assigned_cashier_id
     order.assignment_status = "ASSIGNED"
-    order.assigned_at = datetime.utcnow()
+    order.assigned_at = utcnow()
     log_action(
         db,
         current_user,
@@ -720,7 +721,7 @@ def delete_order(
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
     table_id = order.table_id
     order.status = "Archivée"
-    order.cancelled_at = datetime.utcnow()
+    order.cancelled_at = utcnow()
     order.deleted_at = order.cancelled_at
     order.deleted_by = current_user.id
     order.delete_reason = payload.reason.strip() if payload and payload.reason else None
@@ -747,7 +748,7 @@ def log_receipt_print(
 ):
     assert_can_read_orders(current_user)
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
-    order.printed_at = datetime.utcnow()
+    order.printed_at = utcnow()
     order.print_count = int(order.print_count or 0) + 1
     log_action(
         db,
@@ -821,10 +822,10 @@ def settle_cash_payment(
         get_cash_register_or_404(db, order.restaurant_id, cash_register_id)
         order.cash_register_id = cash_register_id
         order.assignment_status = "ASSIGNED"
-        order.assigned_at = order.assigned_at or datetime.utcnow()
+        order.assigned_at = order.assigned_at or utcnow()
     order.status = "Payée"
     order.payment_status = "SUCCESS"
-    order.paid_at = datetime.utcnow()
+    order.paid_at = utcnow()
     sync_table_status(db, order)
     from app.modules.finance.router import post_order_sale_entry_safe
 
@@ -871,7 +872,7 @@ def assert_can_collect_cashier(user: User) -> None:
 def cashier_period(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime, datetime]:
     if start_date and end_date:
         return start_date, end_date
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     return datetime.combine(today, time.min), datetime.combine(today, time.max)
 
 
@@ -942,7 +943,7 @@ def assign_order_to_cash_register(db: Session, order: CustomerOrder, rule: str =
     order.cash_register_id = selected.id
     order.assigned_cashier_id = selected.responsible_user_id
     order.assignment_status = "ASSIGNED"
-    order.assigned_at = datetime.utcnow()
+    order.assigned_at = utcnow()
 
 
 def normalize_promo_code(code: str) -> str:
@@ -960,7 +961,7 @@ def calculate_promo_discount(promo: PromotionCode, order_amount: float) -> float
 
 
 def assert_promo_usable(promo: PromotionCode, order_amount: float) -> None:
-    now = datetime.utcnow()
+    now = utcnow()
     if not promo.is_active:
         raise HTTPException(status_code=400, detail="Code promo inactif")
     if promo.starts_at and promo.starts_at > now:
@@ -1203,7 +1204,7 @@ def deduct_order_packaging_stock(db: Session, order: CustomerOrder, user_id: str
 
 
 def make_order_number(slug: str) -> str:
-    return f"{slug[:6].upper()}-{datetime.utcnow().strftime('%y%m%d%H%M%S%f')[-12:]}"
+    return f"{slug[:6].upper()}-{utcnow().strftime('%y%m%d%H%M%S%f')[-12:]}"
 
 
 def consume_recipe_stock(db: Session, restaurant_id: str, dish: MenuItem, dish_quantity: int) -> None:

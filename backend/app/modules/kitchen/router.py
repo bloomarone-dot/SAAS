@@ -1,4 +1,5 @@
 from datetime import datetime
+from app.modules.shared.models import utcnow
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -90,7 +91,7 @@ def kitchen_month_stats(
     db: Session = Depends(get_db),
 ):
     assert_kitchen_read_allowed(current_user)
-    now = datetime.utcnow()
+    now = utcnow()
     month_start = datetime(now.year, now.month, 1)
     base = (
         db.query(KitchenTicketModel)

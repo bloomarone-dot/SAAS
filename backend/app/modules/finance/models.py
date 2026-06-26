@@ -6,7 +6,7 @@ from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, Nume
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.modules.shared.models import new_id
+from app.modules.shared.models import new_id, utcnow
 
 
 Money = Numeric(14, 2)
@@ -84,8 +84,8 @@ class AccountingAccount(Base):
     parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class AccountingJournal(Base):
@@ -100,8 +100,8 @@ class AccountingJournal(Base):
     default_debit_account_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=True)
     default_credit_account_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class AccountingEntry(Base):
@@ -110,7 +110,7 @@ class AccountingEntry(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
     entry_number: Mapped[str] = mapped_column(String(60), index=True, nullable=False)
-    entry_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    entry_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
     journal_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounting_journals.id"), index=True, nullable=False)
     reference: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -122,8 +122,8 @@ class AccountingEntry(Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelled_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class AccountingEntryLine(Base):
@@ -138,8 +138,11 @@ class AccountingEntryLine(Base):
     credit: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"), nullable=False)
     third_party_type: Mapped[ThirdPartyType | None] = mapped_column(Enum(ThirdPartyType), nullable=True)
     third_party_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    # Rapprochement bancaire : ligne pointée contre le relevé.
+    reconciled: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class CashRegister(Base):
@@ -152,8 +155,8 @@ class CashRegister(Base):
     account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=False)
     responsible_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class BankAccount(Base):
@@ -166,8 +169,8 @@ class BankAccount(Base):
     account_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
     account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class ExpenseCategory(Base):
@@ -179,8 +182,8 @@ class ExpenseCategory(Base):
     default_account_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Tax(Base):
@@ -193,8 +196,8 @@ class Tax(Base):
     type: Mapped[TaxType] = mapped_column(Enum(TaxType), nullable=False)
     account_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Expense(Base):
@@ -202,10 +205,11 @@ class Expense(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    expense_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    expense_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
     category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("expense_categories.id"), nullable=True)
     supplier_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(6, 3), default=Decimal("0.000"), nullable=False)
     tax_amount: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"), nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
     payment_status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus), default=PaymentStatus.UNPAID, index=True, nullable=False)
@@ -216,8 +220,8 @@ class Expense(Base):
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Revenue(Base):
@@ -225,9 +229,10 @@ class Revenue(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    revenue_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    revenue_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
     customer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(6, 3), default=Decimal("0.000"), nullable=False)
     tax_amount: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"), nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
     payment_status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus), default=PaymentStatus.UNPAID, index=True, nullable=False)
@@ -238,8 +243,8 @@ class Revenue(Base):
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Payment(Base):
@@ -247,7 +252,7 @@ class Payment(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    payment_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    payment_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
     payment_type: Mapped[PaymentType] = mapped_column(Enum(PaymentType), index=True, nullable=False)
     payment_method: Mapped[PaymentMethod] = mapped_column(Enum(PaymentMethod), index=True, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
@@ -262,8 +267,8 @@ class Payment(Base):
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class AccountingPeriodClose(Base):
@@ -274,7 +279,7 @@ class AccountingPeriodClose(Base):
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     closed_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
-    closed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    closed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -286,7 +291,7 @@ class FinancialStatementMapping(Base):
     statement: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     section: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounting_accounts.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
 class PromotionCode(Base):
@@ -308,8 +313,30 @@ class PromotionCode(Base):
     ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class PaymentSchedule(Base):
+    """Échéance à payer (fournisseur) ou à encaisser (client)."""
+
+    __tablename__ = "payment_schedules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    direction: Mapped[str] = mapped_column(String(20), index=True, nullable=False)  # payable | receivable
+    third_party_type: Mapped[ThirdPartyType | None] = mapped_column(Enum(ThirdPartyType), nullable=True)
+    third_party_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    due_date: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True, nullable=False)  # pending | paid | cancelled
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 RestaurantExpense = Expense

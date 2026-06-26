@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from app.modules.shared.models import utcnow
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -186,7 +187,7 @@ def approve_instance_request(request_id: str, current_user: User = Depends(requi
     request.status = "approved"
     request.created_restaurant_id = restaurant.id
     request.reviewed_by = current_user.id
-    request.reviewed_at = datetime.utcnow()
+    request.reviewed_at = utcnow()
     log_action(
         db, current_user, "instance_request.approve", "instance_request", request.id,
         f"Demande d'instance approuvée: {restaurant.name} (slug {slug})",
@@ -216,7 +217,7 @@ def reject_instance_request(request_id: str, current_user: User = Depends(requir
         raise HTTPException(status_code=409, detail="Cette demande a déjà été traitée")
     request.status = "rejected"
     request.reviewed_by = current_user.id
-    request.reviewed_at = datetime.utcnow()
+    request.reviewed_at = utcnow()
     log_action(
         db, current_user, "instance_request.reject", "instance_request", request.id,
         f"Demande d'instance rejetée: {request.restaurant_name}",
@@ -432,7 +433,7 @@ def get_overview(
         pending_subscriptions_count=max(0, len(restaurants) - len(configured)) if not pending else len(pending),
         monthly_recurring_revenue=sum(item.amount for item in configured),
         currency=currency,
-        last_checked_at=datetime.utcnow(),
+        last_checked_at=utcnow(),
         checks=[
             {"label": "API backend", "value": "Reponse authentifiee", "status": "Actif"},
             {"label": "Base de donnees", "value": "Lecture restaurants et abonnements OK", "status": "Actif"},

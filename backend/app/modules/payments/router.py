@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
+from app.modules.shared.models import utcnow
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
@@ -391,7 +392,7 @@ def list_transactions(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.ACCOUNTING_READ)
-    end = end_date or datetime.utcnow()
+    end = end_date or utcnow()
     start = start_date or end - timedelta(days=30)
     query = db.query(PaymentTransaction).filter(
         PaymentTransaction.restaurant_id == current_user.restaurant_id,

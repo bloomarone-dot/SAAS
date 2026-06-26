@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.modules.shared.models import new_id
+from app.modules.shared.models import new_id, utcnow
 
 
 class MenuCategory(Base):
@@ -18,9 +18,9 @@ class MenuCategory(Base):
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
     )
 
     items = relationship("MenuItem", back_populates="category", cascade="all, delete-orphan")
@@ -42,9 +42,9 @@ class MenuItem(Base):
     requires_kitchen: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, onupdate=utcnow, nullable=False
     )
 
     category = relationship("MenuCategory", back_populates="items")

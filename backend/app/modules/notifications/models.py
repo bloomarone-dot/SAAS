@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.modules.shared.models import new_id
+from app.modules.shared.models import new_id, utcnow
 
 
 class Notification(Base):
@@ -21,4 +21,4 @@ class Notification(Base):
     category: Mapped[str] = mapped_column(String(40), default="system", nullable=False)
     link: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)

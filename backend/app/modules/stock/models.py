@@ -6,7 +6,7 @@ from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Numeric, Stri
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.modules.shared.models import new_id
+from app.modules.shared.models import new_id, utcnow
 
 # Types monétaires/quantités en Decimal (jamais Float pour des montants/stocks).
 Money = Numeric(14, 2)   # montants FCFA
@@ -80,8 +80,8 @@ class Depot(Base):
     type: Mapped[DepotType] = mapped_column(Enum(DepotType), default=DepotType.AUTRE, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class StockCategory(Base):
@@ -91,8 +91,8 @@ class StockCategory(Base):
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Unit(Base):
@@ -102,8 +102,8 @@ class Unit(Base):
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Supplier(Base):
@@ -116,8 +116,8 @@ class Supplier(Base):
     email: Mapped[str | None] = mapped_column(String(160), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class Product(Base):
@@ -140,8 +140,8 @@ class Product(Base):
     packaging_sale_price: Mapped[Decimal] = mapped_column(Money, default=0, nullable=False)
     sale_margin_rate: Mapped[Decimal] = mapped_column(Rate, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
     @property
     def unit(self) -> str:
@@ -186,7 +186,7 @@ class StockMovement(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    movement_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    movement_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
     movement_type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType), index=True, nullable=False)
     product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
     item_id_legacy: Mapped[str | None] = mapped_column("item_id", String(36), index=True, nullable=True)
@@ -197,6 +197,7 @@ class StockMovement(Base):
     quantity: Mapped[Decimal] = mapped_column(Qty, nullable=False)
     unit_price: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
     total_amount: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    production_cost: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
     value_legacy: Mapped[Decimal] = mapped_column("value", Money, default=0, nullable=False)
     valuation_delta: Mapped[Decimal] = mapped_column(Money, default=0, nullable=False)
     supplier_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("suppliers.id"), nullable=True)
@@ -207,8 +208,8 @@ class StockMovement(Base):
     validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelled_movement_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("stock_movements.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
     def __init__(self, **kwargs):
         legacy_item_id = kwargs.pop("item_id", None)
@@ -230,11 +231,11 @@ class StockMovement(Base):
         if (legacy_note or legacy_destination) and "reason" not in kwargs:
             kwargs["reason"] = legacy_note or legacy_destination
         if "movement_date" not in kwargs:
-            kwargs["movement_date"] = datetime.utcnow()
+            kwargs["movement_date"] = utcnow()
         if "status" not in kwargs:
             kwargs["status"] = StockMovementStatus.VALIDATED
         if kwargs.get("status") == StockMovementStatus.VALIDATED and "validated_at" not in kwargs:
-            kwargs["validated_at"] = datetime.utcnow()
+            kwargs["validated_at"] = utcnow()
         super().__init__(**kwargs)
 
     @property
@@ -251,15 +252,15 @@ class Inventory(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
-    inventory_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    inventory_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     depot_id: Mapped[str] = mapped_column(String(36), ForeignKey("depots.id"), index=True, nullable=False)
     status: Mapped[InventoryStatus] = mapped_column(Enum(InventoryStatus), default=InventoryStatus.DRAFT, index=True, nullable=False)
     observation: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class InventoryDetail(Base):
@@ -272,8 +273,12 @@ class InventoryDetail(Base):
     theoretical_quantity: Mapped[Decimal] = mapped_column(Qty, nullable=False)
     real_quantity: Mapped[Decimal] = mapped_column(Qty, nullable=False)
     gap_quantity: Mapped[Decimal] = mapped_column(Qty, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    value_gap: Mapped[Decimal] = mapped_column(Money, default=0, nullable=False)
+    exceeds_tolerance: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    tolerance_threshold: Mapped[Decimal] = mapped_column(Qty, default=0, nullable=False)
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class StockRecipeIngredient(Base):
@@ -286,7 +291,7 @@ class StockRecipeIngredient(Base):
     quantity_per_dish: Mapped[Decimal] = mapped_column(Qty, nullable=False)
     location: Mapped[StockLocation] = mapped_column(Enum(StockLocation), default=StockLocation.CUISINE, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
 class StockItemPackaging(Base):
@@ -298,8 +303,8 @@ class StockItemPackaging(Base):
     packaging_item_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
     required_quantity: Mapped[Decimal] = mapped_column(Qty, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class StockProductionSheet(Base):
@@ -311,7 +316,7 @@ class StockProductionSheet(Base):
     quantity: Mapped[Decimal] = mapped_column(Qty, nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
 # Compatibilite imports historiques.
@@ -324,5 +329,20 @@ StockCostCenter = Depot
 StockCostCenterType = DepotType
 
 
-class StockLot:
-    pass
+class StockLot(Base):
+    """Lot de stock avec date de péremption (DLC/DLUO) pour la logique FEFO."""
+
+    __tablename__ = "stock_lots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
+    depot_id: Mapped[str] = mapped_column(String(36), ForeignKey("depots.id"), index=True, nullable=False)
+    lot_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    expiry_date: Mapped[datetime | None] = mapped_column(DateTime, index=True, nullable=True)
+    quantity_initial: Mapped[Decimal] = mapped_column(Qty, nullable=False)
+    quantity_remaining: Mapped[Decimal] = mapped_column(Qty, index=True, nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Money, default=0, nullable=False)
+    movement_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

@@ -26,6 +26,7 @@ STOCK_TABLES = [
     _sm.StockItemPackaging.__table__,
     _sm.Inventory.__table__,
     _sm.InventoryDetail.__table__,
+    _sm.StockLot.__table__,
     User.__table__,
 ]
 

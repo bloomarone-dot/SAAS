@@ -7,7 +7,7 @@ tables ou le lancement des migrations.
 from app.modules.branches.models import Branch, DeliveryArea
 from app.modules.audit.models import AuditLog
 from app.modules.catalog.models import MenuCategory, MenuItem
-from app.modules.finance.models import PromotionCode, RestaurantExpense
+from app.modules.finance.models import PaymentSchedule, PromotionCode, RestaurantExpense
 from app.modules.notifications.models import Notification
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.platform.models import InstanceRequest, PlatformSetting, RestaurantSubscription
@@ -36,6 +36,7 @@ __all__ = [
     "MenuItem",
     "RestaurantExpense",
     "PromotionCode",
+    "PaymentSchedule",
     "Notification",
     "CustomerOrder",
     "CustomerOrderItem",
