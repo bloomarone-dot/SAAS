@@ -1,6 +1,6 @@
 """Helpers de schéma pour les tests (création ciblée de tables SQLite).
 
-Évite `Base.metadata.create_all` global (FK legacy customer_order_items->stock_items).
+Évite `Base.metadata.create_all` global pour garder les tests ciblés et rapides.
 """
 from app.modules.finance import models as _fm
 from app.modules.stock import models as _sm
