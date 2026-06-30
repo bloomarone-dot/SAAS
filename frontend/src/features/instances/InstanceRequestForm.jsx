@@ -62,7 +62,7 @@ export default function InstanceRequestForm({ apiBaseUrl }) {
 
   if (done) {
     return (
-      <div className="mx-auto max-w-xl rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center">
+      <div className="mx-auto max-w-xl rounded-lg border border-emerald-200 bg-emerald-50 p-8 text-center">
         <CheckCircle className="mx-auto mb-3 text-emerald-600" size={40} />
         <h3 className="text-xl font-black text-emerald-800">Demande envoyée !</h3>
         <p className="mt-2 text-sm font-medium text-emerald-700">
@@ -76,7 +76,7 @@ export default function InstanceRequestForm({ apiBaseUrl }) {
   }
 
   return (
-    <form onSubmit={submit} className="mx-auto grid max-w-2xl gap-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+    <form onSubmit={submit} className="mx-auto grid max-w-2xl gap-3 rounded-lg border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
       <Field label="Nom du restaurant" required name="restaurant_name" value={form.restaurant_name} onChange={update} />
       <Field label="Nom du propriétaire" required name="owner_name" value={form.owner_name} onChange={update} />
       <Field label="Téléphone" required name="owner_phone" value={form.owner_phone} onChange={update} />

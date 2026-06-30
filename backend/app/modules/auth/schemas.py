@@ -36,7 +36,7 @@ class ResetPasswordIn(BaseModel):
     """Payload de changement de mot de passe via token temporaire."""
 
     token: str = Field(min_length=20)
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
 
     @validator("password")
     def password_is_strong(cls, value: str) -> str:
@@ -47,7 +47,7 @@ class ChangePasswordIn(BaseModel):
     """Changement de mot de passe par l'utilisateur connecte (self-service)."""
 
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=10, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
     @validator("new_password")
     def new_password_is_strong(cls, value: str) -> str:

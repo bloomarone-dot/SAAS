@@ -59,6 +59,8 @@ services:
       MTN_WEBHOOK_ALLOWED_IPS: ${MTN_WEBHOOK_ALLOWED_IPS:-}
       PAYMENT_RECONCILIATION_INTERVAL_SECONDS: ${PAYMENT_RECONCILIATION_INTERVAL_SECONDS:-60}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL}
+      TENANT_BASE_DOMAIN: ${TENANT_BASE_DOMAIN:-bloomarone.com}
+      TENANT_PLATFORM_HOSTS: ${TENANT_PLATFORM_HOSTS:-restaurant.bloomarone.com,www.restaurant.bloomarone.com,platform.bloomarone.com,www.platform.bloomarone.com}
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
@@ -81,6 +83,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/}
+        VITE_SAAS_HOST: ${VITE_SAAS_HOST:-restaurant.bloomarone.com}
+        VITE_PLATFORM_HOST: ${VITE_PLATFORM_HOST:-platform.bloomarone.com}
+        VITE_BASE_DOMAIN: ${VITE_BASE_DOMAIN:-bloomarone.com}
     container_name: restaurant_saas_frontend
     restart: unless-stopped
     ports:

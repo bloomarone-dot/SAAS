@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { DashboardIcon } from "../icons";
-import { Panel } from "../DashboardPrimitives";
 import { apiFetch } from "@/config/http";
+import { DashboardSection, FilterBar, PageContainer, PageHeader, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+}
+
+function formatVariation(value) {
+  if (value == null) return "Variation indisponible";
+  const number = Number(value || 0);
+  const sign = number >= 0 ? "+" : "";
+  return `${sign}${number.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % vs période précédente`;
 }
 
 function downloadCsv(filename, rows) {
@@ -111,101 +118,98 @@ export function AdminDashboard({ overrides = {} }) {
   }
 
   return (
-    <section className="space-y-4">
-      {/* Filtres globaux */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
-        <div className="flex flex-wrap gap-1">
-          {PERIODS.map(([key, label]) => (
-            <button key={key} type="button" onClick={() => setPeriod(key)}
-              className={`rounded px-3 py-1.5 text-xs font-semibold transition ${period === key ? "bg-[var(--dashboard-primary)] text-white" : "text-slate-600 hover:bg-slate-100"}`}>
-              {label}
-            </button>
-          ))}
-        </div>
-        {period === "custom" && (
-          <div className="flex items-center gap-1">
-            <input type="date" value={custom.start} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="h-8 rounded border border-slate-300 px-2 text-xs" />
-            <input type="date" value={custom.end} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="h-8 rounded border border-slate-300 px-2 text-xs" />
-          </div>
-        )}
-        {branchOptions.length > 0 && (
-          <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="h-8 rounded border border-slate-300 px-2 text-xs font-semibold text-slate-600">
-            <option value="">Toutes les branches</option>
-            {branchOptions.map((branch) => (
-              <option key={branch.id} value={branch.id}>{branch.name}</option>
-            ))}
-          </select>
-        )}
-        <div className="ml-auto flex gap-1">
-          <button type="button" onClick={exportDashboardData} className="rounded bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">
-            Exporter graphiques
+    <PageContainer>
+      <PageHeader
+        eyebrow="Pilotage restaurant"
+        title="Tableau de bord"
+        subtitle="Suivez l’activité essentielle du restaurant : ventes, commandes, paiements, alertes et performance de service."
+        primaryAction={<SecondaryAction icon="Download" onClick={exportDashboardData}>Exporter CSV</SecondaryAction>}
+      />
+
+      <FilterBar
+        right={
+          <>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="form-control h-10 w-36">
+              {CATEGORIES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+            {branchOptions.length > 0 && (
+              <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="form-control h-10 w-48">
+                <option value="">Toutes les branches</option>
+                {branchOptions.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              </select>
+            )}
+          </>
+        }
+      >
+        {PERIODS.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setPeriod(key)}
+            className={`h-9 rounded-md px-3 text-xs font-bold transition ${
+              period === key ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+            }`}
+          >
+            {label}
           </button>
-          {CATEGORIES.map(([key, label]) => (
-            <button key={key} type="button" onClick={() => setCategory(key)}
-              className={`rounded px-3 py-1.5 text-xs font-semibold transition ${category === key ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
-              {label}
-            </button>
-          ))}
-        </div>
+        ))}
+        {period === "custom" && (
+          <>
+            <input type="date" value={custom.start} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="form-control h-10 w-40" />
+            <input type="date" value={custom.end} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="form-control h-10 w-40" />
+          </>
+        )}
+      </FilterBar>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Chiffre d'affaires" value={money(kpi.revenue)} trend={formatVariation(kpi.revenue_variation)} icon="ShoppingCart" tone="success" />
+        <StatCard label="Commandes" value={Number(kpi.orders_count || 0).toLocaleString("fr-FR")} trend={formatVariation(kpi.orders_variation)} icon="ClipboardList" tone="info" />
+        <StatCard label="Ticket moyen" value={money(kpi.average_ticket)} trend={formatVariation(kpi.average_ticket_variation)} icon="ReceiptText" tone="warning" />
+        <StatCard label="Bénéfice estimé" value={money(kpi.profit)} trend={`${Number(kpi.margin_rate || 0).toFixed(1)} % de marge`} icon="Wallet" tone="success" />
       </div>
 
-      {/* Ligne 1 : KPI */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <KpiCard label="Chiffre d'affaires" value={money(kpi.revenue)} variation={kpi.revenue_variation} icon="ShoppingCart" tone="pink" />
-        <KpiCard label="Bénéfice" value={money(kpi.profit)} icon="Wallet" tone="green" />
-        <KpiCard label="Commandes" value={Number(kpi.orders_count || 0).toLocaleString("fr-FR")} variation={kpi.orders_variation} icon="ClipboardList" tone="blue" />
-        <KpiCard label="Ticket moyen" value={money(kpi.average_ticket)} variation={kpi.average_ticket_variation} icon="ReceiptText" tone="orange" />
-        <KpiCard label="Taux de marge" value={`${Number(kpi.margin_rate || 0).toFixed(1)}%`} icon="TrendingUp" tone="green" />
-        <KpiCard label="Clients servis" value={Number(kpi.clients_served || 0).toLocaleString("fr-FR")} icon="Users" tone="blue" />
-      </div>
-
-      {/* Ligne 2 : CA par heure + commandes temps réel */}
-      <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
-        <Panel title="Chiffre d'affaires par heure">
+      <div className="grid gap-4 xl:grid-cols-[1.45fr_0.75fr]">
+        <DashboardSection title="Ventes par heure" description="Courbe opérationnelle du service sur la période sélectionnée.">
           <HourlyChart rows={data?.hourly_sales ?? []} />
-        </Panel>
-        <Panel title="Commandes en temps réel">
+        </DashboardSection>
+        <DashboardSection title="Commandes en direct" description="Cliquez sur un statut pour consulter le détail.">
           <div className="grid grid-cols-2 gap-2">
             <RealtimeStat label="En cours" value={realtime.in_progress} tone="blue" onClick={() => openOrders("Commandes en cours", ["Nouvelle", "Acceptée", "En préparation", "Prête"])} />
-            <RealtimeStat label="En préparation" value={realtime.preparing} tone="orange" onClick={() => openOrders("En préparation", ["En préparation"])} />
+            <RealtimeStat label="Préparation" value={realtime.preparing} tone="orange" onClick={() => openOrders("En préparation", ["En préparation"])} />
             <RealtimeStat label="Prêtes" value={realtime.ready} tone="green" onClick={() => openOrders("Commandes prêtes", ["Prête"])} />
-            <RealtimeStat label="Livrées" value={realtime.delivered} tone="blue" onClick={() => openOrders("Commandes livrées", ["Livrée"])} />
-            <RealtimeStat label="Payées" value={realtime.paid} tone="green" onClick={() => openOrders("Commandes payées", ["Payée", "Payee"])} />
             <RealtimeStat label="Annulées" value={realtime.cancelled} tone="red" onClick={() => openOrders("Commandes annulées", ["Annulée"])} />
           </div>
-        </Panel>
+        </DashboardSection>
       </div>
 
-      {/* Ligne 3 : top produits + paiements + alertes stock */}
       <div className="grid gap-4 xl:grid-cols-3">
-        <Panel title="Produits les plus vendus">
-          <TopProducts rows={data?.top_products ?? []} />
-        </Panel>
-        <Panel title="Modes de paiement">
+        <DashboardSection title="Produits les plus vendus">
+          <TopProducts rows={(data?.top_products ?? []).slice(0, 6)} />
+        </DashboardSection>
+        <DashboardSection title="Paiements">
           <PaymentMethods rows={data?.payment_methods ?? []} />
           <DonutSplit mealShare={mealShare} meal={meal} drink={drink} />
-        </Panel>
-        <Panel title="Alertes stock">
-          <StockAlerts rows={data?.stock_alerts ?? []} />
-        </Panel>
+        </DashboardSection>
+        <DashboardSection title="Alertes importantes">
+          <StockAlerts rows={(data?.stock_alerts ?? []).slice(0, 5)} />
+        </DashboardSection>
       </div>
 
-      {/* Ligne 4 : employés + branches */}
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Performance des employés">
-          <EmployeeTable rows={data?.employee_performance ?? []} />
-        </Panel>
-        <Panel title="Performance des branches">
-          <BranchTable rows={(data?.branches ?? []).filter((branch) => !branchId || branch.id === branchId)} />
-        </Panel>
+        <DashboardSection title="Performance équipe">
+          <EmployeeTable rows={(data?.employee_performance ?? []).slice(0, 6)} />
+        </DashboardSection>
+        <DashboardSection title="Performance branches">
+          <BranchTable rows={(data?.branches ?? []).filter((branch) => !branchId || branch.id === branchId).slice(0, 6)} />
+        </DashboardSection>
       </div>
 
-      {isLoading && !data && <p className="text-center text-sm font-semibold text-slate-400">Chargement…</p>}
+      {isLoading && !data && <p className="text-center text-sm font-semibold text-slate-400">Chargement...</p>}
 
       {ordersModal && (
         <OrdersModal title={ordersModal.title} statuses={ordersModal.statuses} onClose={() => setOrdersModal(null)} />
       )}
-    </section>
+    </PageContainer>
   );
 }
 

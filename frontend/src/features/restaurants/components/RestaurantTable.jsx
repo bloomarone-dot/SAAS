@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { DashboardSection } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 
 export function RestaurantTable({
@@ -17,6 +18,7 @@ export function RestaurantTable({
       sortRows(restaurants, sort, {
         name: (restaurant) => restaurant.name,
         slug: (restaurant) => restaurant.slug,
+        subdomain: (restaurant) => restaurant.subdomain || restaurant.slug,
         branches: (restaurant) => Number(restaurant.branches_count || 1),
         currency: (restaurant) => restaurant.currency,
         status: (restaurant) => Number(restaurant.is_active),
@@ -27,21 +29,10 @@ export function RestaurantTable({
 
   if (!restaurants.length) {
     return (
-      <div className="overflow-hidden border border-[#eadfd7] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
-        <div className="border-b border-[#eadfd7] bg-[#fffaf5] px-6 py-4">
-          <div className="grid grid-cols-6 gap-4 text-xs font-black uppercase text-[#9a3412]">
-            <span>Restaurant</span>
-            <span>Slug</span>
-            <span>Branches</span>
-            <span>Propriétaire</span>
-            <span>Statut</span>
-            <span>Création</span>
-          </div>
-        </div>
-
-        <div className="grid min-h-[260px] place-items-center px-6 py-10">
-          <div className="max-w-xl border border-[#eadfd7] bg-white p-6 text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center border border-[#fed7aa] bg-[#fff4ed] text-[#f04438]">
+      <DashboardSection title="Restaurants créés" description="Liste des tenants disponibles sur la plateforme.">
+        <div className="grid min-h-[260px] place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-10">
+          <div className="max-w-xl text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-[#fed7aa] bg-[#fff4ed] text-[#f04438]">
               <DashboardIcon name={hasFilters ? "Search" : "Store"} size={24} />
             </div>
             <h2 className="text-xl font-black text-[#07133d]">
@@ -57,7 +48,7 @@ export function RestaurantTable({
                 <button
                   type="button"
                   onClick={onClearFilters}
-                  className="h-10 border border-[#eadfd7] bg-white px-4 text-sm font-black text-[#172033] transition-all hover:bg-[#fffaf5]"
+                  className="lte-btn lte-btn-default"
                 >
                   Réinitialiser les filtres
                 </button>
@@ -66,7 +57,7 @@ export function RestaurantTable({
                 <button
                   type="button"
                   onClick={onAdd}
-                  className="h-10 bg-[#f04438] px-4 text-sm font-black text-white shadow-[0_10px_24px_rgba(240,68,56,0.18)] transition-all hover:bg-[#d92d20]"
+                  className="lte-btn lte-btn-primary"
                 >
                   Ajouter un restaurant
                 </button>
@@ -74,34 +65,31 @@ export function RestaurantTable({
             </div>
           </div>
         </div>
-      </div>
+      </DashboardSection>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
-      <div className="flex items-center justify-between border-b border-[#eadfd7] px-6 py-4">
-        <div>
-          <h2 className="text-lg font-black text-[#07133d]">Restaurants créés</h2>
-          <p className="mt-1 text-xs font-semibold text-[#64708b]">
-            Liste des tenants disponibles sur la plateforme.
-          </p>
-        </div>
+    <DashboardSection
+      title="Restaurants créés"
+      description="Liste des tenants disponibles sur la plateforme."
+      action={
         <button
           type="button"
           onClick={onAdd}
-          className="h-10 rounded-lg bg-[#f04438] px-4 text-sm font-black text-white transition-all hover:bg-[#d92d20]"
+          className="lte-btn lte-btn-primary lte-btn-sm"
         >
           Ajouter
         </button>
-      </div>
+      }
+    >
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
             <tr>
               <th className="px-6 py-4"><SortButton label="Nom" column="name" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
-              <th className="px-6 py-4"><SortButton label="Slug" column="slug" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
+              <th className="px-6 py-4"><SortButton label="Adresse publique" column="subdomain" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4"><SortButton label="Branches" column="branches" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4"><SortButton label="Devise" column="currency" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
               <th className="px-6 py-4"><SortButton label="Statut" column="status" sort={sort} onSort={(key) => setSort((current) => nextSort(current, key))} /></th>
@@ -113,7 +101,10 @@ export function RestaurantTable({
             {sortedRestaurants.map((restaurant) => (
               <tr key={restaurant.id} className="text-[#64708b] hover:bg-slate-50">
                 <td className="px-6 py-4 font-black text-[#07133d]">{restaurant.name}</td>
-                <td className="px-6 py-4">{restaurant.slug}</td>
+                <td className="px-6 py-4">
+                  <div className="font-bold text-[#07133d]">{restaurant.subdomain || restaurant.slug}.bloomarone.com</div>
+                  <div className="text-xs font-semibold text-slate-400">slug: {restaurant.slug}</div>
+                </td>
                 <td className="px-6 py-4">
                   <span className="rounded-lg bg-[#f04438]/10 px-3 py-1 text-xs font-black text-[#f04438]">
                     {Number(restaurant.branches_count || 1)}
@@ -138,7 +129,7 @@ export function RestaurantTable({
                   <button
                     type="button"
                     onClick={() => onView?.(restaurant)}
-                    className="border border-[#eadfd7] px-3 py-1.5 text-xs font-black text-[#172033] hover:border-[#f04438] hover:text-[#f04438]"
+                    className="lte-btn lte-btn-default lte-btn-sm"
                   >
                     Voir
                   </button>
@@ -148,6 +139,6 @@ export function RestaurantTable({
           </tbody>
         </table>
       </div>
-    </div>
+    </DashboardSection>
   );
 }

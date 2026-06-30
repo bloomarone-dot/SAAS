@@ -1,17 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "../icons";
-import {
-  DashboardHeader,
-  DonutChart,
-  KpiGrid,
-  Legend,
-  Panel,
-  SimpleRows,
-  SummaryCard,
-} from "../DashboardPrimitives";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { apiFetch } from "@/config/http";
+import { DashboardSection, ErrorState, LoadingState, PageContainer, PageHeader, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
 
 const locationLabels = {
   MAGASIN: "Magasin",
@@ -21,9 +13,15 @@ const locationLabels = {
 
 const movementLabels = {
   IN: "Entrée",
+  ENTRY: "Entrée",
+  DIRECT_ENTRY: "Entrée directe",
   OUT: "Sortie",
+  OUTPUT: "Sortie",
+  LOSS: "Avarie",
   TRANSFER: "Transfert",
   ADJUSTMENT: "Inventaire",
+  INVENTORY_PLUS: "Inventaire",
+  INVENTORY_MINUS: "Inventaire",
 };
 
 const typeLabels = {
@@ -36,7 +34,36 @@ function money(value) {
 }
 
 function quantity(item) {
+  if (item?.current_stock !== undefined) return Number(item.current_stock || 0);
   return Number(item?.quantity || 0) + Number(item?.kitchen_quantity || 0) + Number(item?.drink_quantity || 0);
+}
+
+function unitLabel(item) {
+  return item?.unit_symbol || item?.unit_name || item?.unit || "";
+}
+
+function unitCost(item) {
+  return Number(item?.cmup || item?.purchase_price || 0);
+}
+
+function minimumStock(item) {
+  return Number(item?.minimum_stock ?? item?.alert_threshold ?? 0);
+}
+
+function movementProductId(movement) {
+  return movement?.product_id || movement?.item_id;
+}
+
+function movementType(movement) {
+  return movement?.movement_type || movement?.type;
+}
+
+function isEntryMovement(movement) {
+  return ["IN", "ENTRY", "DIRECT_ENTRY", "INVENTORY_PLUS"].includes(movementType(movement));
+}
+
+function isOutputMovement(movement) {
+  return ["OUT", "OUTPUT", "LOSS", "TRANSFER", "INVENTORY_MINUS"].includes(movementType(movement));
 }
 
 function formatDate(value) {
@@ -51,7 +78,6 @@ function formatDate(value) {
 
 export function StockDashboard({ variant = "accounting", overrides = {}, onNavigate }) {
   const apiBaseUrl = overrides.__apiBaseUrl;
-  const currentUser = overrides.__currentUser;
   const isStockView = variant === "stock";
   const [summary, setSummary] = useState(null);
   const [items, setItems] = useState([]);
@@ -77,24 +103,25 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
       setIsLoading(true);
       setMessage("");
     }
-    try {
-      const [summaryData, itemData, movementData, damageData, reportData] = await Promise.all([
-        api("/api/v1/stock/summary"),
-        api("/api/v1/stock/items"),
-        api("/api/v1/stock/movements"),
-        api("/api/v1/stock/damages"),
-        api("/api/v1/stock/reports"),
-      ]);
-      setSummary(summaryData);
-      setItems(itemData);
-      setMovements(movementData);
-      setDamages(damageData);
-      setReport(reportData);
-    } catch (error) {
-      if (!silent) setMessage(error.message);
-    } finally {
-      if (!silent) setIsLoading(false);
+    const resources = await Promise.allSettled([
+      api("/api/v1/stock/summary"),
+      api("/api/v1/stock/products"),
+      api("/api/v1/stock/movements"),
+      api("/api/v1/stock/damages"),
+      api("/api/v1/stock/reports"),
+    ]);
+    const [summaryResult, itemResult, movementResult, damageResult, reportResult] = resources;
+    if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
+    if (itemResult.status === "fulfilled") setItems(Array.isArray(itemResult.value) ? itemResult.value : []);
+    if (movementResult.status === "fulfilled") setMovements(Array.isArray(movementResult.value) ? movementResult.value : []);
+    if (damageResult.status === "fulfilled") setDamages(Array.isArray(damageResult.value) ? damageResult.value : []);
+    if (reportResult.status === "fulfilled") setReport(reportResult.value);
+
+    const criticalFailed = summaryResult.status === "rejected" && itemResult.status === "rejected";
+    if (!silent && criticalFailed) {
+      setMessage(summaryResult.reason?.message || itemResult.reason?.message || "Chargement du stock impossible.");
     }
+    if (!silent) setIsLoading(false);
   }
 
   const todayMovements = useMemo(() => {
@@ -103,44 +130,45 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
   }, [movements]);
 
   const lowStockItems = useMemo(
-    () => items.filter((item) => quantity(item) <= Number(item.alert_threshold || 0)).sort((a, b) => quantity(a) - quantity(b)),
+    () => items.filter((item) => quantity(item) <= minimumStock(item)).sort((a, b) => quantity(a) - quantity(b)),
     [items]
   );
 
   const stockByType = useMemo(() => {
     return items.reduce((acc, item) => {
       const label = typeLabels[item.product_type] ?? item.product_type ?? "Autres";
-      acc[label] = (acc[label] || 0) + quantity(item) * Number(item.purchase_price || 0);
+      acc[label] = (acc[label] || 0) + quantity(item) * unitCost(item);
       return acc;
     }, {});
   }, [items]);
 
   const recentMovements = movements.slice(0, 7).map((movement) => {
-    const item = items.find((entry) => entry.id === movement.item_id);
-    const sign = movement.movement_type === "IN" ? "+" : movement.movement_type === "ADJUSTMENT" ? "=" : "-";
+    const item = items.find((entry) => entry.id === movementProductId(movement));
+    const type = movementType(movement);
+    const sign = isEntryMovement(movement) ? "+" : ["ADJUSTMENT", "INVENTORY_PLUS", "INVENTORY_MINUS"].includes(type) ? "=" : "-";
     return [
-      movementLabels[movement.movement_type] ?? movement.movement_type,
+      movementLabels[type] ?? type,
       item?.name ?? "Produit supprimé",
-      formatDate(movement.created_at),
-      `${sign} ${Number(movement.quantity || 0).toLocaleString("fr-FR")} ${item?.unit ?? ""}`,
-      movement.id.slice(0, 8).toUpperCase(),
+      formatDate(movement.movement_date || movement.created_at),
+      `${sign} ${Number(movement.quantity || 0).toLocaleString("fr-FR")} ${unitLabel(item)}`,
+      String(movement.id || movement.reference || "-").slice(0, 8).toUpperCase(),
     ];
   });
 
   const lowStockRows = lowStockItems.slice(0, 7).map((item) => [
     item.name,
-    `${quantity(item).toLocaleString("fr-FR")} ${item.unit}`,
-    `${Number(item.alert_threshold || 0).toLocaleString("fr-FR")} ${item.unit}`,
-    quantity(item) <= Number(item.alert_threshold || 0) / 2 ? "Critique" : "Faible",
+    `${quantity(item).toLocaleString("fr-FR")} ${unitLabel(item)}`,
+    `${minimumStock(item).toLocaleString("fr-FR")} ${unitLabel(item)}`,
+    quantity(item) <= minimumStock(item) / 2 ? "Critique" : "Faible",
   ]);
 
   const damageRows = damages.slice(0, 6).map((damage) => {
-    const item = items.find((entry) => entry.id === damage.item_id);
+    const item = items.find((entry) => entry.id === movementProductId(damage));
     return [
       item?.name ?? "Produit supprimé",
-      `${Number(damage.quantity || 0).toLocaleString("fr-FR")} ${item?.unit ?? ""}`,
-      locationLabels[damage.location] ?? damage.location,
-      damage.accounted_at ? "Comptabilisé" : "À comptabiliser",
+      `${Number(damage.quantity || 0).toLocaleString("fr-FR")} ${unitLabel(item)}`,
+      locationLabels[damage.location] ?? damage.reason ?? "Stock",
+      damage.status === "VALIDATED" ? "Validé" : "À valider",
     ];
   });
 
@@ -148,39 +176,29 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => [label, money(value), value > 0 ? "Actif" : "Vide"]);
 
-  const kpis = isStockView
-    ? [
-        { label: "Valeur du stock", value: money(summary?.stock_value), trend: `${items.length} produits suivis`, icon: "Wallet", tone: "green" },
-        { label: "Produits en stock faible", value: Number(summary?.low_stock_count || 0).toLocaleString("fr-FR"), trend: lowStockItems[0]?.name ?? "Aucune alerte", icon: "AlertTriangle", tone: "orange" },
-        { label: "Entrées du jour", value: money(todayMovements.filter((m) => m.movement_type === "IN").reduce((total, m) => total + Number(m.quantity || 0) * Number(m.unit_price || 0), 0)), trend: `${todayMovements.filter((m) => m.movement_type === "IN").length} mouvement(s)`, icon: "ShoppingCart", tone: "green" },
-        { label: "Sorties du jour", value: money(todayMovements.filter((m) => ["OUT", "TRANSFER"].includes(m.movement_type)).reduce((total, m) => total + Number(m.quantity || 0) * Number(m.unit_price || 0), 0)), trend: `${todayMovements.filter((m) => ["OUT", "TRANSFER"].includes(m.movement_type)).length} mouvement(s)`, icon: "Package", tone: "orange" },
-      ]
-    : [
-        { label: "Valeur du stock", value: money(summary?.stock_value), trend: "Magasin, cuisine et boissons", icon: "Wallet", tone: "green" },
-        { label: "Pertes avaries", value: money(summary?.total_damage_loss), trend: `${damages.length} avarie(s)`, icon: "AlertTriangle", tone: "orange" },
-        { label: "Bénéfice estimé", value: money(report?.estimated_profit), trend: "Selon les taux de marge", icon: "Wallet", tone: "green" },
-        { label: "Sorties période", value: money(report?.outputs_value), trend: `${report?.movement_count ?? 0} mouvement(s)`, icon: "Package", tone: "orange" },
-      ];
-
   return (
-    <section className="space-y-4">
-      <DashboardHeader
-        title={isStockView ? "Dashboard Stock" : "Dashboard Stock & Comptabilité"}
-        subtitle={isStockView ? "Vue connectée aux produits, mouvements, seuils et avaries du restaurant." : "Suivi des stocks, marges, pertes et sorties sur la période."}
+    <PageContainer>
+      <PageHeader
+        eyebrow={isStockView ? "Gestion stock" : "Stock & comptabilité"}
+        title={isStockView ? "Tableau de bord Stock" : "Tableau de bord Stock & Comptabilité"}
+        subtitle={isStockView ? "Surveillez la valeur du stock, les alertes et les derniers mouvements." : "Suivez la valorisation, les pertes et l’impact comptable du stock."}
+        primaryAction={<SecondaryAction icon="Plus" onClick={() => onNavigate?.("entries")}>Nouvelle entrée</SecondaryAction>}
+        secondaryActions={<SecondaryAction icon="BarChart3" onClick={() => onNavigate?.("reports")}>Rapports</SecondaryAction>}
       />
 
-      {message && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-600">{message}</div>
-      )}
-
-      <KpiGrid kpis={kpis} />
+      {message && <ErrorState title="Stock indisponible" text={message} />}
 
       {isLoading ? (
-        <Panel title="Chargement">
-          <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
-        </Panel>
+        <LoadingState label="Chargement du dashboard stock..." />
       ) : (
         <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Valeur du stock" value={money(summary?.stock_value)} trend={`${items.length} produits suivis`} icon="Wallet" tone="success" />
+            <StatCard label="Stock faible" value={Number(summary?.low_stock_count || 0).toLocaleString("fr-FR")} trend={lowStockItems[0]?.name ?? "Aucune alerte"} icon="AlertTriangle" tone={Number(summary?.low_stock_count || 0) ? "warning" : "success"} />
+            <StatCard label={isStockView ? "Entrées du jour" : "Pertes avaries"} value={isStockView ? money(todayMovements.filter(isEntryMovement).reduce((total, m) => total + Number(m.total_amount || Number(m.quantity || 0) * Number(m.unit_price || 0)), 0)) : money(summary?.total_damage_loss)} trend={isStockView ? `${todayMovements.filter(isEntryMovement).length} mouvement(s)` : `${damages.length} avarie(s)`} icon={isStockView ? "ShoppingCart" : "AlertTriangle"} tone={isStockView ? "success" : "warning"} />
+            <StatCard label={isStockView ? "Sorties du jour" : "Bénéfice estimé"} value={isStockView ? money(todayMovements.filter(isOutputMovement).reduce((total, m) => total + Number(m.total_amount || Number(m.quantity || 0) * Number(m.unit_price || 0)), 0)) : money(report?.estimated_profit)} trend={isStockView ? `${todayMovements.filter(isOutputMovement).length} mouvement(s)` : "Selon taux de marge"} icon={isStockView ? "Package" : "TrendingUp"} tone="info" />
+          </div>
+
           {isStockView ? (
             <StockOnlyContent
               lowStockRows={lowStockRows}
@@ -200,16 +218,15 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
             />
           )}
 
-          <div className="grid gap-4 md:grid-cols-5">
-            <QuickAction icon="Plus" label="Ajouter une entrée" tone="green" onClick={() => onNavigate?.("movements")} />
-            <QuickAction icon="Activity" label="Enregistrer une sortie" tone="orange" onClick={() => onNavigate?.("movements")} />
-            <QuickAction icon="FileText" label={isStockView ? "Faire un inventaire" : "Imprimer état"} tone="amber" onClick={() => onNavigate?.("inventory")} />
-            <QuickAction icon="FileText" label="Exporter Excel" tone="greenSoft" onClick={() => onNavigate?.("reports")} />
-            <QuickAction icon="FileText" label="Exporter PDF" tone="red" onClick={() => onNavigate?.("reports")} />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <QuickAction icon="Plus" label="Nouvelle entrée" tone="green" onClick={() => onNavigate?.("entries")} />
+            <QuickAction icon="Activity" label="Nouvelle sortie" tone="orange" onClick={() => onNavigate?.("outputs")} />
+            <QuickAction icon="FileText" label="Inventaire" tone="amber" onClick={() => onNavigate?.("inventories")} />
+            <QuickAction icon="BarChart3" label="Rapports" tone="greenSoft" onClick={() => onNavigate?.("reports")} />
           </div>
         </>
       )}
-    </section>
+    </PageContainer>
   );
 }
 
@@ -223,26 +240,23 @@ function StockOnlyContent({ lowStockRows, recentMovements, categoryRows, damageR
   return (
     <>
       <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr]">
-        <Panel title="Produits en alerte" link={`${lowStockRows.length} alerte(s)`}>
+        <DashboardSection title="Produits en alerte" description={`${lowStockRows.length} alerte(s) à traiter`}>
           <DataTable headers={["Produit", "Stock actuel", "Seuil d'alerte", "Statut"]} rows={lowStockRows} empty="Aucun produit en stock faible." />
-        </Panel>
-        <Panel title="Mouvements récents de stock" link="Temps réel">
+        </DashboardSection>
+        <DashboardSection title="Mouvements récents" description="Dernières entrées, sorties et corrections.">
           <DataTable headers={["Type", "Produit", "Date", "Quantité", "Référence"]} rows={recentMovements} movement empty="Aucun mouvement enregistré." />
-        </Panel>
+        </DashboardSection>
       </div>
       <div className="grid gap-4 xl:grid-cols-3">
-        <Panel title="Répartition du stock">
-          <div className="grid gap-5 md:grid-cols-[170px_1fr]">
-            <DonutChart total={money(summary?.stock_value).replace(" FCFA", "")} label="FCFA" segments={["#079455", "#f04438", "#f59e0b", "#2f80ed"]} />
-            <Legend items={legendItems.length ? legendItems : [["Aucun stock", "0 FCFA", "bg-slate-300"]]} />
-          </div>
-        </Panel>
-        <Panel title="État du stock par catégorie" link="Valeur">
-          <SimpleRows rows={categoryRows.length ? categoryRows : [["Aucune catégorie", "0 FCFA", "Vide"]]} />
-        </Panel>
-        <Panel title="Avaries / produits abîmés" link={`${damageRows.length} récent(s)`}>
-          <SimpleRows rows={damageRows.length ? damageRows : [["Aucune avarie", "-", "RAS"]]} />
-        </Panel>
+        <DashboardSection title="Répartition du stock">
+          <ValueList rows={legendItems.length ? legendItems.map(([label, value]) => [label, value, "Valorisé"]) : [["Aucun stock", "0 FCFA", "Vide"]]} />
+        </DashboardSection>
+        <DashboardSection title="Stock par catégorie">
+          <ValueList rows={categoryRows.length ? categoryRows : [["Aucune catégorie", "0 FCFA", "Vide"]]} />
+        </DashboardSection>
+        <DashboardSection title="Avaries récentes">
+          <ValueList rows={damageRows.length ? damageRows : [["Aucune avarie", "-", "RAS"]]} />
+        </DashboardSection>
       </div>
     </>
   );
@@ -252,32 +266,32 @@ function AccountingContent({ lowStockRows, recentMovements, damageRows, report, 
   return (
     <>
       <div className="grid gap-4 xl:grid-cols-[1.05fr_1fr]">
-        <Panel title="Résumé comptable stock" action="Période récente">
+        <DashboardSection title="Résumé comptable stock" description="Valorisation et pertes sur la période récente.">
           <div className="grid gap-3 md:grid-cols-2">
-            <SummaryCard label="Valeur d'achat" value={money(summary?.stock_value)} trend="Stock courant" tone="green" />
-            <SummaryCard label="Valeur de vente estimée" value={money(report?.estimated_sales_value)} trend="Avec taux de marge" tone="green" />
-            <SummaryCard label="Entrées" value={money(report?.entries_value)} trend="Achats période" tone="green" />
-            <SummaryCard label="Avaries" value={money(report?.damage_loss)} trend="Pertes période" tone="pink" />
+            <StatCard label="Valeur d'achat" value={money(summary?.stock_value)} trend="Stock courant" icon="Wallet" tone="success" />
+            <StatCard label="Vente estimée" value={money(report?.estimated_sales_value)} trend="Avec taux de marge" icon="TrendingUp" tone="info" />
+            <StatCard label="Entrées" value={money(report?.entries_value)} trend="Achats période" icon="ShoppingCart" tone="success" />
+            <StatCard label="Avaries" value={money(report?.damage_loss)} trend="Pertes période" icon="AlertTriangle" tone="warning" />
           </div>
-        </Panel>
-        <Panel title="Mouvements de stock" link="Voir tout">
+        </DashboardSection>
+        <DashboardSection title="Mouvements de stock" description="Dernières opérations validées.">
           <DataTable headers={["Type", "Produit", "Date", "Quantité", "Référence"]} rows={recentMovements} movement empty="Aucun mouvement enregistré." />
-        </Panel>
+        </DashboardSection>
       </div>
       <div className="grid gap-4 xl:grid-cols-3">
-        <Panel title="Produits en alerte" link="Priorité achat">
+        <DashboardSection title="Produits en alerte">
           <DataTable headers={["Produit", "Stock actuel", "Stock min.", "Statut"]} rows={lowStockRows} empty="Aucune alerte." />
-        </Panel>
-        <Panel title="Avaries">
-          <SimpleRows rows={damageRows.length ? damageRows : [["Aucune avarie", "-", "RAS"]]} />
-        </Panel>
-        <Panel title="Valorisation par emplacement">
-          <SimpleRows rows={[
+        </DashboardSection>
+        <DashboardSection title="Avaries">
+          <ValueList rows={damageRows.length ? damageRows : [["Aucune avarie", "-", "RAS"]]} />
+        </DashboardSection>
+        <DashboardSection title="Valorisation par emplacement">
+          <ValueList rows={[
             ["Magasin", money(summary?.main_stock_value), "Principal"],
             ["Cuisine", money(summary?.kitchen_stock_value), "Production"],
             ["Boisson", money(summary?.drink_stock_value), "Bar"],
           ]} />
-        </Panel>
+        </DashboardSection>
       </div>
     </>
   );
@@ -313,6 +327,22 @@ function DataTable({ headers, rows, movement = false, empty }) {
 function Badge({ label }) {
   const danger = ["Critique", "Sortie", "Périmé", "Faible", "À comptabiliser"].includes(label);
   return <span className={`rounded-md px-2 py-1 text-xs font-black ${danger ? "bg-red-50 text-red-500" : "bg-emerald-50 text-emerald-700"}`}>{label}</span>;
+}
+
+function ValueList({ rows }) {
+  return (
+    <div className="divide-y divide-slate-100">
+      {rows.map((row) => (
+        <div key={row.join("-")} className="flex items-center justify-between gap-3 py-3 text-sm">
+          <div className="min-w-0">
+            <p className="truncate font-bold text-slate-800">{row[0]}</p>
+            <p className="truncate text-xs font-semibold text-slate-400">{row[2]}</p>
+          </div>
+          <span className="shrink-0 font-black text-slate-900">{row[1]}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function QuickAction({ icon, label, tone, onClick }) {

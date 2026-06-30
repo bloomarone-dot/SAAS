@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
+import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { menuApi } from "../services/menuApi";
 
@@ -238,12 +238,14 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         />
       )}
 
-      {!createOnly && <AdminKpis items={[
-        { label: "Plats disponibles", value: dishes.filter((dish) => dish.is_available).length, icon: "UtensilsCrossed", trend: "à jour" },
-        { label: "Indisponibles", value: dishes.filter((dish) => !dish.is_available).length, icon: "Power", tone: "warn" },
-        { label: "Catégories couvertes", value: activeCategories.length, icon: "ClipboardList" },
-        { label: "Prix moyen", value: money(averagePrice), icon: "Wallet" },
-      ]} />}
+      {!createOnly && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Plats disponibles" value={dishes.filter((dish) => dish.is_available).length.toLocaleString("fr-FR")} icon="UtensilsCrossed" trend="À jour" tone="success" />
+          <StatCard label="Indisponibles" value={dishes.filter((dish) => !dish.is_available).length.toLocaleString("fr-FR")} icon="Power" trend="À vérifier" tone="warning" />
+          <StatCard label="Catégories couvertes" value={activeCategories.length.toLocaleString("fr-FR")} icon="ClipboardList" trend="Carte" tone="info" />
+          <StatCard label="Prix moyen" value={money(averagePrice)} icon="Wallet" trend="Catalogue" tone="default" />
+        </div>
+      )}
 
       {showForm && (
         <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
@@ -254,20 +256,27 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         </div>
       )}
 
-      {!createOnly && <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
-        <AdminCard>
-          <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_180px_180px_auto]">
+      {!createOnly && <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+        <DashboardSection
+          title="Liste des plats"
+          description={`${visibleDishes.length.toLocaleString("fr-FR")} plat(s) selon les filtres actifs`}
+        >
+          <FilterBar className="mb-5">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher un plat..." />
-            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="form-control">
-              <option value="ALL">Toutes</option>
-              {activeCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-            <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="form-control">
-              <option value="ALL">Tous statuts</option>
-              <option value="AVAILABLE">Disponibles</option>
-              <option value="UNAVAILABLE">Indisponibles</option>
-            </select>
-          </div>
+            <div className="w-full sm:w-48">
+              <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="form-control">
+                <option value="ALL">Toutes</option>
+                {activeCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+            </div>
+            <div className="w-full sm:w-48">
+              <select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)} className="form-control">
+                <option value="ALL">Tous statuts</option>
+                <option value="AVAILABLE">Disponibles</option>
+                <option value="UNAVAILABLE">Indisponibles</option>
+              </select>
+            </div>
+          </FilterBar>
           <DishesTable
             dishes={visibleDishes}
             categoryNameById={categoryNameById}
@@ -277,15 +286,15 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
             onToggle={toggleDish}
             onDelete={deleteDish}
           />
-        </AdminCard>
+        </DashboardSection>
 
         <div className="space-y-5">
-          <AdminCard title="Insights rapides">
+          <DashboardSection title="Insights rapides">
             <Insight label="Taux de disponibilité" value={`${percent(dishes.filter((dish) => dish.is_available).length, dishes.length)}%`} />
             <Insight label="Catégorie la plus remplie" value={mostUsedCategory(dishes, categoryNameById)} />
             <Insight label="Évolution du prix moyen" value={money(averagePrice)} />
-          </AdminCard>
-          <AdminCard title="Top plats">
+          </DashboardSection>
+          <DashboardSection title="Top plats">
             <div className="space-y-3">
               {topDishes.map((dish, index) => (
                 <div key={dish.id} className="flex items-center gap-3">
@@ -298,7 +307,7 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
                 </div>
               ))}
             </div>
-          </AdminCard>
+          </DashboardSection>
         </div>
       </div>}
     </AdminPage>
@@ -357,7 +366,7 @@ function DishEditor({ form, categories, onChange, onUpload, onSubmit, role }) {
         </div>
       </div>
       <Field name="description" label="Description" as="textarea" rows={3} value={form.description} onChange={onChange} className="mt-4" placeholder="Décrivez votre plat..." />
-      <Field name="image_url" label="URL image" value={form.image_url} onChange={onChange} placeholder="https://..." />
+      <Field name="image_url" label="URL image" value={form.image_url} onChange={onChange} placeholder="/uploads/menu/image.webp ou https://..." />
       <div className="mt-2 flex justify-end gap-3 border-t border-slate-100 pt-4">
         <PrimaryAction icon="Plus" type="submit">Enregistrer</PrimaryAction>
       </div>

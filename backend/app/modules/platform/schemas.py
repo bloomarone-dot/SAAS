@@ -61,7 +61,7 @@ class SubscriptionUpdateIn(BaseModel):
 
 
 class PlatformUserPasswordResetIn(BaseModel):
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
 
     @validator("password")
     def password_is_strong(cls, value: str) -> str:

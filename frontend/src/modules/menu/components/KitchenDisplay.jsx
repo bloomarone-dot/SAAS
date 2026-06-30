@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardIcon } from '@/components/dashboard/icons';
+import { DashboardSection, PageHeader, StatCard } from '@/modules/admin/components/AdminUi';
 import { kitchenApi } from '../services/kitchenApi';
 
 const columns = [
@@ -82,10 +83,11 @@ export default function KitchenDisplay({ filter = 'orders' }) {
 
   return (
     <section className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-black text-[#070528]">{pageCopy[0]}</h1>
-        <p className="mt-1 text-sm font-medium text-slate-500">{pageCopy[1]}</p>
-      </div>
+      <PageHeader
+        eyebrow="Cuisine"
+        title={pageCopy[0]}
+        subtitle={pageCopy[1]}
+      />
 
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-600">{error}</div>}
 
@@ -106,18 +108,18 @@ export default function KitchenDisplay({ filter = 'orders' }) {
               return matchesColumn && matchesUrgent && matchesNotes;
             });
             return (
-              <div key={column.key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-lg font-black text-[#070528]">{column.title}</h2>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{items.length}</span>
-                </div>
+              <DashboardSection
+                key={column.key}
+                title={column.title}
+                action={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{items.length}</span>}
+              >
                 <div className="space-y-3">
                   {items.map((ticket) => (
                     <TicketCard key={ticket.id} ticket={ticket} action={column.action} onAdvance={() => advance(ticket)} />
                   ))}
                   {items.length === 0 && <p className="py-10 text-center text-sm font-semibold text-slate-400">Aucune commande.</p>}
                 </div>
-              </div>
+              </DashboardSection>
             );
           })}
         </div>
@@ -147,20 +149,8 @@ export default function KitchenDisplay({ filter = 'orders' }) {
 }
 
 function Metric({ icon, label, value, tone }) {
-  const colors = { orange: 'bg-orange-50 text-orange-500', blue: 'bg-blue-50 text-blue-600', green: 'bg-emerald-50 text-emerald-600', red: 'bg-red-50 text-red-500' };
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center gap-4">
-        <div className={`flex h-12 w-12 items-center justify-center rounded-full ${colors[tone]}`}>
-          <DashboardIcon name={icon} size={22} />
-        </div>
-        <div>
-          <p className="text-xs font-bold text-slate-500">{label}</p>
-          <p className="mt-2 text-2xl font-black text-[#070528]">{value}</p>
-        </div>
-      </div>
-    </div>
-  );
+  const tones = { orange: 'warning', blue: 'info', green: 'success', red: 'danger' };
+  return <StatCard icon={icon} label={label} value={value} tone={tones[tone] ?? 'default'} />;
 }
 
 function TicketCard({ ticket, action, onAdvance }) {
@@ -185,7 +175,7 @@ function TicketCard({ ticket, action, onAdvance }) {
 
 function Panel({ title, children }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="mb-3 text-base font-black text-[#070528]">{title}</h2>
       {children}
     </div>

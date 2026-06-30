@@ -3,6 +3,18 @@ import { validationFor } from "@/utils/validation";
 
 const restaurantFields = [
   ["name", "Nom du restaurant", "text", "Le Bon Coin"],
+  ["subdomain", "Sous-domaine", "text", "leboncoin"],
+  ["logo_url", "URL du logo", "url", "https://..."],
+  ["cover_image_url", "Image de couverture", "url", "https://..."],
+];
+
+const colorFields = [
+  ["primary_color", "Couleur principale"],
+  ["secondary_color", "Couleur secondaire"],
+  ["accent_color", "Couleur accent"],
+  ["button_color", "Boutons"],
+  ["background_color", "Fond vitrine"],
+  ["text_color", "Texte vitrine"],
 ];
 
 const ownerFields = [
@@ -12,10 +24,10 @@ const ownerFields = [
   ["owner_alt_phone", "Téléphone secondaire", "tel", "+237 6XX XXX XXX"],
   ["owner_email", "Email", "email", "owner@restaurant.cm"],
   ["owner_username", "Identifiant", "text", "owner"],
-  ["owner_password", "Mot de passe", "password", "10 caractères avec majuscule, chiffre et symbole"],
+  ["owner_password", "Mot de passe", "password", "8 caractères avec majuscule, chiffre et symbole"],
 ];
 
-const optionalFields = new Set(["owner_email", "owner_alt_phone"]);
+const optionalFields = new Set(["subdomain", "logo_url", "cover_image_url", "owner_email", "owner_alt_phone"]);
 
 export function RestaurantProvisionForm({ value, onChange, onSubmit, isLoading }) {
   return (
@@ -37,6 +49,17 @@ export function RestaurantProvisionForm({ value, onChange, onSubmit, isLoading }
           {restaurantFields.map((field) => (
             <ProvisionField key={field[0]} field={field} value={value} onChange={onChange} wide />
           ))}
+          <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
+            {colorFields.map(([name, label]) => (
+              <ProvisionColorField
+                key={name}
+                name={name}
+                label={label}
+                value={value[name]}
+                onChange={onChange}
+              />
+            ))}
+          </div>
         </FormSection>
 
         <FormSection
@@ -70,6 +93,29 @@ export function RestaurantProvisionForm({ value, onChange, onSubmit, isLoading }
         </button>
       </div>
     </form>
+  );
+}
+
+function ProvisionColorField({ name, label, value, onChange }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-black text-slate-900">{label}</span>
+      <div className="flex h-12 overflow-hidden rounded-lg border border-slate-200 bg-white focus-within:border-[var(--dashboard-primary)] focus-within:ring-4 focus-within:ring-[var(--dashboard-primary)]/10">
+        <input
+          type="color"
+          name={name}
+          value={value || "#E4572E"}
+          onChange={onChange}
+          className="h-full w-14 border-0 bg-transparent p-1"
+        />
+        <input
+          name={name}
+          value={value || ""}
+          onChange={onChange}
+          className="min-w-0 flex-1 px-3 text-sm font-semibold text-slate-900 outline-none"
+        />
+      </div>
+    </label>
   );
 }
 

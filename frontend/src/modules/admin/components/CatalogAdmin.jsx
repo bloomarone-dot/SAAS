@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { DashboardSection, EmptyState as AdminEmptyState, FilterBar, PageHeader } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { formatApiError } from "@/utils/network";
 import { validationFor } from "@/utils/validation";
@@ -191,15 +192,15 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
-        <div>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Carte</h1>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Catalogue"
+        title="Carte"
+        subtitle="Gérez les catégories, les plats, les prix et la disponibilité affichée au service."
+      />
 
       <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
         <div className="space-y-6">
-          <form onSubmit={createCategory} className="border border-slate-200 bg-white p-6 shadow-sm">
+          <form onSubmit={createCategory} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle title="Créer une catégorie" icon="ClipboardList" />
             <div className="mt-5 grid gap-4">
               <Field name="name" label="Nom de la catégorie" value={categoryForm.name} onChange={updateCategoryField} required />
@@ -214,7 +215,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
             <PrimaryButton disabled={isLoading} icon="Plus">Ajouter la catégorie</PrimaryButton>
           </form>
 
-          <form onSubmit={createItem} className="border border-slate-200 bg-white p-6 shadow-sm">
+          <form onSubmit={createItem} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
             <SectionTitle title="Créer un plat" icon="UtensilsCrossed" />
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <Field name="name" label="Nom du plat" value={itemForm.name} onChange={updateItemField} required />
@@ -257,10 +258,9 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
           </form>
         </div>
 
-        <div className="border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-5">
-            <div className="grid gap-3 xl:grid-cols-[1fr_200px_190px]">
-              <div className="flex h-12 items-center gap-3 border border-slate-200 bg-white px-4">
+        <DashboardSection title="Plats" description="Liste filtrable des plats disponibles dans la carte.">
+          <FilterBar>
+              <div className="flex h-12 min-w-[260px] flex-1 items-center gap-3 rounded-lg border border-slate-200 bg-white px-4">
                 <DashboardIcon name="Search" size={17} className="text-slate-400" />
                 <input
                   value={search}
@@ -288,8 +288,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
                 <option value="AVAILABLE">Disponibles</option>
                 <option value="UNAVAILABLE">Indisponibles</option>
               </select>
-            </div>
-          </div>
+          </FilterBar>
 
           <div className="overflow-x-auto">
             <table className="lte-table min-w-[820px]">
@@ -322,7 +321,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => toggleAvailability(item)} className="border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:border-[#f04438] hover:text-[#f04438]">
+                        <button type="button" onClick={() => toggleAvailability(item)} className="lte-btn lte-btn-default lte-btn-sm">
                           {item.is_available ? "Retirer" : "Activer"}
                         </button>
                       </div>
@@ -335,7 +334,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
               <EmptyState title="Aucun plat trouvé" text="Ajoutez vos premiers plats ou ajustez les filtres." />
             )}
           </div>
-        </div>
+        </DashboardSection>
       </div>
     </section>
   );
@@ -380,13 +379,5 @@ function PrimaryButton({ children, icon, disabled }) {
 }
 
 function EmptyState({ title, text }) {
-  return (
-    <div className="px-5 py-16 text-center">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center bg-[#fff4ed] text-[#f04438]">
-        <DashboardIcon name="UtensilsCrossed" size={23} />
-      </div>
-      <p className="mt-4 text-lg font-black text-[#070528]">{title}</p>
-      <p className="mt-1 text-sm font-medium text-slate-500">{text}</p>
-    </div>
-  );
+  return <AdminEmptyState icon="UtensilsCrossed" title={title} text={text} />;
 }

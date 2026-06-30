@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { EmptyState, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import DishesPage from "@/modules/menu/pages/DishesPage";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
@@ -93,6 +94,7 @@ export function ServerInvoices() {
 export function ServerOpenTables({ restaurantId }) {
   const [tables, setTables] = useState([]);
   const [partySizes, setPartySizes] = useState({});
+  const [customerForms, setCustomerForms] = useState({});
   const [message, setMessage] = useState("");
   const [loadingTableId, setLoadingTableId] = useState("");
 
@@ -107,8 +109,9 @@ export function ServerOpenTables({ restaurantId }) {
 
   async function openTable(table) {
     const partySize = Math.max(1, Number(partySizes[table.id] || 1));
-    const customerName = window.prompt("Nom du client", "")?.trim();
-    const customerPhone = window.prompt("Téléphone du client (optionnel)", "")?.trim();
+    const customer = customerForms[table.id] ?? {};
+    const customerName = customer.name?.trim();
+    const customerPhone = customer.phone?.trim();
     setLoadingTableId(table.id);
     setMessage("");
     try {
@@ -118,12 +121,27 @@ export function ServerOpenTables({ restaurantId }) {
         customer_phone: customerPhone || undefined,
       });
       setMessage(`Table ${table.name || table.number} ouverte avec la commande ${result.order.order_number}.`);
+      setCustomerForms((current) => {
+        const next = { ...current };
+        delete next[table.id];
+        return next;
+      });
       await loadTables();
     } catch (error) {
       setMessage(error.message || "Ouverture de table impossible.");
     } finally {
       setLoadingTableId("");
     }
+  }
+
+  function updateCustomerField(tableId, field, value) {
+    setCustomerForms((current) => ({
+      ...current,
+      [tableId]: {
+        ...(current[tableId] ?? {}),
+        [field]: value,
+      },
+    }));
   }
 
   const availableTables = useMemo(
@@ -149,6 +167,28 @@ export function ServerOpenTables({ restaurantId }) {
                 className="mt-2 form-control focus:border-emerald-600"
               />
             </label>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-black uppercase text-slate-500">Client</span>
+                <input
+                  type="text"
+                  value={customerForms[table.id]?.name || ""}
+                  onChange={(event) => updateCustomerField(table.id, "name", event.target.value)}
+                  className="mt-2 form-control focus:border-emerald-600"
+                  placeholder="Nom du client"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-black uppercase text-slate-500">Téléphone</span>
+                <input
+                  type="tel"
+                  value={customerForms[table.id]?.phone || ""}
+                  onChange={(event) => updateCustomerField(table.id, "phone", event.target.value)}
+                  className="mt-2 form-control focus:border-emerald-600"
+                  placeholder="Optionnel"
+                />
+              </label>
+            </div>
             <button
               type="button"
               onClick={() => openTable(table)}
@@ -406,7 +446,7 @@ function OrderSelector({ orders, selectedOrderId, onSelect }) {
 
 function OrderActionCard({ order, actionLabel, disabled, loading, onAction }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-lg font-black text-slate-950">{order.order_number}</p>
@@ -465,7 +505,7 @@ function ServerPaymentRequests({ orders, onReload }) {
       {message && <Message text={message} />}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {eligible.map((order) => (
-          <div key={order.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div key={order.id} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-lg font-black text-slate-950">{order.order_number}</p>
@@ -614,7 +654,7 @@ function PaymentRequestModal({ order, onClose, onDone }) {
 
 function TableActionCard({ table, children }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xl font-black text-slate-950">Table {table.name || table.number}</p>
@@ -653,8 +693,8 @@ function Message({ text }) {
 
 function EmptyBox({ text }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm font-semibold text-slate-500">
-      {text}
+    <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <EmptyState title="Aucune donnée" text={text} />
     </div>
   );
 }
@@ -685,37 +725,29 @@ export function ServerHistory() {
 
 function Header({ title, subtitle, icon }) {
   return (
-    <div>
-      <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-        <DashboardIcon name={icon} size={20} />
-      </div>
-      <h1 className="mt-3 text-3xl font-black text-slate-950">{title}</h1>
-      <p className="mt-1 text-sm font-semibold text-slate-500">{subtitle}</p>
-    </div>
+    <PageHeader
+      eyebrow="Service"
+      title={title}
+      subtitle={subtitle}
+      meta={
+        <span className="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-1 text-emerald-700">
+          <DashboardIcon name={icon} size={15} />
+          Espace serveur
+        </span>
+      }
+    />
   );
 }
 
 function SummaryCard({ label, value, icon }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-          <DashboardIcon name={icon} size={18} />
-        </span>
-        <div>
-          <p className="text-xs font-black uppercase text-slate-500">{label}</p>
-          <p className="mt-1 text-lg font-black text-slate-950">{value}</p>
-        </div>
-      </div>
-    </div>
-  );
+  return <StatCard label={label} value={value} icon={icon} tone="success" />;
 }
 
 function DataTable({ headers, rows, empty, footerLabel, footerValue }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       {rows.length === 0 ? (
-        <div className="p-10 text-center text-sm font-semibold text-slate-500">{empty}</div>
+        <EmptyState title="Aucune donnée" text={empty} />
       ) : (
         <div className="overflow-x-auto">
           <table className="lte-table min-w-[720px]">

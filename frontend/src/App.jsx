@@ -6,9 +6,8 @@ const KitchenPage = lazy(() => import('./modules/menu/pages/KitchenPage'));
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
-import { LoginPanel } from "@/features/auth/components/LoginPanel";
 import { PasswordRecovery } from "@/features/auth/components/PasswordRecovery";
-import { SuperAdminLoginPage, RestaurantLandingPage, RestaurantLoginPage } from "@/features/auth/PublicAuthPages";
+import { AccessPortalPage, SuperAdminLoginPage, RestaurantLandingPage, RestaurantLoginPage, TenantPublicRouter } from "@/features/auth/PublicAuthPages";
 const SuperadminRestaurants = lazy(() =>
   import("@/features/restaurants/components/SuperadminRestaurants").then((m) => ({
     default: m.SuperadminRestaurants,
@@ -17,6 +16,7 @@ const SuperadminRestaurants = lazy(() =>
 import LandingPage from "@/LandingPage";
 import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
 import { AuditLogsAdmin } from "@/modules/admin/components/AuditLogsAdmin";
+import { AdminReports } from "@/modules/admin/components/AdminReports";
 import { CatalogAdmin } from "@/modules/admin/components/CatalogAdmin";
 import { OnlineOrderDispatchAdmin } from "@/modules/admin/components/OnlineOrderDispatchAdmin";
 import { PerformanceAdmin } from "@/modules/admin/components/PerformanceAdmin";
@@ -50,14 +50,23 @@ const AccountingOperations = lazyNamed(
   () => import("@/modules/finance/components/AccountingOperations"),
   "AccountingOperations",
 );
-import { clearOfflineQueue, flushOfflineQueue, formatApiError, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
+import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { getApiBaseUrl } from "@/config/api";
 import { apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/config/http";
+import { getPublicHostKind, shouldResolveTenantFromHost } from "@/tenancy/tenantResolver";
 
-const initialLogin = { login: "", password: "" };
 const initialRestaurant = {
   name: "",
+  subdomain: "",
+  logo_url: "",
+  cover_image_url: "",
+  primary_color: "#E4572E",
+  secondary_color: "#1F2937",
+  accent_color: "#F59E0B",
+  background_color: "#FFFFFF",
+  text_color: "#0F172A",
+  button_color: "#078D50",
   owner_email: "",
   owner_username: "",
   owner_password: "",
@@ -67,7 +76,13 @@ const initialRestaurant = {
   owner_alt_phone: "",
 };
 
-const optionalRestaurantFields = new Set(["owner_email", "owner_alt_phone"]);
+const optionalRestaurantFields = new Set([
+  "subdomain",
+  "logo_url",
+  "cover_image_url",
+  "owner_email",
+  "owner_alt_phone",
+]);
 
 const rolePaths = {
   SUPERADMIN: "superadmin",
@@ -94,10 +109,12 @@ const viewPathSegments = {
   "menu-dishes": "dishes",
 };
 
-// Préfixe d'URL du tenant : /superadmin pour la plateforme, /r/:slug pour un restaurant.
+// Préfixe d'URL du tenant : /superadmin pour la plateforme, /admin sur sous-domaine restaurant,
+// /r/:slug seulement en développement local ou en fallback sans sous-domaine.
 function routePrefix(user) {
   if (!user) return "";
   if (user.role === "SUPERADMIN") return "/superadmin";
+  if (getPublicHostKind() === "restaurant") return "/admin";
   if (user.restaurant_slug) return `/r/${user.restaurant_slug}`;
   return `/${rolePaths[user.role] ?? "app"}`;
 }
@@ -130,9 +147,14 @@ function shouldShowLoginForPath(path = window.location.pathname) {
   return path.split("/").filter(Boolean)[0] === "login";
 }
 
+function isRestaurantPublicPath(path = window.location.pathname) {
+  const cleanPath = path.replace(/\/+$/, "") || "/";
+  return ["/", "/menu", "/commande", "/contact"].includes(cleanPath);
+}
+
 export default function App() {
   const apiBaseUrl = useMemo(getApiBaseUrl, []);
-  const [loginForm, setLoginForm] = useState(initialLogin);
+  const publicHostKind = useMemo(() => getPublicHostKind(), []);
   const [restaurantForm, setRestaurantForm] = useState(initialRestaurant);
   const [session, setSession] = useState(null);
   const [activeView, setActiveView] = useState("dashboard");
@@ -143,6 +165,7 @@ export default function App() {
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
   const [showLogin, setShowLogin] = useState(() => shouldShowLoginForPath());
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(() => readOfflineQueue().length);
@@ -154,6 +177,10 @@ export default function App() {
 
     apiFetch("/api/v1/auth/me")
       .then((user) => {
+        if (!isSessionAllowedOnCurrentHost(user)) {
+          rejectWrongHostSession();
+          return;
+        }
         const routeView = viewFromPath(user);
         setSession(user);
         setActiveView(routeView);
@@ -204,17 +231,20 @@ export default function App() {
 
   useEffect(() => {
     function handlePopState() {
+      const nextPath = window.location.pathname;
+      setCurrentPath(nextPath);
       if (session) {
         const prefix = routePrefix(session);
-        if (prefix && !window.location.pathname.startsWith(prefix)) {
+        if (prefix && !nextPath.startsWith(prefix)) {
           pushAppRoute(session, "dashboard", true);
+          setCurrentPath(window.location.pathname);
           setActiveView("dashboard");
           return;
         }
         setActiveView(viewFromPath(session));
         return;
       }
-      setShowLogin(shouldShowLoginForPath());
+      setShowLogin(shouldShowLoginForPath(nextPath));
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -263,13 +293,6 @@ export default function App() {
     }
   }
 
-  function updateLoginField(event) {
-    setLoginForm((current) => ({
-      ...current,
-      [event.target.name]: event.target.value,
-    }));
-  }
-
   function updateRestaurantField(event) {
     const { name } = event.target;
     let { value } = event.target;
@@ -284,6 +307,10 @@ export default function App() {
 
   function handleAuthenticated(data) {
     // Post-connexion commun aux pages publiques (superadmin / restaurant par slug).
+    if (!isSessionAllowedOnCurrentHost(data.user)) {
+      rejectWrongHostSession();
+      return;
+    }
     setToken(data.access_token);
     setSession(data.user);
     setActiveView("dashboard");
@@ -295,41 +322,21 @@ export default function App() {
     if (data.user.restaurant_id) fetchRestaurantTheme();
   }
 
-  async function submitLogin(event) {
-    event.preventDefault();
-    setIsLoading(true);
-    setMessage("");
+  function isSessionAllowedOnCurrentHost(user) {
+    if (publicHostKind === "platform") return user.role === "SUPERADMIN";
+    if (publicHostKind === "restaurant") return user.role !== "SUPERADMIN";
+    return true;
+  }
 
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(loginForm),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(formatApiError(data.detail, "Identifiants invalides."));
-        return;
-      }
-
-      setToken(data.access_token);
-      setSession(data.user);
-      setActiveView("dashboard");
-      pushAppRoute(data.user, "dashboard", true);
-      if (data.user.role === "SUPERADMIN") fetchRestaurants();
-      if (data.user.role === "ADMIN") fetchAdminSummary();
-      if (data.user.restaurant_id) fetchRestaurantTheme();
-    } catch (error) {
-      setMessage(
-        friendlyNetworkMessage(
-          error,
-          `API indisponible à ${apiBaseUrl}. Vérifie que le backend est démarré et accessible depuis ton navigateur.`
-        )
-      );
-    } finally {
-      setIsLoading(false);
-    }
+  function rejectWrongHostSession() {
+    clearToken();
+    setSession(null);
+    setShowLogin(true);
+    setMessage(
+      publicHostKind === "platform"
+        ? "Utilisez un compte superadmin pour accéder à la plateforme."
+        : "Utilisez l'espace de connexion dédié à ce restaurant.",
+    );
   }
 
   async function submitRestaurant(event) {
@@ -365,7 +372,6 @@ export default function App() {
   function logout({ expired = false } = {}) {
     clearToken();
     setSession(null);
-    setLoginForm(initialLogin);
     setRestaurants([]);
     setRestaurantTheme(null);
     setAdminSummary(null);
@@ -378,10 +384,11 @@ export default function App() {
       setMessage("");
       setShowLogin(false);
       window.history.pushState({}, "", "/");
+      setCurrentPath("/");
     }
   }
 
-  if (!session && window.location.pathname.startsWith("/reset-password")) {
+  if (!session && currentPath.startsWith("/reset-password")) {
     return (
       <PasswordRecovery
         apiBaseUrl={apiBaseUrl}
@@ -389,6 +396,7 @@ export default function App() {
         token={new URLSearchParams(window.location.search).get("token") || ""}
         onBackToLogin={() => {
           window.history.pushState({}, "", "/login");
+          setCurrentPath("/login");
           setRecoveryMode(false);
           setShowLogin(true);
         }}
@@ -396,8 +404,31 @@ export default function App() {
     );
   }
 
+  if (session && publicHostKind === "restaurant" && isRestaurantPublicPath(currentPath)) {
+    const publicPath = currentPath.replace(/\/+$/, "") || "/";
+    return (
+      <TenantPublicRouter
+        apiBaseUrl={apiBaseUrl}
+        currentPath={publicPath}
+        onAuthenticated={handleAuthenticated}
+      />
+    );
+  }
+
   if (!session) {
-    const publicPath = window.location.pathname.replace(/\/+$/, "") || "/";
+    const publicPath = currentPath.replace(/\/+$/, "") || "/";
+    if (publicHostKind === "platform") {
+      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
+    }
+    if (shouldResolveTenantFromHost()) {
+      return (
+        <TenantPublicRouter
+          apiBaseUrl={apiBaseUrl}
+          currentPath={publicPath}
+          onAuthenticated={handleAuthenticated}
+        />
+      );
+    }
     // Toute URL de l'espace plateforme sans session -> page de connexion superadmin.
     if (publicPath === "/superadmin" || publicPath.startsWith("/superadmin/")) {
       return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
@@ -406,9 +437,18 @@ export default function App() {
     const restaurantMatch = publicPath.match(/^\/r\/([^/]+)(\/.*)?$/);
     if (restaurantMatch) {
       const slug = restaurantMatch[1];
-      return (restaurantMatch[2] || "") === ""
-        ? <RestaurantLandingPage apiBaseUrl={apiBaseUrl} slug={slug} />
-        : <RestaurantLoginPage apiBaseUrl={apiBaseUrl} slug={slug} onAuthenticated={handleAuthenticated} />;
+      const restaurantPath = restaurantMatch[2] || "";
+      if (["/login", "/admin"].includes(restaurantPath)) {
+        return <RestaurantLoginPage apiBaseUrl={apiBaseUrl} slug={slug} onAuthenticated={handleAuthenticated} />;
+      }
+      const initialSection = restaurantPath === "/commande" ? "commande" : restaurantPath === "/contact" ? "infos" : restaurantPath === "/menu" ? "menu" : null;
+      return <RestaurantLandingPage apiBaseUrl={apiBaseUrl} slug={slug} initialSection={initialSection} />;
+    }
+    if (publicHostKind === "saas" && publicPath === "/login") {
+      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
+    }
+    if (publicHostKind === "saas") {
+      return <LandingPage apiBaseUrl={apiBaseUrl} />;
     }
   }
 
@@ -427,16 +467,7 @@ export default function App() {
   }
 
   if (!session) {
-    return (
-      <LoginPanel
-        value={loginForm}
-        onChange={updateLoginField}
-        onSubmit={submitLogin}
-        isLoading={isLoading}
-        message={message}
-        onForgotPassword={() => setRecoveryMode(true)}
-      />
-    );
+    return <AccessPortalPage message={message} onForgotPassword={() => setRecoveryMode(true)} />;
   }
 
   const overrides =
@@ -507,7 +538,7 @@ export default function App() {
       </Suspense>
 
       {message && (
-        <p className="mt-8 max-w-3xl rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
+        <p className="mt-8 max-w-3xl rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
           {friendlyNetworkMessage(message, message)}
         </p>
       )}
@@ -515,13 +546,18 @@ export default function App() {
   );
 
   function renderContent() {
+    const navigateFromDashboard = (view) => {
+      setActiveView(view);
+      pushAppRoute(session, view);
+    };
+
     if (session.role !== "SUPERADMIN") {
       if (session.role === "SERVEUR" && activeView === "dashboard") {
-        return <RoleDashboard role="SERVEUR" overrides={{ ...overrides, __currentUser: session }} />;
+        return <RoleDashboard role="SERVEUR" overrides={{ ...overrides, __currentUser: session }} onNavigate={navigateFromDashboard} />;
       }
 
       if (session.role === "CUISINE" && activeView === "dashboard") {
-        return <RoleDashboard role="CUISINE" overrides={{ ...overrides, __currentUser: session }} />;
+        return <RoleDashboard role="CUISINE" overrides={{ ...overrides, __currentUser: session }} onNavigate={navigateFromDashboard} />;
       }
 
       // Comptabilité (partie double) : le rôle COMPTABLE utilise le nouveau module dédié.
@@ -534,7 +570,10 @@ export default function App() {
       if (accountingViews.includes(activeView) && session.role === "ADMIN") {
         return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
       }
-      const stockAccountingViews = ["comptabilite", "accounts", "journals", "accounting-entries", "accounting-expenses", "accounting-revenues", "accounting-payments", "cash", "banks", "statements"];
+      if (activeView === "comptabilite" && session.role === "STOCK") {
+        return <RoleDashboard role={session.role} overrides={overrides} onNavigate={navigateFromDashboard} />;
+      }
+      const stockAccountingViews = ["accounts", "journals", "accounting-entries", "accounting-expenses", "accounting-revenues", "accounting-payments", "cash", "banks", "statements"];
       if (stockAccountingViews.includes(activeView) && session.role === "STOCK") {
         return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
       }
@@ -648,6 +687,19 @@ export default function App() {
         return <AuditLogsAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
+      if (["reports", "sales-report", "profit-report", "server-report"].includes(activeView) && session.role === "ADMIN") {
+        return (
+          <AdminReports
+            initialView={activeView}
+            onMessage={setMessage}
+            onNavigate={(view) => {
+              setActiveView(view);
+              pushAppRoute(session, view);
+            }}
+          />
+        );
+      }
+
       if (["menu-categories", "create-category"].includes(activeView) && ["ADMIN", "CUISINE", "STOCK"].includes(session.role)) {
         return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={session.role !== "STOCK" && activeView === "create-category"} />;
       }
@@ -705,7 +757,7 @@ export default function App() {
         return <RoleWorkspacePage role={session.role} view={activeView} overrides={overrides} />;
       }
 
-      return <RoleDashboard role={session.role} overrides={overrides} />;
+      return <RoleDashboard role={session.role} overrides={overrides} onNavigate={navigateFromDashboard} />;
     }
 
     if (activeView === "restaurants" || activeView === "create-restaurant") {
@@ -825,7 +877,7 @@ export default function App() {
       return <RoleWorkspacePage role={session.role} view={activeView} overrides={overrides} />;
     }
 
-    return <RoleDashboard role={session.role} overrides={overrides} />;
+    return <RoleDashboard role={session.role} overrides={overrides} onNavigate={navigateFromDashboard} />;
   }
 }
 
@@ -843,7 +895,7 @@ function SyncStatus({ apiBaseUrl, isOnline, queueCount, onMessage }) {
   }
 
   return (
-    <div className={`mb-4 flex flex-col gap-3 rounded-xl border p-3 text-sm font-bold md:flex-row md:items-center md:justify-between ${
+    <div className={`mb-4 flex flex-col gap-3 rounded-lg border p-3 text-sm font-bold md:flex-row md:items-center md:justify-between ${
       isOnline ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-700"
     }`}>
       <span>

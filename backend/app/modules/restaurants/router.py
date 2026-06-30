@@ -1,8 +1,5 @@
-import re
 from pathlib import Path
 from uuid import uuid4
-
-import unicodedata
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import func, or_
@@ -20,27 +17,129 @@ from app.modules.restaurants.schemas import (
     RestaurantPublic,
     RestaurantSettingsIn,
     RestaurantStatusIn,
+    TenantResolveOut,
 )
+from app.modules.menu.models import CategoryModel, DishModel
 from app.modules.audit.service import log_action
 from app.modules.platform.models import RestaurantSubscription
 from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
 from app.security import detect_image_extension, hash_password
+from app.modules.restaurants.tenant_resolution import (
+    BASE_DOMAIN,
+    PLATFORM_HOSTS,
+    RESERVED_SUBDOMAINS,
+    clean_host,
+    extract_subdomain,
+    generate_slug,
+    normalize_subdomain,
+)
 
 
 router = APIRouter(prefix="/restaurants", tags=["restaurants"])
+public_router = APIRouter(prefix="/public", tags=["public"])
 LOGO_UPLOAD_DIR = Path("uploads/logos")
 ALLOWED_LOGO_TYPES = {"image/png", "image/jpeg", "image/webp"}
+def public_restaurant_payload(restaurant: Restaurant) -> dict:
+    return {
+        "id": restaurant.id,
+        "name": restaurant.name,
+        "slug": restaurant.slug,
+        "subdomain": restaurant.subdomain,
+        "custom_domain": restaurant.custom_domain,
+        "logo_url": restaurant.logo_url,
+        "cover_image_url": restaurant.cover_image_url,
+        "description": restaurant.description,
+        "phone": restaurant.phone,
+        "whatsapp_phone": restaurant.whatsapp_phone,
+        "email": restaurant.email,
+        "address": restaurant.address,
+        "city": restaurant.city,
+        "country": restaurant.country,
+        "opening_hours": restaurant.opening_hours,
+        "is_open": restaurant.is_open,
+        "payment_methods": restaurant.payment_methods,
+        "delivery_fee": restaurant.delivery_fee,
+        "currency": restaurant.currency,
+        "primary_color": restaurant.primary_color,
+        "secondary_color": restaurant.secondary_color,
+        "accent_color": restaurant.accent_color,
+        "background_color": restaurant.background_color,
+        "text_color": restaurant.text_color,
+        "button_color": restaurant.button_color,
+        "is_active": restaurant.is_active,
+    }
 
 
-def generate_slug(name: str) -> str:
-    """Generate a URL-friendly slug from a restaurant name."""
-    slug = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
-    slug = slug.lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    slug = re.sub(r"-{2,}", "-", slug)
-    slug = slug.strip("-")
-    return slug or str(uuid4().hex[:8])
+def get_public_menu_payload(db: Session, restaurant: Restaurant) -> tuple[list[CategoryModel], list[DishModel]]:
+    categories = (
+        db.query(CategoryModel)
+        .filter(CategoryModel.restaurant_id == restaurant.id, CategoryModel.is_active.is_(True))
+        .order_by(CategoryModel.created_at.desc())
+        .all()
+    )
+    dishes = (
+        db.query(DishModel)
+        .filter(DishModel.restaurant_id == restaurant.id, DishModel.is_available.is_(True))
+        .order_by(DishModel.created_at.desc())
+        .all()
+    )
+    return categories, dishes
+
+
+def public_category_payload(category: CategoryModel) -> dict:
+    return {
+        "id": category.id,
+        "restaurant_id": category.restaurant_id,
+        "name": category.name,
+        "description": category.description,
+        "image_url": category.image_url,
+        "is_active": category.is_active,
+        "created_at": category.created_at,
+    }
+
+
+def public_dish_payload(dish: DishModel) -> dict:
+    return {
+        "id": dish.id,
+        "restaurant_id": dish.restaurant_id,
+        "category_id": dish.category_id,
+        "name": dish.name,
+        "description": dish.description,
+        "price": dish.price,
+        "cost_per_dish": dish.cost_per_dish,
+        "image_url": dish.image_url,
+        "is_available": dish.is_available,
+        "requires_kitchen": dish.requires_kitchen,
+        "created_at": dish.created_at,
+    }
+
+
+def find_restaurant_by_tenant(db: Session, host: str, subdomain: str | None = None) -> Restaurant | None:
+    custom_host = clean_host(host)
+    if custom_host and not custom_host.endswith(f".{BASE_DOMAIN}"):
+        restaurant = (
+            db.query(Restaurant)
+            .filter(func.lower(Restaurant.custom_domain) == custom_host)
+            .one_or_none()
+        )
+        if restaurant:
+            return restaurant
+
+    tenant_subdomain = (subdomain or extract_subdomain(custom_host) or "").lower().strip()
+    if not tenant_subdomain or tenant_subdomain in RESERVED_SUBDOMAINS:
+        return None
+    return (
+        db.query(Restaurant)
+        .filter(
+            or_(
+                func.lower(Restaurant.subdomain) == tenant_subdomain,
+                func.lower(Restaurant.slug) == tenant_subdomain,
+                func.replace(func.lower(Restaurant.slug), "-", "") == tenant_subdomain,
+            )
+        )
+        .one_or_none()
+    )
 
 
 @router.get("", response_model=list[RestaurantPublic])
@@ -82,6 +181,14 @@ def provision_restaurant(
     while db.query(Restaurant).filter(Restaurant.slug == slug).one_or_none():
         slug = f"{original_slug}-{counter}"
         counter += 1
+    subdomain = normalize_subdomain(payload.subdomain or slug)
+    if subdomain in RESERVED_SUBDOMAINS:
+        raise HTTPException(status_code=400, detail="Sous-domaine reserve")
+    original_subdomain = subdomain
+    counter = 1
+    while db.query(Restaurant).filter(func.lower(Restaurant.subdomain) == subdomain).one_or_none():
+        subdomain = f"{original_subdomain}{counter}"
+        counter += 1
 
     user_filters = [User.username == username]
     if email:
@@ -93,9 +200,15 @@ def provision_restaurant(
     restaurant = Restaurant(
         name=payload.name,
         slug=slug,
+        subdomain=subdomain,
         logo_url=payload.logo_url,
+        cover_image_url=payload.cover_image_url,
         primary_color=payload.primary_color,
         secondary_color=payload.secondary_color,
+        accent_color=payload.accent_color,
+        background_color=payload.background_color,
+        text_color=payload.text_color,
+        button_color=payload.button_color,
         currency=payload.currency.upper(),
         timezone=payload.timezone,
         phone=payload.owner_phone,
@@ -138,18 +251,54 @@ def provision_restaurant(
     return RestaurantProvisionOut(restaurant=restaurant, owner=owner)
 
 
+@router.get("/public/tenant/resolve", response_model=TenantResolveOut)
+@public_router.get("/tenant/resolve", response_model=TenantResolveOut)
+def resolve_public_tenant(
+    request: Request,
+    host: str | None = None,
+    subdomain: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """PUBLIC : resout le host courant vers la plateforme ou le restaurant tenant."""
+    resolved_host = clean_host(host or request.headers.get("host"))
+    if resolved_host in PLATFORM_HOSTS:
+        return TenantResolveOut(type="platform", host=resolved_host, status="active")
+
+    restaurant = find_restaurant_by_tenant(db, resolved_host, subdomain=subdomain)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    categories, dishes = get_public_menu_payload(db, restaurant)
+    return TenantResolveOut(
+        type="restaurant",
+        host=resolved_host,
+        subdomain=restaurant.subdomain or restaurant.slug,
+        status="active" if restaurant.is_active else "suspended",
+        restaurant=public_restaurant_payload(restaurant),
+        categories=[public_category_payload(category) for category in categories],
+        dishes=[public_dish_payload(dish) for dish in dishes],
+    )
+
+
 @router.get("/public/{slug}")
 def get_public_restaurant(slug: str, db: Session = Depends(get_db)):
     """PUBLIC : infos d'affichage d'un restaurant pour sa landing / page de connexion."""
-    restaurant = db.query(Restaurant).filter(Restaurant.slug == slug).one_or_none()
+    restaurant = find_restaurant_by_tenant(db, "", subdomain=slug)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant introuvable")
     return {
         "name": restaurant.name,
         "slug": restaurant.slug,
+        "subdomain": restaurant.subdomain,
+        "custom_domain": restaurant.custom_domain,
         "logo_url": restaurant.logo_url,
+        "cover_image_url": restaurant.cover_image_url,
         "primary_color": restaurant.primary_color,
         "secondary_color": restaurant.secondary_color,
+        "accent_color": restaurant.accent_color,
+        "background_color": restaurant.background_color,
+        "text_color": restaurant.text_color,
+        "button_color": restaurant.button_color,
         "city": restaurant.city,
         "address": restaurant.address,
         "description": restaurant.description,
@@ -290,7 +439,35 @@ def update_my_restaurant_settings(
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant introuvable")
 
-    for field, value in payload.dict(exclude_unset=True).items():
+    incoming = payload.dict(exclude_unset=True)
+    if "subdomain" in incoming and incoming["subdomain"]:
+        incoming["subdomain"] = normalize_subdomain(incoming["subdomain"])
+        if incoming["subdomain"] in RESERVED_SUBDOMAINS:
+            raise HTTPException(status_code=400, detail="Sous-domaine reserve")
+        existing = (
+            db.query(Restaurant)
+            .filter(
+                func.lower(Restaurant.subdomain) == incoming["subdomain"],
+                Restaurant.id != restaurant.id,
+            )
+            .one_or_none()
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="Sous-domaine deja utilise")
+    if "custom_domain" in incoming and incoming["custom_domain"]:
+        incoming["custom_domain"] = clean_host(incoming["custom_domain"])
+        existing = (
+            db.query(Restaurant)
+            .filter(
+                func.lower(Restaurant.custom_domain) == incoming["custom_domain"],
+                Restaurant.id != restaurant.id,
+            )
+            .one_or_none()
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="Domaine personnalise deja utilise")
+
+    for field, value in incoming.items():
         if field == "currency" and value:
             value = value.upper()
         setattr(restaurant, field, value)

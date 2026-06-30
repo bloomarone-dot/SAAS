@@ -12,7 +12,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))
 PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30"))
-MIN_PASSWORD_LENGTH = 10
+MIN_PASSWORD_LENGTH = 8
 
 # Tout secret contenant un de ces motifs est un placeholder de template: on le
 # refuse en production meme s'il respecte la longueur minimale. La detection par

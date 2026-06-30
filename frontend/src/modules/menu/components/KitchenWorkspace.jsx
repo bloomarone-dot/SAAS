@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { DashboardSection, ErrorState, LoadingState, PageContainer, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import CategoriesPage from "../pages/CategoriesPage";
 import DishesPage from "../pages/DishesPage";
@@ -68,6 +69,14 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
     () => tickets.filter((ticket) => ticket.status === "En attente").length,
     [tickets]
   );
+  const preparingCount = useMemo(
+    () => tickets.filter((ticket) => ticket.status === "En préparation").length,
+    [tickets]
+  );
+  const readyCount = useMemo(
+    () => tickets.filter((ticket) => ticket.status === "Prête").length,
+    [tickets]
+  );
 
   async function advanceTicket(ticket, nextStatus) {
     setBusyId(String(ticket.id));
@@ -83,15 +92,13 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
   }
 
   return (
-    <section className="space-y-4">
-      <header className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="mt-1 text-2xl font-black text-slate-950">
-              {screen === "production" ? "Production du jour" : "Carte & plats"}
-            </h1>
-          </div>
-          <div className="flex flex-wrap gap-2">
+    <PageContainer>
+      <PageHeader
+        eyebrow="Cuisine"
+        title={screen === "production" ? "Production du jour" : "Carte & plats"}
+        subtitle={screen === "production" ? `Suivez les tickets à préparer${currentUser?.first_name ? `, ${currentUser.first_name}` : ""} et faites avancer chaque commande.` : "Gérez les catégories et les plats disponibles pour la cuisine."}
+        secondaryActions={
+          <>
             <TabButton active={screen === "production"} onClick={() => setScreen("production")} icon="ChefHat">
               Production
               {pendingCount > 0 && (
@@ -103,13 +110,16 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
             <TabButton active={screen === "catalog"} onClick={() => setScreen("catalog")} icon="UtensilsCrossed">
               Catégories & plats
             </TabButton>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+        meta={[
+          <span key="pending">{pendingCount.toLocaleString("fr-FR")} nouvelle(s)</span>,
+          <span key="preparing">{preparingCount.toLocaleString("fr-FR")} en préparation</span>,
+          <span key="ready">{readyCount.toLocaleString("fr-FR")} prête(s)</span>,
+        ]}
+      />
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>
-      )}
+      {error && <ErrorState title="Cuisine indisponible" text={error} />}
 
       {screen === "catalog" ? (
         <div className="space-y-6">
@@ -118,78 +128,67 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
         </div>
       ) : (
         <>
-          {monthStats && (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-black uppercase text-slate-500">
-                Plats préparés ce mois ({monthStats.month})
-              </p>
-              <p className="mt-2 text-3xl font-black text-[var(--dashboard-primary)]">{monthStats.total_dishes}</p>
-              {monthStats.top_items?.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {monthStats.top_items.map((item) => (
-                    <span
-                      key={item.name}
-                      className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700"
-                    >
-                      {item.name} · {item.quantity}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Nouvelles commandes" value={pendingCount.toLocaleString("fr-FR")} trend="À lancer" icon="ChefHat" tone={pendingCount ? "warning" : "success"} />
+            <StatCard label="En préparation" value={preparingCount.toLocaleString("fr-FR")} trend="En cours" icon="Clock3" tone="info" />
+            <StatCard label="Prêtes" value={readyCount.toLocaleString("fr-FR")} trend="À servir" icon="CheckCircle2" tone="success" />
+            <StatCard label="Plats ce mois" value={Number(monthStats?.total_dishes || 0).toLocaleString("fr-FR")} trend={monthStats?.month || "Mois courant"} icon="UtensilsCrossed" tone="default" />
+          </div>
+
+          {monthStats?.top_items?.length > 0 && (
+            <DashboardSection title="Plats les plus préparés" description={`Synthèse du mois ${monthStats.month}`}>
+              <div className="flex flex-wrap gap-2">
+                {monthStats.top_items.slice(0, 8).map((item) => (
+                  <span
+                    key={item.name}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700"
+                  >
+                    {item.name} · {item.quantity}
+                  </span>
+                ))}
+              </div>
+            </DashboardSection>
           )}
 
           {loading ? (
-            <p className="text-sm font-semibold text-slate-500">Chargement des commandes cuisine…</p>
+            <LoadingState label="Chargement des commandes cuisine..." />
           ) : (
             <div className="grid gap-4 lg:grid-cols-3">
               {COLUMNS.map((column) => {
                 const items = tickets.filter((ticket) => ticket.status === column.key);
                 return (
-                  <div key={column.key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="mb-4 flex items-center justify-between">
-                      <h2 className="text-base font-black text-slate-950">{column.title}</h2>
-                      <span className={`rounded-full px-3 py-1 text-xs font-black ${column.tone}`}>{items.length}</span>
-                    </div>
+                  <DashboardSection
+                    key={column.key}
+                    title={column.title}
+                    action={<span className={`rounded-full px-3 py-1 text-xs font-black ${column.tone}`}>{items.length}</span>}
+                  >
                     <div className="space-y-3">
                       {items.map((ticket) => (
-                        <article key={ticket.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                          <p className="text-xs font-bold text-slate-500">Table {ticket.table_number}</p>
-                          <p className="mt-1 text-sm font-black text-slate-900">
-                            {ticket.quantity}× {ticket.item_name}
-                          </p>
-                          {ticket.notes && (
-                            <p className="mt-2 rounded bg-white px-2 py-1 text-xs font-semibold text-slate-600">
-                              {ticket.notes}
-                            </p>
-                          )}
-                          <button
-                            type="button"
-                            disabled={busyId === String(ticket.id)}
-                            onClick={() => advanceTicket(ticket, column.next)}
-                            className="mt-3 w-full lte-btn lte-btn-primary lte-btn-sm"
-                          >
-                            {busyId === String(ticket.id) ? "…" : column.action}
-                          </button>
-                        </article>
+                        <KitchenTicket
+                          key={ticket.id}
+                          ticket={ticket}
+                          action={column.action}
+                          isBusy={busyId === String(ticket.id)}
+                          onAdvance={() => advanceTicket(ticket, column.next)}
+                        />
                       ))}
                       {!items.length && (
-                        <p className="py-8 text-center text-sm font-semibold text-slate-400">Rien pour le moment.</p>
+                        <EmptyKitchenColumn />
                       )}
                     </div>
-                  </div>
+                  </DashboardSection>
                 );
               })}
             </div>
           )}
 
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
+          <p className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-600 shadow-sm">
             Les boissons bar (vin, whisky, sodas…) ne passent pas ici — seulement les plats et boissons à préparer en
             cuisine (ex. jus naturel). C’est configurable dans « Catégories & plats ».
           </p>
         </>
       )}
-    </section>
+    </PageContainer>
   );
 }
 
@@ -207,5 +206,45 @@ function TabButton({ active, onClick, icon, children }) {
       <DashboardIcon name={icon} size={16} />
       {children}
     </button>
+  );
+}
+
+function KitchenTicket({ ticket, action, isBusy, onAdvance }) {
+  return (
+    <article className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition hover:border-slate-300 hover:bg-white">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-slate-500">Table {ticket.table_number}</p>
+          <p className="mt-1 text-sm font-black text-slate-900">
+            {ticket.quantity}x {ticket.item_name}
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-black text-slate-500">
+          #{String(ticket.id).slice(0, 6)}
+        </span>
+      </div>
+      {ticket.notes && (
+        <p className="mt-3 rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800">
+          {ticket.notes}
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={isBusy}
+        onClick={onAdvance}
+        className="mt-3 w-full lte-btn lte-btn-primary lte-btn-sm"
+      >
+        {isBusy ? "..." : action}
+      </button>
+    </article>
+  );
+}
+
+function EmptyKitchenColumn() {
+  return (
+    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+      <DashboardIcon name="CheckCircle2" size={22} className="mx-auto text-slate-300" />
+      <p className="mt-2 text-sm font-semibold text-slate-400">Rien pour le moment.</p>
+    </div>
   );
 }

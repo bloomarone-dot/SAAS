@@ -13,6 +13,7 @@ USERNAME_PATTERN = r"^[a-zA-Z0-9\._\-]{3,50}$"
 PHONE_PATTERN = r"^\+?[0-9 \(\)\-]{5,30}$"
 CURRENCY_PATTERN = r"^[A-Za-z]{3}$"
 TIMEZONE_PATTERN = r"^[A-Za-z_]+/[A-Za-z0-9_\+\-\/]+$"
+SUBDOMAIN_PATTERN = r"^[a-z0-9](?:[a-z0-9-]{0,118}[a-z0-9])?$"
 
 
 class RestaurantPublic(OrmModel):
@@ -21,7 +22,10 @@ class RestaurantPublic(OrmModel):
     id: str
     name: str
     slug: str
+    subdomain: Optional[str] = None
+    custom_domain: Optional[str] = None
     logo_url: Optional[str] = None
+    cover_image_url: Optional[str] = None
     description: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
@@ -41,6 +45,10 @@ class RestaurantPublic(OrmModel):
     bloomar_commission_rate: float = 0
     primary_color: str
     secondary_color: str
+    accent_color: str = "#F59E0B"
+    background_color: str = "#FFFFFF"
+    text_color: str = "#0F172A"
+    button_color: str = "#078D50"
     currency: str
     timezone: str
     owner_id: Optional[str] = None
@@ -54,14 +62,20 @@ class RestaurantProvisionIn(BaseModel):
 
     name: str = Field(min_length=2, max_length=191, pattern=NAME_PATTERN)
     slug: Optional[str] = Field(default=None, min_length=2, max_length=191, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    subdomain: Optional[str] = Field(default=None, min_length=2, max_length=120, pattern=SUBDOMAIN_PATTERN)
     logo_url: Optional[str] = Field(default=None, max_length=500)
+    cover_image_url: Optional[str] = Field(default=None, max_length=500)
     primary_color: str = Field(default="#E4572E", pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_color: str = Field(default="#1F2937", pattern=r"^#[0-9A-Fa-f]{6}$")
+    accent_color: str = Field(default="#F59E0B", pattern=r"^#[0-9A-Fa-f]{6}$")
+    background_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    text_color: str = Field(default="#0F172A", pattern=r"^#[0-9A-Fa-f]{6}$")
+    button_color: str = Field(default="#078D50", pattern=r"^#[0-9A-Fa-f]{6}$")
     currency: str = Field(default="XAF", min_length=3, max_length=3, pattern=CURRENCY_PATTERN)
     timezone: str = Field(default="Africa/Douala", max_length=50, pattern=TIMEZONE_PATTERN)
     owner_email: Optional[str] = Field(default=None, max_length=191)
     owner_username: str = Field(min_length=3, max_length=50, pattern=USERNAME_PATTERN)
-    owner_password: str = Field(min_length=10, max_length=128)
+    owner_password: str = Field(min_length=8, max_length=128)
     owner_first_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
     owner_last_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
     owner_phone: str = Field(min_length=5, max_length=30, pattern=PHONE_PATTERN)
@@ -103,7 +117,10 @@ class RestaurantSettingsIn(BaseModel):
     """Champs configurables par le proprietaire du restaurant."""
 
     name: Optional[str] = Field(default=None, min_length=2, max_length=191, pattern=NAME_PATTERN)
+    subdomain: Optional[str] = Field(default=None, min_length=2, max_length=120, pattern=SUBDOMAIN_PATTERN)
+    custom_domain: Optional[str] = Field(default=None, max_length=255)
     logo_url: Optional[str] = Field(default=None, max_length=500)
+    cover_image_url: Optional[str] = Field(default=None, max_length=500)
     description: Optional[str] = None
     address: Optional[str] = Field(default=None, max_length=255)
     city: Optional[str] = Field(default=None, max_length=120, pattern=NAME_PATTERN)
@@ -122,5 +139,21 @@ class RestaurantSettingsIn(BaseModel):
     legal_name: Optional[str] = Field(default=None, max_length=191, pattern=NAME_PATTERN)
     primary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    background_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    text_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    button_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3, pattern=CURRENCY_PATTERN)
     timezone: Optional[str] = Field(default=None, max_length=50, pattern=TIMEZONE_PATTERN)
+
+
+class TenantResolveOut(BaseModel):
+    """Resolution publique d'un host vers la plateforme ou un restaurant."""
+
+    type: str
+    host: Optional[str] = None
+    subdomain: Optional[str] = None
+    status: str
+    restaurant: Optional[dict] = None
+    categories: list[dict] = Field(default_factory=list)
+    dishes: list[dict] = Field(default_factory=list)

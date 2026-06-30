@@ -260,14 +260,21 @@ def ensure_restaurant_settings_columns() -> None:
         "tax_id": "VARCHAR(100) NULL",
         "legal_name": "VARCHAR(191) NULL",
         "bloomar_commission_rate": "FLOAT NOT NULL DEFAULT 0",
+        "subdomain": "VARCHAR(120) NULL",
+        "custom_domain": "VARCHAR(255) NULL",
+        "cover_image_url": "VARCHAR(500) NULL",
+        "accent_color": "VARCHAR(20) NOT NULL DEFAULT '#F59E0B'",
+        "background_color": "VARCHAR(20) NOT NULL DEFAULT '#FFFFFF'",
+        "text_color": "VARCHAR(20) NOT NULL DEFAULT '#0F172A'",
+        "button_color": "VARCHAR(20) NOT NULL DEFAULT '#078D50'",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
-    if not missing:
-        return
 
     with engine.begin() as connection:
         for name, definition in missing:
             connection.execute(text(f"ALTER TABLE restaurants ADD COLUMN {name} {definition}"))
+        if "subdomain" in existing or any(name == "subdomain" for name, _definition in missing):
+            connection.execute(text("UPDATE restaurants SET subdomain = slug WHERE subdomain IS NULL OR subdomain = ''"))
 
 
 def ensure_order_columns() -> None:
@@ -341,35 +348,35 @@ def ensure_order_columns() -> None:
 def ensure_stock_columns() -> None:
     """Ajoute les champs stock recents sans attendre une migration Alembic."""
     inspector = inspect(engine)
-    if "stock_items" not in inspector.get_table_names():
-        return
+    tables = set(inspector.get_table_names())
 
-    existing = {column["name"] for column in inspector.get_columns("stock_items")}
-    columns = {
-        "product_type": "VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'",
-        "unit": "VARCHAR(30) NOT NULL DEFAULT 'Unité'",
-        "quantity": "FLOAT NOT NULL DEFAULT 0",
-        "kitchen_quantity": "FLOAT NOT NULL DEFAULT 0",
-        "drink_quantity": "FLOAT NOT NULL DEFAULT 0",
-        "alert_threshold": "FLOAT NOT NULL DEFAULT 0",
-        "purchase_price": "FLOAT NOT NULL DEFAULT 0",
-        "cmup_current": "FLOAT NOT NULL DEFAULT 0",
-        "packaging_sale_price": "FLOAT NOT NULL DEFAULT 0",
-        "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
-        "sale_margin_rate": "FLOAT NOT NULL DEFAULT 0",
-        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
-        "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
-    }
-    missing = [(name, definition) for name, definition in columns.items() if name not in existing]
-    if missing:
-        with engine.begin() as connection:
-            for name, definition in missing:
-                connection.execute(text(f"ALTER TABLE stock_items ADD COLUMN {name} {definition}"))
-            connection.execute(text("UPDATE stock_items SET cmup_current = purchase_price WHERE cmup_current = 0"))
+    if "stock_items" in tables:
+        existing = {column["name"] for column in inspector.get_columns("stock_items")}
+        columns = {
+            "product_type": "VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'",
+            "unit": "VARCHAR(30) NOT NULL DEFAULT 'Unité'",
+            "quantity": "FLOAT NOT NULL DEFAULT 0",
+            "kitchen_quantity": "FLOAT NOT NULL DEFAULT 0",
+            "drink_quantity": "FLOAT NOT NULL DEFAULT 0",
+            "alert_threshold": "FLOAT NOT NULL DEFAULT 0",
+            "purchase_price": "FLOAT NOT NULL DEFAULT 0",
+            "cmup_current": "FLOAT NOT NULL DEFAULT 0",
+            "packaging_sale_price": "FLOAT NOT NULL DEFAULT 0",
+            "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "sale_margin_rate": "FLOAT NOT NULL DEFAULT 0",
+            "created_at": "DATETIME NULL",
+            "updated_at": "DATETIME NULL",
+        }
+        missing = [(name, definition) for name, definition in columns.items() if name not in existing]
+        if missing:
+            with engine.begin() as connection:
+                for name, definition in missing:
+                    connection.execute(text(f"ALTER TABLE stock_items ADD COLUMN {name} {definition}"))
+                connection.execute(text("UPDATE stock_items SET cmup_current = purchase_price WHERE cmup_current = 0"))
 
-    if engine.dialect.name == "mysql":
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE stock_items MODIFY COLUMN product_type VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'"))
+        if engine.dialect.name == "mysql":
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE stock_items MODIFY COLUMN product_type VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'"))
 
     if "stock_movements" in inspector.get_table_names():
         existing_movements = {column["name"] for column in inspector.get_columns("stock_movements")}
@@ -408,19 +415,43 @@ def ensure_stock_columns() -> None:
                 connection.execute(text("ALTER TABLE stock_recipe_ingredients ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"))
 
     # P0-2 : colonne CMUP (coût moyen unitaire pondéré) initialisée au prix d'achat.
-    if "products" in inspector.get_table_names():
+    if "products" in tables:
         existing_products = {column["name"] for column in inspector.get_columns("products")}
-        if "cmup" not in existing_products:
+        product_columns = {
+            "code": "VARCHAR(60) NULL",
+            "product_type": "VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'",
+            "category_id": "VARCHAR(36) NULL",
+            "unit_id": "VARCHAR(36) NULL",
+            "purchase_unit_id": "VARCHAR(36) NULL",
+            "purchase_factor": "DECIMAL(14,4) NOT NULL DEFAULT 1",
+            "purchase_price": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+            "cmup": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+            "minimum_stock": "DECIMAL(14,3) NOT NULL DEFAULT 0",
+            "packaging_sale_price": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+            "sale_margin_rate": "DECIMAL(7,4) NOT NULL DEFAULT 0",
+            "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        }
+        missing_product_columns = [
+            (name, definition)
+            for name, definition in product_columns.items()
+            if name not in existing_products
+        ]
+        if missing_product_columns:
             with engine.begin() as connection:
-                connection.execute(text("ALTER TABLE products ADD COLUMN cmup DECIMAL(14,2) NOT NULL DEFAULT 0"))
+                for name, definition in missing_product_columns:
+                    connection.execute(text(f"ALTER TABLE products ADD COLUMN {name} {definition}"))
+                if any(name == "created_at" for name, _definition in missing_product_columns):
+                    connection.execute(text("UPDATE products SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+                if any(name == "updated_at" for name, _definition in missing_product_columns):
+                    connection.execute(text("UPDATE products SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
+        if "cmup" in existing_products or any(name == "cmup" for name, _definition in missing_product_columns):
+            with engine.begin() as connection:
                 connection.execute(text("UPDATE products SET cmup = purchase_price WHERE cmup = 0"))
-        # P2-2 : conversion multi-unités (unité d'achat + facteur).
-        if "purchase_unit_id" not in existing_products:
+        if engine.dialect.name == "mysql" and "product_type" in existing_products:
             with engine.begin() as connection:
-                connection.execute(text("ALTER TABLE products ADD COLUMN purchase_unit_id VARCHAR(36) NULL"))
-        if "purchase_factor" not in existing_products:
-            with engine.begin() as connection:
-                connection.execute(text("ALTER TABLE products ADD COLUMN purchase_factor DECIMAL(14,4) NOT NULL DEFAULT 1"))
+                connection.execute(text("ALTER TABLE products MODIFY COLUMN product_type VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'"))
 
     if "inventory_details" in inspector.get_table_names():
         existing_inventory_details = {column["name"] for column in inspector.get_columns("inventory_details")}
@@ -615,6 +646,11 @@ def ensure_performance_indexes() -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     index_specs = {
+        "restaurants": [
+            ("idx_restaurants_subdomain", ("subdomain",)),
+            ("idx_restaurants_custom_domain", ("custom_domain",)),
+            ("idx_restaurants_active", ("is_active",)),
+        ],
         "customer_orders": [
             ("idx_orders_restaurant_created", ("restaurant_id", "created_at")),
             ("idx_orders_restaurant_updated", ("restaurant_id", "updated_at")),
@@ -999,6 +1035,7 @@ async def health_ready():
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
 app.include_router(restaurants.router, prefix="/api/v1")
+app.include_router(restaurants.public_router, prefix="/api/v1")
 app.include_router(branches.router, prefix="/api/v1")
 app.include_router(catalog.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")

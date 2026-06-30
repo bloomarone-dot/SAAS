@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { PageHeader } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { validationFor } from "@/utils/validation";
 import { formatApiError } from "@/utils/network";
@@ -317,12 +318,11 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
-        <div>
-          <h1 className="mt-2 text-4xl font-black text-[var(--dashboard-secondary)]">Utilisateurs & permissions</h1>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          {!showCreateOnMount && (
+      <PageHeader
+        eyebrow="Administration"
+        title="Utilisateurs & permissions"
+        subtitle="Créez les comptes, ajustez les rôles et contrôlez les accès par métier."
+        primaryAction={!showCreateOnMount ? (
             <button
               type="button"
               onClick={() => setShowCreateForm((value) => !value)}
@@ -331,9 +331,8 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage, show
               <DashboardIcon name="UserPlus" size={17} />
               {showCreateForm ? "Fermer le formulaire" : "Ajouter un utilisateur"}
             </button>
-          )}
-        </div>
-      </div>
+          ) : null}
+      />
 
       {showCreateForm && (
         <form onSubmit={createUser} className="border border-slate-200 bg-white p-6 shadow-sm">

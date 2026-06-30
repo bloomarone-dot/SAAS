@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
+import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { apiFetch } from "@/config/http";
 import { MtnMoneyPayment } from "./MtnMoneyPayment";
@@ -186,12 +186,12 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
       subtitle={reviewOnly ? "Consultez les commandes et validez uniquement les annulations ou suppressions nécessaires." : "Consultez et gérez toutes les commandes de votre restaurant."}
       action={<SecondaryAction icon="Download" onClick={() => exportCsv(visibleOrders)}>Exporter</SecondaryAction>}
     >
-      <AdminKpis items={[
-        { label: "Commandes du jour", value: todayOrders.length, icon: "ShoppingCart", trend: "aujourd'hui" },
-        { label: "En attente", value: orders.filter((order) => ["Nouvelle", "Acceptée"].includes(order.status)).length, icon: "Clock3", tone: "warn" },
-        { label: "En préparation", value: orders.filter((order) => order.status === "En préparation").length, icon: "ChefHat" },
-        { label: "Prêtes", value: orders.filter((order) => order.status === "Prête").length, icon: "Utensils" },
-      ]} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Commandes du jour" value={todayOrders.length.toLocaleString("fr-FR")} icon="ShoppingCart" trend="Aujourd'hui" tone="info" />
+        <StatCard label="En attente" value={orders.filter((order) => ["Nouvelle", "Acceptée"].includes(order.status)).length.toLocaleString("fr-FR")} icon="Clock3" trend="À traiter" tone="warning" />
+        <StatCard label="En préparation" value={orders.filter((order) => order.status === "En préparation").length.toLocaleString("fr-FR")} icon="ChefHat" trend="Cuisine" tone="default" />
+        <StatCard label="Prêtes" value={orders.filter((order) => order.status === "Prête").length.toLocaleString("fr-FR")} icon="Utensils" trend="À servir / encaisser" tone="success" />
+      </div>
 
       {!reviewOnly && editForm && (
         <AdminCard title="Modifier la commande" action={<SecondaryAction onClick={() => { setEditingOrderId(""); setEditForm(null); }}>Annuler</SecondaryAction>}>
@@ -214,8 +214,11 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
         </AdminCard>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
-        <AdminCard>
+      <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
+        <DashboardSection
+          title="Liste des commandes"
+          description={`${visibleOrders.length.toLocaleString("fr-FR")} commande(s) selon les filtres actifs`}
+        >
           <div className="mb-4 flex flex-wrap gap-3 border-b border-slate-100 pb-4">
             {statuses.map((item) => (
               <button key={item} type="button" onClick={() => setStatus(item)} className={`h-10 border-b-2 px-3 text-sm font-black ${status === item ? "border-[var(--dashboard-primary)] text-[var(--dashboard-primary)]" : "border-transparent text-slate-500"}`}>
@@ -223,13 +226,14 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
               </button>
             ))}
           </div>
-          <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_170px_170px_auto]">
+          <FilterBar className="mb-5">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une commande, client, table..." />
-            <select value={status} onChange={(event) => setStatus(event.target.value)} className="form-control">
-              {statuses.map((item) => <option key={item}>{item}</option>)}
-            </select>
-            <input type="date" className="form-control" />
-          </div>
+            <div className="w-full sm:w-48">
+              <select value={status} onChange={(event) => setStatus(event.target.value)} className="form-control">
+                {statuses.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </div>
+          </FilterBar>
           <OrdersTable
             orders={visibleOrders}
             selectedOrderId={selectedOrder?.id}
@@ -242,10 +246,10 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
                   onOrangePay={reviewOnly ? undefined : setOrangePayOrderId}
                   onMtnPay={reviewOnly ? undefined : setMtnPayOrderId}
                 />
-        </AdminCard>
+        </DashboardSection>
 
         <div className="space-y-5">
-          <AdminCard title="Détail de la commande">
+          <DashboardSection title="Détail de la commande" action={selectedOrder ? <StatusBadge status={selectedOrder.status} /> : null}>
             {selectedOrder ? (
               <OrderDetail
                 order={selectedOrder}
@@ -255,8 +259,8 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
                 onOrangePay={reviewOnly ? undefined : setOrangePayOrderId}
               />
             ) : <EmptyState title="Aucune commande" />}
-          </AdminCard>
-          <AdminCard title="Activité récente">
+          </DashboardSection>
+          <DashboardSection title="Activité récente">
             <div className="space-y-4">
               {orders.slice(0, 5).map((order) => (
                 <div key={order.id} className="border-l-2 border-[var(--dashboard-primary)] pl-3">
@@ -266,7 +270,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
                 </div>
               ))}
             </div>
-          </AdminCard>
+          </DashboardSection>
         </div>
       </div>
       {/* Modal paiement Orange Money */}
@@ -451,7 +455,7 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
         <button
           type="button"
           onClick={() => onOrangePay(order.id)}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 py-3 text-sm font-black text-white hover:bg-orange-600 transition"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 py-3 text-sm font-black text-white transition hover:bg-orange-600"
         >
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-xs font-black">OM</span>
           Payer par Orange Money · {money(order.total_amount)}
@@ -461,7 +465,7 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
         <button
           type="button"
           onClick={() => onMtnPay(order.id)}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-3 text-sm font-black text-white hover:bg-yellow-600 transition"
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-yellow-500 py-3 text-sm font-black text-white transition hover:bg-yellow-600"
         >
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-xs font-black">M</span>
           Payer par MTN Mobile Money · {money(order.total_amount)}

@@ -7,11 +7,17 @@ const apiProxyTarget =
   process.env.VITE_API_PROXY_TARGET ||
   (existsSync('/.dockerenv') ? 'http://backend:8000' : 'http://localhost:8001')
 
+const devAllowedHosts = (process.env.VITE_DEV_ALLOWED_HOSTS || 'all')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean)
+
 export default defineConfig({
   plugins: [react()],
   server: {
     host: "0.0.0.0",
     port: 5173,
+    allowedHosts: devAllowedHosts.includes('all') ? true : devAllowedHosts,
     proxy: {
       "/api": {
         target: apiProxyTarget,

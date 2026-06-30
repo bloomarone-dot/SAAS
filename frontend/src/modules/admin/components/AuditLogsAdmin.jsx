@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { FilterBar, PageHeader } from "@/modules/admin/components/AdminUi";
 import { formatApiError } from "@/utils/network";
 
 const actionLabels = {
@@ -67,13 +68,13 @@ export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
-        <div>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Journaux d'activité</h1>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Traçabilité"
+        title="Journaux d'activité"
+        subtitle="Consultez les actions importantes du restaurant avec leurs utilisateurs, objets et horodatages."
+      />
 
-      <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+      <FilterBar>
         <select value={action} onChange={(event) => setAction(event.target.value)} className="form-control">
           <option value="">Toutes les actions</option>
           {actions.map((item) => <option key={item} value={item}>{actionLabels[item] ?? item}</option>)}
@@ -85,9 +86,9 @@ export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
         <button type="button" onClick={loadLogs} className="h-12 rounded-lg border border-slate-200 px-5 text-sm font-black text-slate-700">
           Filtrer
         </button>
-      </div>
+      </FilterBar>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         {isLoading ? (
           <div className="p-8 text-center text-sm font-black text-slate-500">Chargement des journaux...</div>
         ) : logs.length === 0 ? (

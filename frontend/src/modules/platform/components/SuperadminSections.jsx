@@ -112,7 +112,7 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
           emptyText="Les propriétaires apparaîtront ici après création des restaurants."
         >
           {sortedOwners.map((owner) => (
-            <tr key={`${owner.id}-${owner.restaurant}`} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+            <tr key={`${owner.id}-${owner.restaurant}`} className="border-t border-slate-200 hover:bg-slate-50">
               <td className="px-5 py-4">
                 <p className="font-black text-[#07133d]">Administrateur propriétaire</p>
                 <p className="mt-1 text-xs font-semibold text-[#64708b]">{owner.email}</p>
@@ -132,7 +132,7 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
           ))}
         </DataTable>
 
-        <div className="border border-[#eadfd7] bg-white p-5">
+        <div className="border border-slate-200 bg-white p-5">
           <h2 className="font-black text-[#07133d]">Détail propriétaire</h2>
           {selectedOwner ? (
             <div className="mt-5 space-y-3">
@@ -143,7 +143,7 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
               <DetailLine label="Restaurant" value={selectedOwner.restaurant?.name ?? "-"} />
               <DetailLine label="Statut" value={selectedOwner.is_active ? "Actif" : "Inactif"} />
               {selectedOwner.id && (
-                <form onSubmit={resetOwnerPassword} className="border-t border-[#eadfd7] pt-4">
+                <form onSubmit={resetOwnerPassword} className="border-t border-slate-200 pt-4">
                   <label className="block">
                     <span className="text-xs font-black uppercase text-[#07133d]">Nouveau mot de passe</span>
                     <input
@@ -156,7 +156,7 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
                       data-lpignore="true"
                       data-1p-ignore="true"
                       data-form-type="other"
-                      className="mt-2 h-11 w-full border border-[#eadfd7] bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438]"
+                      className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[var(--dashboard-primary)]"
                     />
                   </label>
                   <button
@@ -216,6 +216,8 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
       !value ||
       restaurant.name.toLowerCase().includes(value) ||
       restaurant.slug.toLowerCase().includes(value) ||
+      (restaurant.subdomain ?? "").toLowerCase().includes(value) ||
+      (restaurant.custom_domain ?? "").toLowerCase().includes(value) ||
       (restaurant.email ?? "").toLowerCase().includes(value) ||
       (restaurant.phone ?? "").toLowerCase().includes(value)
     );
@@ -267,7 +269,7 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
         <DataTable
           columns={[
             { label: "Restaurant", key: "name" },
-            { label: "Tenant", key: "slug" },
+            { label: "Adresse publique", key: "slug" },
             { label: "Branches", key: "branches" },
             { label: "Téléphone" },
             { label: "Statut", key: "status" },
@@ -280,9 +282,12 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
           emptyText="Créez d’abord un restaurant ou modifiez la recherche."
         >
           {sortedRestaurants.map((restaurant) => (
-            <tr key={restaurant.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+            <tr key={restaurant.id} className="border-t border-slate-200 hover:bg-slate-50">
               <td className="px-5 py-4 font-black text-[#07133d]">{restaurant.name}</td>
-              <td className="px-5 py-4 font-semibold text-[#64708b]">{restaurant.slug}</td>
+              <td className="px-5 py-4">
+                <p className="font-bold text-[#172033]">{restaurant.subdomain || restaurant.slug}.bloomarone.com</p>
+                <p className="text-xs font-semibold text-[#98a2b3]">slug: {restaurant.slug}</p>
+              </td>
               <td className="px-5 py-4 font-bold text-[#172033]">{Number(restaurant.branches_count || 1)}</td>
               <td className="px-5 py-4 font-semibold text-[#64708b]">{restaurant.phone ?? "-"}</td>
               <td className="px-5 py-4"><StatusBadge status={restaurant.is_active ? "Actif" : "Inactif"} /></td>
@@ -325,6 +330,8 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
           <SettingsPanel title="Restaurant">
             <DetailLine label="Nom" value={detail.restaurant.name} />
             <DetailLine label="Slug" value={detail.restaurant.slug} />
+            <DetailLine label="Sous-domaine" value={detail.restaurant.subdomain ? `${detail.restaurant.subdomain}.bloomarone.com` : "-"} />
+            <DetailLine label="Domaine personnalisé" value={detail.restaurant.custom_domain ?? "-"} />
             <DetailLine label="Téléphone 1" value={detail.restaurant.phone ?? "-"} />
             <DetailLine label="Téléphone 2" value={detail.restaurant.whatsapp_phone ?? "-"} />
             <DetailLine label="Email" value={detail.restaurant.email ?? "Non renseigné"} />
@@ -338,7 +345,7 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
             <DetailLine label="Téléphone" value={detail.owner?.phone ?? "-"} />
             <DetailLine label="Compte" value={detail.owner?.is_active ? "Actif" : "Inactif"} />
             {detail.owner?.id && (
-              <form onSubmit={resetDetailOwnerPassword} className="border-t border-[#eadfd7] pt-4">
+              <form onSubmit={resetDetailOwnerPassword} className="border-t border-slate-200 pt-4">
                 <label className="block">
                   <span className="text-xs font-black uppercase text-[#07133d]">Nouveau mot de passe</span>
                   <input
@@ -351,7 +358,7 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-form-type="other"
-                    className="mt-2 h-11 w-full border border-[#eadfd7] bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438]"
+                    className="mt-2 h-11 w-full border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[var(--dashboard-primary)]"
                   />
                 </label>
                 <button
@@ -482,7 +489,7 @@ export function SuperadminPlatformActivity({ apiBaseUrl, onMessage }) {
           emptyText="Les actions auditées apparaîtront ici."
         >
           {sortedRows.map((row) => (
-            <tr key={row.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+            <tr key={row.id} className="border-t border-slate-200 hover:bg-slate-50">
               <td className="px-5 py-4 font-semibold text-[#64708b]">{formatDateTime(row.created_at)}</td>
               <td className="px-5 py-4 font-bold text-[#172033]">{row.restaurant_name ?? "Plateforme"}</td>
               <td className="px-5 py-4 font-black text-[#07133d]">{row.action}</td>
@@ -581,7 +588,7 @@ export function SuperadminActivation({ apiBaseUrl, restaurants, onRefreshRestaur
         emptyText="Créez d’abord un restaurant."
       >
         {restaurants.map((restaurant) => (
-          <tr key={restaurant.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+          <tr key={restaurant.id} className="border-t border-slate-200 hover:bg-slate-50">
             <td className="px-5 py-4 font-black text-[#07133d]">{restaurant.name}</td>
             <td className="px-5 py-4 font-semibold text-[#64708b]">{restaurant.slug}</td>
             <td className="px-5 py-4"><StatusBadge status={restaurant.is_active ? "Actif" : "Inactif"} /></td>
@@ -667,7 +674,7 @@ export function SuperadminPayments({ apiBaseUrl, onMessage }) {
           emptyText="Configurez les abonnements pour générer le suivi des paiements."
         >
           {sortedRows.map((row) => (
-            <tr key={row.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+            <tr key={row.id} className="border-t border-slate-200 hover:bg-slate-50">
               <td className="px-5 py-4 font-black text-[#07133d]">{row.reference}</td>
               <td className="px-5 py-4">
                 <p className="font-bold text-[#172033]">{row.restaurant_name}</p>
@@ -804,7 +811,7 @@ export function SuperadminSubscriptions({ apiBaseUrl, restaurants, onMessage }) 
             emptyText={restaurants.length ? "Rechargez la page pour synchroniser les tenants." : "Créez d’abord un restaurant."}
           >
             {sortedRows.map((row) => (
-              <tr key={row.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+              <tr key={row.id} className="border-t border-slate-200 hover:bg-slate-50">
                 <td className="px-5 py-4">
                   <p className="font-black text-[#07133d]">{row.restaurant_name}</p>
                   <p className="mt-1 text-xs font-semibold text-[#64708b]">{row.restaurant_slug}</p>
@@ -883,8 +890,8 @@ export function SuperadminPlatform({ apiBaseUrl, restaurants, onMessage, onRefre
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="border border-[#eadfd7] bg-white">
-          <div className="border-b border-[#eadfd7] px-5 py-4">
+        <div className="border border-slate-200 bg-white">
+          <div className="border-b border-slate-200 px-5 py-4">
             <h2 className="font-black text-[#07133d]">État des services</h2>
             <p className="mt-1 text-xs font-semibold text-[#64708b]">
               Dernier contrôle: {overview?.last_checked_at ? formatDateTime(overview.last_checked_at) : "-"}
@@ -903,7 +910,7 @@ export function SuperadminPlatform({ apiBaseUrl, restaurants, onMessage, onRefre
           </div>
         </div>
 
-        <div className="border border-[#eadfd7] bg-[#fffaf5] p-5">
+        <div className="border border-slate-200 bg-slate-50 p-5">
           <h2 className="font-black text-[#07133d]">Capacité actuelle</h2>
           <div className="mt-5 space-y-4">
             <Progress label="Restaurants actifs" value={active} max={Math.max(total, 1)} />
@@ -1133,7 +1140,7 @@ export function SuperadminInstanceRequests({ apiBaseUrl, onMessage, onRefreshRes
         emptyText="Aucune demande d'instance pour ce filtre."
       >
         {requests.map((request) => (
-          <tr key={request.id} className="border-t border-[#eadfd7] hover:bg-[#fffaf5]">
+          <tr key={request.id} className="border-t border-slate-200 hover:bg-slate-50">
             <td className="px-5 py-4 font-black text-[#07133d]">{request.restaurant_name}<p className="text-xs font-semibold text-[#64708b]">{request.business_type || "—"}</p></td>
             <td className="px-5 py-4 font-semibold text-[#64708b]">{request.owner_name}</td>
             <td className="px-5 py-4 font-semibold text-[#64708b]">{request.owner_phone}<p className="text-xs">{request.owner_email || ""}</p></td>

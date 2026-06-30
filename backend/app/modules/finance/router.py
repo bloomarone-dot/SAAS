@@ -337,14 +337,23 @@ def ensure_default_accounting(db: Session, restaurant_id: str) -> dict[str, Acco
             account = AccountingAccount(restaurant_id=restaurant_id, code=code, name=name, type=account_type)
             db.add(account)
             db.flush()
+        else:
+            account.name = name
+            account.type = account_type
+            account.is_active = True
         semantic[key] = account
     journals_by_code = {
         journal.code: journal
         for journal in db.query(AccountingJournal).filter(AccountingJournal.restaurant_id == restaurant_id).all()
     }
     for code, name, journal_type in DEFAULT_JOURNALS:
-        if code not in journals_by_code:
+        journal = journals_by_code.get(code)
+        if not journal:
             db.add(AccountingJournal(restaurant_id=restaurant_id, code=code, name=name, type=journal_type))
+        else:
+            journal.name = name
+            journal.type = journal_type
+            journal.is_active = True
     if not db.query(CashRegister).filter(CashRegister.restaurant_id == restaurant_id).first():
         db.add(CashRegister(restaurant_id=restaurant_id, name="Caisse principale", code="MAIN", account_id=semantic["cash"].id))
     existing_categories = {
@@ -1109,6 +1118,16 @@ def list_journals(current_user: User = Depends(require_tenant_user), db: Session
     ensure_default_accounting(db, current_user.restaurant_id)
     db.commit()
     return db.query(AccountingJournal).filter(AccountingJournal.restaurant_id == current_user.restaurant_id).order_by(AccountingJournal.code.asc()).all()
+
+
+@router.post("/defaults/restore")
+def restore_accounting_defaults(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
+    assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
+    ensure_default_accounting(db, current_user.restaurant_id)
+    db.commit()
+    account_count = db.query(AccountingAccount).filter(AccountingAccount.restaurant_id == current_user.restaurant_id).count()
+    journal_count = db.query(AccountingJournal).filter(AccountingJournal.restaurant_id == current_user.restaurant_id).count()
+    return {"message": "Valeurs comptables par défaut restaurées", "accounts": account_count, "journals": journal_count}
 
 
 @router.post("/journals", status_code=201)

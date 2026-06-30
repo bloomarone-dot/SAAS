@@ -1,7 +1,7 @@
 import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -108,7 +108,18 @@ def superadmin_login(payload: LoginIn, request: Request, db: Session = Depends(g
 def restaurant_login(slug: str, payload: LoginIn, request: Request, db: Session = Depends(get_db)):
     """Connexion dédiée à un restaurant : l'utilisateur doit appartenir à ce restaurant."""
     enforce_rate_limit(request, scope="login", limit=10, window_seconds=300)
-    restaurant = db.query(Restaurant).filter(Restaurant.slug == slug).one_or_none()
+    tenant_key = slug.strip().lower()
+    restaurant = (
+        db.query(Restaurant)
+        .filter(
+            or_(
+                func.lower(Restaurant.slug) == tenant_key,
+                func.lower(Restaurant.subdomain) == tenant_key,
+                func.replace(func.lower(Restaurant.slug), "-", "") == tenant_key,
+            )
+        )
+        .one_or_none()
+    )
     if not restaurant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant introuvable")
     if not restaurant.is_active:

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { DashboardHeader, KpiGrid, Panel } from "../DashboardPrimitives";
 import { DashboardIcon } from "../icons";
+import { DashboardSection, FilterBar, PageContainer, PageHeader, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
@@ -192,10 +192,10 @@ export function CaisseDashboard({ overrides = {} }) {
   const paymentGridClass = activeView === "unpaid-orders" ? "grid gap-4" : "grid gap-4 xl:grid-cols-[0.95fr_1fr]";
 
   const kpis = [
-    { label: "Commandes non payées", value: report.pending_orders_count ?? pendingOrders.length, trend: "À encaisser", icon: "ClipboardList", tone: "green" },
-    { label: "Total encaissé", value: money(report.total_collected), trend: "Service du jour", icon: "Wallet", tone: "green" },
-    { label: "Paiements Mobile Money", value: money(mobileMoneyTotal), trend: "Service du jour", icon: "Phone", tone: "purple" },
-    { label: "Reçus imprimables", value: report.receipts_count ?? receipts.length, trend: "Commandes payées", icon: "ReceiptText", tone: "orange" },
+    { label: "Commandes non payées", value: report.pending_orders_count ?? pendingOrders.length, trend: "À encaisser", icon: "ClipboardList", tone: "warning" },
+    { label: "Total encaissé", value: money(report.total_collected), trend: "Service du jour", icon: "Wallet", tone: "success" },
+    { label: "Mobile Money", value: money(mobileMoneyTotal), trend: "Service du jour", icon: "Phone", tone: "info" },
+    { label: "Reçus imprimables", value: report.receipts_count ?? receipts.length, trend: "Commandes payées", icon: "ReceiptText", tone: "default" },
   ];
 
   async function validatePayment() {
@@ -292,25 +292,41 @@ export function CaisseDashboard({ overrides = {} }) {
   }
 
   return (
-    <section className="space-y-4">
-      <DashboardHeader
+    <PageContainer>
+      <PageHeader
+        eyebrow={adminReviewOnly ? "Administration" : "Caisse"}
         title={adminReviewOnly ? "Suivi caisse" : viewCopy.title}
-        subtitle={adminReviewOnly ? "Consultez les paiements et validez uniquement les annulations de facture." : viewCopy.subtitle || `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""} ! Gérez vos encaissements en toute simplicité.`}
+        subtitle={adminReviewOnly ? "Consultez les paiements et validez uniquement les annulations de facture." : viewCopy.subtitle || `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""}. Gérez les encaissements et les reçus du service.`}
+        primaryAction={!adminReviewOnly && <SecondaryAction icon="ReceiptText" onClick={printCashReport}>Rapport caisse</SecondaryAction>}
+        meta={[
+          <span key="orders">{pendingOrders.length.toLocaleString("fr-FR")} commande(s) à encaisser</span>,
+          <span key="receipts">{receipts.length.toLocaleString("fr-FR")} reçu(s)</span>,
+        ]}
       />
 
-      {showSearch && <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:flex-row md:items-center md:justify-between">
-        <label className="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-lg border border-slate-200 px-3 text-sm">
-          <DashboardIcon name="Search" size={17} className="text-slate-400" />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Rechercher une commande, un client..."
-            className="min-w-0 flex-1 bg-transparent font-semibold outline-none placeholder:text-slate-400"
-          />
-        </label>
-      </div>}
+      {showSearch && (
+        <FilterBar
+          right={isLoading ? <span className="text-xs font-black uppercase text-slate-400">Synchronisation...</span> : null}
+        >
+          <label className="flex h-10 min-w-[240px] flex-1 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 text-sm focus-within:border-emerald-600">
+            <DashboardIcon name="Search" size={17} className="text-slate-400" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Rechercher une commande, un client..."
+              className="min-w-0 flex-1 bg-transparent font-semibold outline-none placeholder:text-slate-400"
+            />
+          </label>
+        </FilterBar>
+      )}
 
-      {showKpis && <KpiGrid kpis={kpis} />}
+      {showKpis && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {kpis.map((item) => (
+            <StatCard key={item.label} {...item} />
+          ))}
+        </div>
+      )}
 
       {message && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">
@@ -319,18 +335,18 @@ export function CaisseDashboard({ overrides = {} }) {
       )}
 
       {!adminReviewOnly && paymentRequests.length > 0 && (
-        <Panel title="Demandes de paiement (serveurs)" link={`${paymentRequests.length} en attente`}>
+        <DashboardSection title="Demandes de paiement serveur" action={<SmallMeta>{paymentRequests.length} en attente</SmallMeta>}>
           <PaymentRequestsList
             requests={paymentRequests}
             actionId={requestActionId}
             onValidate={validatePaymentRequest}
             onReject={rejectPaymentRequest}
           />
-        </Panel>
+        </DashboardSection>
       )}
 
       {showPaymentArea && <div className={paymentGridClass}>
-        <Panel title="Commandes à encaisser" link={`${pendingOrders.length} en attente`}>
+        <DashboardSection title="Commandes à encaisser" action={<SmallMeta>{pendingOrders.length} en attente</SmallMeta>}>
           <OrdersTable
             orders={pendingOrders}
             selectedOrderId={selectedOrder?.id}
@@ -339,9 +355,9 @@ export function CaisseDashboard({ overrides = {} }) {
               setDiscount(order.discount_amount ? String(order.discount_amount) : "");
             }}
           />
-        </Panel>
+        </DashboardSection>
 
-        {activeView !== "unpaid-orders" && <Panel title="Détail de la commande" action={selectedOrder?.order_number ?? "Aucune"}>
+        {activeView !== "unpaid-orders" && <DashboardSection title="Détail de la commande" action={<SmallMeta>{selectedOrder?.order_number ?? "Aucune"}</SmallMeta>}>
           {selectedOrder ? (
             <div>
               <OrderDetail order={selectedOrder} discountPreview={discount} />
@@ -420,11 +436,11 @@ export function CaisseDashboard({ overrides = {} }) {
           ) : (
             <EmptyState text="Aucune commande prête ou servie à encaisser." />
           )}
-        </Panel>}
+        </DashboardSection>}
       </div>}
 
       {showClosingArea && <div className="grid gap-4 xl:grid-cols-[0.72fr_1.28fr]">
-        <Panel title="Clôture de caisse">
+        <DashboardSection title="Clôture de caisse">
           <div className="rounded-lg bg-emerald-50 p-5">
             <p className="text-sm font-semibold text-slate-600">Total du service aujourd'hui</p>
             <p className="mt-2 text-3xl font-black text-slate-950">{money(report.total_collected)}</p>
@@ -444,10 +460,10 @@ export function CaisseDashboard({ overrides = {} }) {
           <button type="button" onClick={printCashReport} className="mt-5 h-11 w-full rounded-lg bg-emerald-700 font-black text-white">
             Générer rapport de caisse
           </button>
-        </Panel>
+        </DashboardSection>
 
         {showReceiptArea ? (
-        <Panel title="Derniers reçus" action={selectedReceipt?.order_number ?? ""}>
+        <DashboardSection title="Derniers reçus" action={<SmallMeta>{selectedReceipt?.order_number ?? ""}</SmallMeta>}>
           <ReceiptsTable
             receipts={receipts}
             selectedReceiptId={selectedReceipt?.id}
@@ -457,16 +473,16 @@ export function CaisseDashboard({ overrides = {} }) {
             isLoading={isLoading}
             adminReviewOnly={adminReviewOnly}
           />
-        </Panel>
+        </DashboardSection>
         ) : (
-          <Panel title="Totaux par mode de paiement">
+          <DashboardSection title="Totaux par mode de paiement">
             <PaymentTotals rows={report.by_payment_method ?? {}} />
-          </Panel>
+          </DashboardSection>
         )}
       </div>}
 
       {showReceiptArea && !showClosingArea && (
-        <Panel title={activeView === "cancel-payment" ? "Annuler un paiement" : "Derniers reçus"} action={selectedReceipt?.order_number ?? ""}>
+        <DashboardSection title={activeView === "cancel-payment" ? "Annuler un paiement" : "Derniers reçus"} action={<SmallMeta>{selectedReceipt?.order_number ?? ""}</SmallMeta>}>
           <ReceiptsTable
             receipts={receipts}
             selectedReceiptId={selectedReceipt?.id}
@@ -476,7 +492,7 @@ export function CaisseDashboard({ overrides = {} }) {
             isLoading={isLoading}
             adminReviewOnly={adminReviewOnly}
           />
-        </Panel>
+        </DashboardSection>
       )}
 
       {mobilePaymentOrder && (
@@ -506,14 +522,14 @@ export function CaisseDashboard({ overrides = {} }) {
           </div>
         </div>
       )}
-    </section>
+    </PageContainer>
   );
 }
 
 function getCashierViewCopy(view) {
   const copy = {
-    dashboard: ["Dashboard Caissier", ""],
-    cashier: ["Dashboard Caissier", ""],
+    dashboard: ["Tableau de bord Caissier", ""],
+    cashier: ["Tableau de bord Caissier", ""],
     payments: ["Tous les paiements", "Encaissez les commandes prêtes et consultez les paiements reçus, annulés ou en attente."],
     "completed-payments": ["Paiements effectués", "Consultez uniquement les paiements validés et réellement encaissés."],
     "unpaid-orders": ["Commandes non payées", "Liste des commandes prêtes ou servies en attente d'encaissement."],
@@ -554,6 +570,15 @@ function PaymentTotals({ rows }) {
         <span className="text-lg font-black text-emerald-900">{money(total)}</span>
       </div>
     </div>
+  );
+}
+
+function SmallMeta({ children }) {
+  if (!children) return null;
+  return (
+    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase text-slate-500">
+      {children}
+    </span>
   );
 }
 

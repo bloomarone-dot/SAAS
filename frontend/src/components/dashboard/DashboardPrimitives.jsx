@@ -273,7 +273,7 @@ export function BarChart() {
 export function SummaryCard({ label, value, trend, tone }) {
   const styles = tone === "green" ? "bg-emerald-50 text-emerald-600" : "bg-orange-50 text-[#f04438]";
   return (
-    <div className={`rounded-xl p-5 ${styles}`}>
+    <div className={`rounded-lg p-5 ${styles}`}>
       <p className="text-sm font-black">{label}</p>
       <p className="mt-3 text-lg font-black text-slate-950">{value}</p>
       <p className="mt-1 text-xs font-black">{trend}</p>

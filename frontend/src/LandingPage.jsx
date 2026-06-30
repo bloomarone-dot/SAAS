@@ -42,8 +42,7 @@ export default function LandingPage({ apiBaseUrl }) {
   }
 
   function goToSuperadmin() {
-    window.history.pushState({}, "", "/superadmin/login");
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    goToLogin();
   }
 
   function handleNotify(e) {
@@ -77,7 +76,7 @@ export default function LandingPage({ apiBaseUrl }) {
               onClick={goToLogin}
               className="hidden text-sm font-bold text-slate-700 hover:text-emerald-600 transition sm:block"
             >
-              Se Connecter
+              Se connecter
             </button>
             <button
               onClick={goToRegister}
@@ -101,7 +100,7 @@ export default function LandingPage({ apiBaseUrl }) {
               <button onClick={() => scrollTo("features")} className="text-left hover:text-emerald-600">Fonctionnalités</button>
               <button onClick={() => scrollTo("pricing")} className="text-left hover:text-emerald-600">Tarifs</button>
               <button onClick={() => scrollTo("testimonials")} className="text-left hover:text-emerald-600">Témoignages</button>
-              <button onClick={goToLogin} className="text-left hover:text-emerald-600">Se Connecter</button>
+              <button onClick={goToLogin} className="text-left hover:text-emerald-600">Se connecter</button>
             </nav>
           </div>
         )}
@@ -133,14 +132,14 @@ export default function LandingPage({ apiBaseUrl }) {
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <button
               onClick={goToRegister}
-              className="inline-flex h-14 items-center gap-3 rounded-xl bg-emerald-500 px-8 text-base font-black text-white shadow-2xl shadow-emerald-500/30 hover:bg-emerald-400 transition"
+              className="inline-flex h-14 items-center gap-3 rounded-lg bg-emerald-500 px-8 text-base font-black text-white shadow-2xl shadow-emerald-500/30 hover:bg-emerald-400 transition"
             >
               Créer Mon Compte Gratuit
               <ArrowRight size={18} />
             </button>
             <button
               onClick={() => scrollTo("features")}
-              className="inline-flex h-14 items-center gap-3 rounded-xl border border-white/20 bg-white/5 px-8 text-base font-black text-white backdrop-blur hover:bg-white/10 transition"
+              className="inline-flex h-14 items-center gap-3 rounded-lg border border-white/20 bg-white/5 px-8 text-base font-black text-white backdrop-blur hover:bg-white/10 transition"
             >
               Voir la Démo
             </button>
@@ -153,7 +152,7 @@ export default function LandingPage({ apiBaseUrl }) {
               { value: "0 FCFA", label: "GRATUIT\nPendant le lancement" },
               { value: "24/7", label: "Support en français" },
             ].map(({ value, label }) => (
-              <div key={label} className="rounded-xl border border-white/10 bg-white/5 px-4 py-5">
+              <div key={label} className="rounded-lg border border-white/10 bg-white/5 px-4 py-5">
                 <p className="text-2xl font-black text-emerald-400">{value}</p>
                 <p className="mt-1 text-xs font-semibold whitespace-pre-line text-slate-400">{label}</p>
               </div>
@@ -200,9 +199,9 @@ export default function LandingPage({ apiBaseUrl }) {
             ].map(({ icon, title, desc }) => (
               <div
                 key={title}
-                className="group rounded-2xl border border-slate-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:border-emerald-200 hover:shadow-lg"
+                className="group rounded-lg border border-slate-100 bg-white p-7 shadow-sm transition hover:-translate-y-1 hover:border-emerald-200 hover:shadow-lg"
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition">
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition">
                   {icon}
                 </div>
                 <h3 className="mt-5 text-base font-black text-slate-900">{title}</h3>
@@ -239,7 +238,7 @@ export default function LandingPage({ apiBaseUrl }) {
                 role: "Directrice, Saveurs d'Afrique — Bafoussam",
               },
             ].map(({ quote, name, role }) => (
-              <div key={name} className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+              <div key={name} className="rounded-lg border border-slate-200 bg-white p-7 shadow-sm">
                 <div className="flex gap-1 text-amber-400">
                   {[...Array(5)].map((_, i) => <Star key={i} size={15} fill="currentColor" />)}
                 </div>
@@ -274,7 +273,7 @@ export default function LandingPage({ apiBaseUrl }) {
 
           <div className="mt-14 grid gap-6 md:grid-cols-3">
             {/* Starter */}
-            <div className="relative rounded-2xl border-2 border-emerald-500 bg-white p-8 shadow-xl shadow-emerald-100">
+            <div className="relative rounded-lg border-2 border-emerald-500 bg-white p-8 shadow-xl shadow-emerald-100">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                 <span className="rounded-full bg-emerald-500 px-4 py-1 text-xs font-black text-white">DISPONIBLE MAINTENANT</span>
               </div>
@@ -294,14 +293,14 @@ export default function LandingPage({ apiBaseUrl }) {
               </ul>
               <button
                 onClick={goToRegister}
-                className="mt-8 w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-black text-white hover:bg-emerald-700 transition"
+                className="mt-8 w-full rounded-lg bg-emerald-600 py-3.5 text-sm font-black text-white hover:bg-emerald-700 transition"
               >
                 Créer Mon Compte
               </button>
             </div>
 
             {/* Pro */}
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-8">
               <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-700">
                 <TrendingUp size={12} />
                 BIENTÔT DISPONIBLE
@@ -341,7 +340,7 @@ export default function LandingPage({ apiBaseUrl }) {
             </div>
 
             {/* Enterprise */}
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-8">
               <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-slate-200 px-3 py-1 text-xs font-black text-slate-600">
                 BIENTÔT DISPONIBLE
               </div>
@@ -360,7 +359,7 @@ export default function LandingPage({ apiBaseUrl }) {
               </ul>
               <a
                 href="mailto:contact@bloomarone.com"
-                className="mt-8 block w-full rounded-xl border border-slate-300 bg-white py-3.5 text-center text-sm font-black text-slate-700 hover:bg-slate-50 transition"
+                className="mt-8 block w-full rounded-lg border border-slate-300 bg-white py-3.5 text-center text-sm font-black text-slate-700 hover:bg-slate-50 transition"
               >
                 Contactez-nous
               </a>
@@ -392,7 +391,7 @@ export default function LandingPage({ apiBaseUrl }) {
           </h2>
           <button
             onClick={goToRegister}
-            className="mt-10 inline-flex h-14 items-center gap-3 rounded-xl bg-white px-10 text-base font-black text-emerald-700 shadow-xl hover:bg-emerald-50 transition"
+            className="mt-10 inline-flex h-14 items-center gap-3 rounded-lg bg-white px-10 text-base font-black text-emerald-700 shadow-xl hover:bg-emerald-50 transition"
           >
             CRÉER MON COMPTE GRATUIT
             <ArrowRight size={18} />

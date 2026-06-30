@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { TableFooter } from "@/modules/admin/components/AdminUi";
+import { PageHeader, TableFooter } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { validationFor } from "@/utils/validation";
 import { formatApiError } from "@/utils/network";
@@ -117,17 +117,17 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, focusCreate = false }) {
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
-        <div>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Branches</h1>
-        </div>
-        {!showCreateForm && (
+      <PageHeader
+        eyebrow="Administration"
+        title="Branches"
+        subtitle="Gérez les points de vente, leurs coordonnées et leur statut opérationnel."
+        primaryAction={!showCreateForm && (
           <button type="button" onClick={() => setShowCreateForm(true)} className="lte-btn lte-btn-primary">
             <DashboardIcon name="Plus" size={17} />
             Créer une branche
           </button>
         )}
-      </div>
+      />
 
       <div className={`grid gap-6 ${showCreateForm ? "xl:grid-cols-[0.8fr_1.2fr]" : "xl:grid-cols-1"}`}>
         {showCreateForm && (

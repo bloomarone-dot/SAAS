@@ -60,9 +60,9 @@ export function LoginPanel({ value, onChange, onSubmit, isLoading, message, onFo
             <img
               src={logoImage}
               alt="Logo Le Bon Coin"
-              className="mx-auto mb-5 h-16 w-16 rounded-xl object-cover shadow-sm ring-1 ring-emerald-100 lg:hidden"
+              className="mx-auto mb-5 h-16 w-16 rounded-lg object-cover shadow-sm ring-1 ring-emerald-100 lg:hidden"
             />
-            <h2 className="mb-3 text-4xl font-black text-[#003f2f]">
+            <h2 className="mb-3 text-3xl font-black text-[#003f2f]">
               Le Bon Coin
             </h2>
             <p className="text-sm leading-relaxed text-slate-500">
@@ -74,7 +74,7 @@ export function LoginPanel({ value, onChange, onSubmit, isLoading, message, onFo
             onSubmit={onSubmit}
             autoComplete="off"
             data-lpignore="true"
-            className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+            className="space-y-5 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
           >
             <label className="block">
               <span className="mb-2 block text-xs font-black text-slate-700">
@@ -150,7 +150,7 @@ export function LoginPanel({ value, onChange, onSubmit, isLoading, message, onFo
           </form>
 
           {message && (
-            <p className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+            <p className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
               {message}
             </p>
           )}

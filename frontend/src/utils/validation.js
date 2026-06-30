@@ -3,11 +3,12 @@ const PATTERNS = {
   personName: "[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '\\-]{1,79}",
   username: "[a-zA-Z0-9\\._\\-]{3,50}",
   slug: "[a-z0-9]+(?:-[a-z0-9]+)*",
+  subdomain: "[a-z0-9](?:[a-z0-9-]{0,118}[a-z0-9])?",
   phone: "\\+?[0-9 \\(\\)\\-]{5,30}",
   currency: "[A-Za-z]{3}",
   timezone: "[A-Za-z_]+/[A-Za-z0-9_\\+\\-\\/]+",
-  url: "https?://.+",
-  password: "(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{10,128}",
+  url: "(https?://.+|/.+)",
+  password: "(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,128}",
 };
 
 export const validationAttrs = {
@@ -35,6 +36,12 @@ export const validationAttrs = {
     maxLength: 80,
     title: "Utilisez des minuscules, chiffres et tirets, sans espace.",
   },
+  subdomain: {
+    pattern: PATTERNS.subdomain,
+    minLength: 2,
+    maxLength: 120,
+    title: "Utilisez des minuscules, chiffres et tirets, sans espace ni point.",
+  },
   phone: {
     pattern: PATTERNS.phone,
     minLength: 5,
@@ -57,13 +64,13 @@ export const validationAttrs = {
     pattern: PATTERNS.url,
     maxLength: 500,
     inputMode: "url",
-    title: "Entrez une URL complète commençant par http:// ou https://.",
+    title: "Entrez une URL commençant par http://, https:// ou /uploads/.",
   },
   password: {
     pattern: PATTERNS.password,
-    minLength: 10,
+    minLength: 8,
     maxLength: 128,
-    title: "Utilisez au moins 10 caractères avec minuscule, majuscule, chiffre et symbole.",
+    title: "Utilisez au moins 8 caractères avec minuscule, majuscule, chiffre et symbole.",
   },
   positiveNumber: {
     min: "0",
@@ -89,6 +96,7 @@ export function validationFor(name, fallback = {}) {
     username: validationAttrs.username,
     owner_username: validationAttrs.username,
     slug: validationAttrs.slug,
+    subdomain: validationAttrs.subdomain,
     phone: validationAttrs.phone,
     owner_phone: validationAttrs.phone,
     owner_alt_phone: validationAttrs.phone,
@@ -98,6 +106,7 @@ export function validationFor(name, fallback = {}) {
     website_url: validationAttrs.url,
     image_url: validationAttrs.url,
     logo_url: validationAttrs.url,
+    cover_image_url: validationAttrs.url,
     password: validationAttrs.password,
     owner_password: validationAttrs.password,
   };

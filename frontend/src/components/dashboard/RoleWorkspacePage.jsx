@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "./icons";
 import { apiFetch } from "@/config/http";
-import { EmptyState, PrimaryAction, SearchBox, SecondaryAction, StatusPill } from "@/modules/admin/components/AdminUi";
+import { DashboardSection, EmptyState, FilterBar, PageContainer, PageHeader, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill } from "@/modules/admin/components/AdminUi";
 
 const money = (value, currency = "FCFA") => `${Number(value || 0).toLocaleString("fr-FR")} ${currency}`;
 
@@ -84,7 +84,7 @@ const pageMeta = {
   "cash-report": ["Rapport de caisse", "Analysez les encaissements par mode de paiement.", "Exporter"],
   "payment-totals": ["Totaux par mode de paiement", "Comparez espèces, Mobile Money et carte.", "Exporter"],
   "payment-history": ["Historique encaissements", "Retrouvez tous les paiements avec filtres.", "Exporter"],
-  "create-stock-product": ["Création produit stock", "Ajoutez un produit avec unité, seuil et prix d’achat.", "Créer produit"],
+  "create-stock-product": ["Création produit stock", "Ajoutez un produit avec unité, seuil et paramètres d’alerte.", "Créer produit"],
   "stock-in": ["Entrée stock", "Enregistrez une livraison ou un achat stock.", "Enregistrer"],
   "stock-out": ["Sortie stock", "Déduisez les consommations cuisine, bar ou pertes.", "Enregistrer"],
   transfer: ["Transfert entre rayons", "Transférez magasin, cuisine et boisson avec traçabilité.", "Transférer"],
@@ -183,22 +183,19 @@ export function RoleWorkspacePage({ role, view, overrides = {} }) {
   }
 
   return (
-    <section className="space-y-5">
+    <PageContainer>
       <PageHero role={role} title={meta[0]} subtitle={meta[1]} action={meta[2]} />
       <KpiStrip role={role} view={view} overrides={overrides} />
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-bold text-red-600">{error}</div>}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <SearchBox value={query} onChange={setQuery} placeholder="Rechercher par référence, statut, client, produit..." />
-          <div className="flex flex-wrap gap-2">
-            {["Tous", "Actifs", "En attente", "Critiques"].map((label) => (
-              <SecondaryAction key={label} icon={label === "Tous" ? "SlidersHorizontal" : undefined}>{label}</SecondaryAction>
-            ))}
-          </div>
-        </div>
-      </div>
+      <FilterBar
+        right={["Tous", "Actifs", "En attente", "Critiques"].map((label) => (
+          <SecondaryAction key={label} icon={label === "Tous" ? "SlidersHorizontal" : undefined}>{label}</SecondaryAction>
+        ))}
+      >
+        <SearchBox value={query} onChange={setQuery} placeholder="Rechercher par référence, statut, client, produit..." />
+      </FilterBar>
       {isLoading ? <LoadingPanel /> : <ResponsiveTable rows={rows} />}
-    </section>
+    </PageContainer>
   );
 }
 
@@ -208,14 +205,14 @@ export function roleWorkspaceSupports(view) {
 
 function PageHero({ role, title, subtitle, action }) {
   return (
-    <div className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center">
-      <div>
-        <h1 className="mt-2 text-2xl font-black text-[var(--dashboard-secondary)] md:text-3xl">{title}</h1>
-      </div>
-      {action && action !== "Actualiser" && (
+    <PageHeader
+      eyebrow={roleCopy[role] ?? role}
+      title={title}
+      subtitle={subtitle}
+      primaryAction={action && action !== "Actualiser" ? (
         <PrimaryAction icon={action?.includes("Exporter") ? "Download" : "Plus"}>{action}</PrimaryAction>
-      )}
-    </div>
+      ) : null}
+    />
   );
 }
 
@@ -229,18 +226,7 @@ function KpiStrip({ role, view, overrides }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {kpis.map(([label, value, icon, trend]) => (
-        <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-bold text-slate-500">{label}</p>
-              <p className="mt-2 text-2xl font-black text-slate-950">{value}</p>
-              <p className="mt-2 text-xs font-black text-emerald-600">{trend}</p>
-            </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-emerald-50 text-[var(--dashboard-primary)]">
-              <DashboardIcon name={icon} size={20} />
-            </div>
-          </div>
-        </div>
+        <StatCard key={label} label={label} value={value} icon={icon} trend={trend} tone={label.includes("Alertes") ? "warning" : "success"} />
       ))}
     </div>
   );
@@ -249,7 +235,7 @@ function KpiStrip({ role, view, overrides }) {
 function ResponsiveTable({ rows }) {
   if (!rows.length) return <EmptyState title="Aucune donnée" text="Les éléments apparaîtront ici après synchronisation." />;
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
         <table className="lte-table min-w-[760px]">
           <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
@@ -291,33 +277,34 @@ function ResponsiveTable({ rows }) {
 
 function FormMock({ role, view, meta }) {
   return (
-    <section className="space-y-5">
+    <PageContainer>
       <PageHero role={role} title={meta[0]} subtitle={meta[1]} action={meta[2]} />
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <FormSection title="Informations générales" fields={formFields(view).slice(0, 4)} />
-          <FormSection title="Paramètres avancés" fields={formFields(view).slice(4)} />
+        <DashboardSection title="Formulaire" description="Saisissez les informations principales, puis validez l’action.">
+          <div className="space-y-5">
+          <MockFormSection title="Informations générales" fields={formFields(view).slice(0, 4)} />
+          <MockFormSection title="Paramètres avancés" fields={formFields(view).slice(4)} />
           <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
             <SecondaryAction>Annuler</SecondaryAction>
             <PrimaryAction icon="CheckCircle2">{meta[2]}</PrimaryAction>
           </div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-base font-black text-[var(--dashboard-secondary)]">Aperçu</h2>
-          <div className="mt-4 rounded-xl bg-slate-50 p-5">
+          </div>
+        </DashboardSection>
+        <DashboardSection title="Aperçu">
+          <div className="mt-4 rounded-lg bg-slate-50 p-5">
             <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-emerald-50 text-[var(--dashboard-primary)]">
               <DashboardIcon name="Store" size={24} />
             </div>
             <p className="mt-4 text-xl font-black text-slate-950">Le Bon Coin</p>
             <p className="mt-2 text-sm font-medium text-slate-500">Les données saisies seront envoyées au module métier correspondant lorsqu’une action dédiée est disponible.</p>
           </div>
-        </div>
+        </DashboardSection>
       </div>
-    </section>
+    </PageContainer>
   );
 }
 
-function FormSection({ title, fields }) {
+function MockFormSection({ title, fields }) {
   return (
     <div>
       <h2 className="text-base font-black text-[var(--dashboard-secondary)]">{title}</h2>
@@ -335,12 +322,12 @@ function FormSection({ title, fields }) {
 
 function DetailMock({ role, view, meta, rows }) {
   return (
-    <section className="space-y-5">
+    <PageContainer>
       <PageHero role={role} title={meta[0]} subtitle={meta[1]} action={meta[2]} />
       <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <DashboardSection title="Résumé">
           <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-emerald-50 text-[var(--dashboard-primary)]">
+            <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-emerald-50 text-[var(--dashboard-primary)]">
               <DashboardIcon name="Store" size={28} />
             </div>
             <div>
@@ -356,21 +343,20 @@ function DetailMock({ role, view, meta, rows }) {
               </div>
             ))}
           </div>
-        </div>
+        </DashboardSection>
         <ResponsiveTable rows={rows} />
       </div>
-    </section>
+    </PageContainer>
   );
 }
 
 function ReportMock({ role, view, meta, rows }) {
   return (
-    <section className="space-y-5">
+    <PageContainer>
       <PageHero role={role} title={meta[0]} subtitle={meta[1]} action={meta[2]} />
       <KpiStrip role={role} view={view} />
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-base font-black text-[var(--dashboard-secondary)]">Évolution par période</h2>
+        <DashboardSection title="Évolution par période">
           <div className="mt-6 flex h-64 items-end gap-3">
             {[48, 72, 61, 88, 75, 96, 83].map((height, index) => (
               <div key={index} className="flex flex-1 flex-col items-center gap-2">
@@ -379,25 +365,25 @@ function ReportMock({ role, view, meta, rows }) {
               </div>
             ))}
           </div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-base font-black text-[var(--dashboard-secondary)]">Exports</h2>
+        </DashboardSection>
+        <DashboardSection title="Exports">
           <div className="mt-4 grid gap-3">
             <SecondaryAction icon="FileText">Exporter en PDF</SecondaryAction>
             <SecondaryAction icon="Download">Exporter en Excel</SecondaryAction>
             <SecondaryAction icon="CalendarDays">Période personnalisée</SecondaryAction>
           </div>
-        </div>
+        </DashboardSection>
       </div>
       <ResponsiveTable rows={rows} />
-    </section>
+    </PageContainer>
   );
 }
 
 function StateScreen({ view, meta }) {
   const icon = view === "denied" ? "ShieldCheck" : view === "network" ? "Cloud" : "Activity";
   return (
-    <section className="flex min-h-[calc(100vh-140px)] items-center justify-center rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+    <PageContainer className="flex min-h-[calc(100vh-140px)] items-center justify-center">
+    <section className="w-full rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
       <div className="max-w-lg">
         <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50 text-[var(--dashboard-primary)]">
           <DashboardIcon name={icon} size={42} />
@@ -410,6 +396,7 @@ function StateScreen({ view, meta }) {
         </div>
       </div>
     </section>
+    </PageContainer>
   );
 }
 
@@ -421,7 +408,7 @@ function filterRows(rows, query) {
 
 function LoadingPanel() {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
     </div>
   );
@@ -626,6 +613,7 @@ function getPageType(view) {
 function formFields(view) {
   if (view.includes("user")) return ["Prénom", "Nom", "Email", "Téléphone", "Rôle", "Branche", "Mot de passe", "Permissions"];
   if (view.includes("restaurant") || view.includes("branch")) return ["Nom", "Slug", "Adresse", "Ville", "Téléphone", "Email", "Responsable", "Plan"];
+  if (view === "create-stock-product") return ["Produit", "Catégorie", "Unité", "Seuil d’alerte", "Emplacement", "Fournisseur", "Description", "Notes"];
   if (view.includes("stock") || ["transfer", "inventory", "thresholds", "production", "ingredients", "damages"].includes(view)) return ["Produit", "Catégorie", "Quantité", "Unité", "Prix unitaire", "Fournisseur", "Emplacement", "Justification"];
   if (["cash", "mobile", "card", "payment-method", "discounts"].includes(view)) return ["Commande", "Montant", "Mode de paiement", "Référence", "Remise", "Motif", "Client", "Notes"];
   return ["Titre", "Catégorie", "Statut", "Période", "Responsable", "Montant", "Description", "Notes"];

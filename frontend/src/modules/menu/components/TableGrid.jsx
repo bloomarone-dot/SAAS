@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardIcon } from '@/components/dashboard/icons';
+import { DashboardSection, FilterBar } from '@/modules/admin/components/AdminUi';
 import { useAutoRefresh } from '@/utils/useAutoRefresh';
 import { validationFor } from '@/utils/validation';
 import { tableApi } from '../services/tableApi';
@@ -88,26 +89,31 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
   if (loading) return <div className="p-6 text-sm font-semibold text-slate-500">Chargement du plan de salle...</div>;
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+    <DashboardSection
+      title="Plan des tables"
+      description="Vue salle avec disponibilité, occupation et accès rapide aux commandes."
+    >
+      <FilterBar
+        right={
+          <div className="flex flex-wrap gap-2">
+            <select value={roomFilter} onChange={(event) => setRoomFilter(event.target.value)} className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm">
+              <option value="ALL">Toutes les salles</option>
+              {rooms.map((room) => <option key={room} value={room}>{room}</option>)}
+            </select>
+            {!readOnly && (
+              <button type="button" onClick={() => setShowForm((value) => !value)} className="lte-btn lte-btn-primary">
+                <DashboardIcon name="Plus" size={15} /> Table
+              </button>
+            )}
+          </div>
+        }
+      >
         <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
-          <h2 className="text-xl font-black text-[#070528]">Plan des tables</h2>
           <Legend color="bg-emerald-600" label="Libre" />
           <Legend color="bg-orange-600" label="Occupée" />
           <Legend color="bg-amber-400" label="En attente d'addition" />
         </div>
-        <div className="flex gap-2">
-          <select value={roomFilter} onChange={(event) => setRoomFilter(event.target.value)} className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm">
-            <option value="ALL">Toutes les salles</option>
-            {rooms.map((room) => <option key={room} value={room}>{room}</option>)}
-          </select>
-          {!readOnly && (
-          <button type="button" onClick={() => setShowForm((value) => !value)} className="lte-btn lte-btn-primary">
-            <DashboardIcon name="Plus" size={15} /> Table
-          </button>
-          )}
-        </div>
-      </div>
+      </FilterBar>
 
       {showForm && !readOnly && (
         <form onSubmit={createTable} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_180px_140px_auto]">
@@ -161,7 +167,7 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>}
 
       <div className="overflow-x-auto">
-        <div className="relative min-h-[450px] min-w-[920px] overflow-hidden border-[3px] border-slate-400 bg-white">
+        <div className="relative min-h-[450px] min-w-[920px] overflow-hidden rounded-lg border border-slate-300 bg-white">
           <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:120px_120px]" />
           <div className="absolute left-0 top-0 h-full w-12 border-r border-slate-200 bg-stone-100/80" />
           <div className="absolute bottom-0 left-[22%] h-10 w-44 border-x border-t border-stone-300 bg-stone-100 text-center text-sm font-black leading-10 text-slate-600">Entrée</div>
@@ -190,7 +196,7 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
           )}
         </div>
       </div>
-    </div>
+    </DashboardSection>
   );
 }
 

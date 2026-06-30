@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { DashboardSection, FilterBar, PageContainer, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { formatApiError } from "@/utils/network";
 
@@ -8,34 +9,36 @@ import { formatApiError } from "@/utils/network";
 // Extrait de SuperadminSections.jsx pour reduire la taille du composant.
 
 export function AdminSurface({ eyebrow, title, description, actionLabel, onAction, actions, children }) {
+  const action = actions ?? (actionLabel ? (
+    <button type="button" onClick={onAction} className="lte-btn lte-btn-primary">
+      {actionLabel}
+    </button>
+  ) : null);
+
   return (
-    <section className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-4xl font-black text-[#07133d]">{title}</h1>
-        </div>
-        {actions ?? (actionLabel ? (
-          <button type="button" onClick={onAction} className="h-11 bg-[#07133d] px-5 text-sm font-black text-white transition-all hover:bg-[#172554]">
-            {actionLabel}
-          </button>
-        ) : null)}
-      </div>
+    <PageContainer>
+      <PageHeader
+        eyebrow={eyebrow}
+        title={title}
+        subtitle={description}
+        primaryAction={action}
+      />
       {children}
-    </section>
+    </PageContainer>
   );
 }
 
 export function Toolbar({ children }) {
   return (
-    <div className="grid gap-3 border border-[#eadfd7] bg-white p-4 shadow-[0_14px_40px_rgba(15,23,42,0.04)] xl:grid-cols-[1fr_repeat(3,auto)]">
+    <FilterBar>
       {children}
-    </div>
+    </FilterBar>
   );
 }
 
 export function SearchBox({ value, onChange, placeholder }) {
   return (
-    <label className="flex h-11 items-center gap-3 border border-[#eadfd7] bg-white px-4">
+    <label className="flex h-11 min-w-[260px] flex-1 items-center gap-3 rounded-lg border border-slate-200 bg-white px-4">
       <DashboardIcon name="Search" size={18} className="text-[#667085]" />
       <input
         value={value}
@@ -49,7 +52,7 @@ export function SearchBox({ value, onChange, placeholder }) {
 
 export function FilterSelect({ value, onChange, options }) {
   return (
-    <label className="flex h-11 items-center gap-3 border border-[#eadfd7] bg-white px-4">
+    <label className="flex h-11 items-center gap-3 rounded-lg border border-slate-200 bg-white px-4">
       <DashboardIcon name="SlidersHorizontal" size={18} className="text-[#f04438]" />
       <select
         value={value}
@@ -68,7 +71,7 @@ export function FilterSelect({ value, onChange, options }) {
 
 export function Metric({ label, value }) {
   return (
-    <div className="min-w-[120px] border border-[#eadfd7] px-4 py-2 text-center text-xs font-black">
+    <div className="min-w-[120px] rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-center text-xs font-black">
       <p className="text-[#98a2b3]">{label}</p>
       <p className="mt-1 text-base text-[#07133d]">{value}</p>
     </div>
@@ -76,29 +79,17 @@ export function Metric({ label, value }) {
 }
 
 export function MetricCard({ icon, label, value }) {
-  return (
-    <div className="border border-[#eadfd7] bg-white p-5">
-      <div className="flex items-center gap-4">
-        <div className="flex h-11 w-11 items-center justify-center bg-[#fff4ed] text-[#f04438]">
-          <DashboardIcon name={icon} size={22} />
-        </div>
-        <div>
-          <p className="text-xs font-black uppercase text-[#98a2b3]">{label}</p>
-          <p className="mt-1 text-2xl font-black text-[#07133d]">{value}</p>
-        </div>
-      </div>
-    </div>
-  );
+  return <StatCard icon={icon} label={label} value={value} tone="info" />;
 }
 
 export function DataTable({ columns, sort, onSort, emptyTitle, emptyText, children }) {
   const hasRows = Array.isArray(children) ? children.length > 0 : Boolean(children);
 
   return (
-    <div className="overflow-hidden border border-[#eadfd7] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
         <table className="lte-table min-w-[860px]">
-          <thead className="bg-[#fffaf5] text-xs font-black uppercase text-[#9a3412]">
+          <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
             <tr>
               {columns.map((column) => {
                 const config = typeof column === "string" ? { label: column } : column;
@@ -140,7 +131,7 @@ export function StatusBadge({ status }) {
         ? "bg-amber-100 text-amber-700"
         : "bg-slate-100 text-slate-600";
 
-  return <span className={`px-3 py-1 text-xs font-black ${className}`}>{status}</span>;
+  return <span className={`rounded-md px-3 py-1 text-xs font-black ${className}`}>{status}</span>;
 }
 
 export function TableAction({ label, onClick }) {
@@ -148,7 +139,7 @@ export function TableAction({ label, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="border border-[#eadfd7] px-3 py-1.5 text-xs font-black text-[#172033] hover:border-[#f04438] hover:text-[#f04438]"
+      className="lte-btn lte-btn-default lte-btn-sm"
     >
       {label}
     </button>
@@ -157,16 +148,15 @@ export function TableAction({ label, onClick }) {
 
 export function SettingsPanel({ title, children }) {
   return (
-    <div className="border border-[#eadfd7] bg-white p-5">
-      <h2 className="font-black text-[#07133d]">{title}</h2>
-      <div className="mt-5 space-y-4">{children}</div>
-    </div>
+    <DashboardSection title={title}>
+      <div className="space-y-4">{children}</div>
+    </DashboardSection>
   );
 }
 
 export function DetailLine({ label, value }) {
   return (
-    <div className="flex items-start justify-between gap-4 border border-[#eadfd7] bg-[#fffaf5] px-4 py-3 text-sm">
+    <div className="flex items-start justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
       <span className="font-black text-[#64708b]">{label}</span>
       <span className="text-right font-bold text-[#172033]">{value ?? "-"}</span>
     </div>
@@ -176,7 +166,7 @@ export function DetailLine({ label, value }) {
 export function SubscriptionEditor({ row, form, onChange, onSubmit, isSaving }) {
   if (!row || !form) {
     return (
-      <div className="border border-[#eadfd7] bg-[#fffaf5] p-5">
+      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-5">
         <h2 className="font-black text-[#07133d]">Configuration abonnement</h2>
         <p className="mt-3 text-sm font-semibold leading-6 text-[#64708b]">
           Sélectionnez un restaurant dans le tableau pour définir son plan, son montant, son statut et la date de renouvellement.
@@ -186,7 +176,7 @@ export function SubscriptionEditor({ row, form, onChange, onSubmit, isSaving }) 
   }
 
   return (
-    <form onSubmit={onSubmit} className="border border-[#eadfd7] bg-[#fffaf5] p-5">
+    <form onSubmit={onSubmit} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="font-black text-[#07133d]">{row.restaurant_name}</h2>
       <p className="mt-1 text-xs font-semibold text-[#64708b]">{row.restaurant_slug}</p>
       <div className="mt-5 space-y-4">
@@ -205,7 +195,7 @@ export function SubscriptionEditor({ row, form, onChange, onSubmit, isSaving }) 
           <textarea
             value={form.notes}
             onChange={(event) => onChange({ ...form, notes: event.target.value })}
-            className="min-h-24 w-full border border-[#eadfd7] bg-white px-4 py-3 text-sm font-semibold text-[#172033] outline-none focus:border-[#f04438]"
+            className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-[#172033] outline-none focus:border-[#f04438]"
           />
         </label>
       </div>
@@ -231,21 +221,24 @@ export function TextField({ label, value, onChange, type = "text", required, ...
         value={value ?? ""}
         onChange={(event) => onChange(event.target.value)}
         required={required}
-        className="h-11 w-full border border-[#eadfd7] bg-white px-4 text-sm font-semibold text-[#172033] outline-none focus:border-[#f04438]"
+        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-[#172033] outline-none focus:border-[#f04438]"
         {...props}
       />
     </label>
   );
 }
 
-export function SelectField({ label, value, onChange, options }) {
+export function SelectField({ label, value, onChange, options, required = false }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-black text-[#172033]">{label}</span>
+      <span className="mb-2 block text-sm font-black text-[#172033]">
+        {label} {required && <span className="text-red-500">*</span>}
+      </span>
       <select
+        required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-11 w-full border border-[#eadfd7] bg-white px-4 text-sm font-semibold text-[#172033] outline-none focus:border-[#f04438]"
+        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-[#172033] outline-none focus:border-[#f04438]"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -259,7 +252,7 @@ export function SelectField({ label, value, onChange, options }) {
 
 export function ToggleField({ label, checked, onChange }) {
   return (
-    <label className="flex items-center justify-between gap-4 border border-[#eadfd7] bg-white px-4 py-3">
+    <label className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
       <span className="text-sm font-black text-[#172033]">{label}</span>
       <input
         type="checkbox"
@@ -273,7 +266,7 @@ export function ToggleField({ label, checked, onChange }) {
 
 export function LoadingState({ label }) {
   return (
-    <div className="border border-[#eadfd7] bg-white px-6 py-12 text-center text-sm font-black text-[#64708b]">
+    <div className="rounded-lg border border-slate-200 bg-white px-6 py-12 text-center text-sm font-black text-[#64708b] shadow-sm">
       {label}
     </div>
   );
@@ -288,8 +281,8 @@ export function Progress({ label, value, max, suffix = "" }) {
         <span className="text-[#172033]">{label}</span>
         <span className="text-[#f04438]">{suffix ? `${value}${suffix}` : `${percent}%`}</span>
       </div>
-      <div className="h-2 bg-[#ffead5]">
-        <div className="h-full bg-[#f04438]" style={{ width: `${percent}%` }} />
+      <div className="h-2 rounded-full bg-slate-100">
+        <div className="h-full rounded-full bg-[#f04438]" style={{ width: `${percent}%` }} />
       </div>
     </div>
   );
@@ -345,7 +338,7 @@ export function ExportActions({ title, filename, rows, columns, fullWidth = fals
       <button
         type="button"
         onClick={() => exportExcel(`${filename}.xls`, rows, columns, title)}
-        className={`${fullWidth ? "flex-1" : ""} inline-flex h-10 items-center justify-center gap-2 border border-[#eadfd7] bg-white px-4 text-sm font-black text-[#172033] hover:border-[#f04438] hover:text-[#f04438]`}
+        className={`${fullWidth ? "flex-1" : ""} lte-btn lte-btn-default`}
       >
         <DashboardIcon name="FileText" size={16} />
         Exporter en Excel
@@ -353,7 +346,7 @@ export function ExportActions({ title, filename, rows, columns, fullWidth = fals
       <button
         type="button"
         onClick={() => exportPdf(title, rows, columns)}
-        className={`${fullWidth ? "flex-1" : ""} inline-flex h-10 items-center justify-center gap-2 border border-[#eadfd7] bg-white px-4 text-sm font-black text-[#172033] hover:border-[#f04438] hover:text-[#f04438]`}
+        className={`${fullWidth ? "flex-1" : ""} lte-btn lte-btn-default`}
       >
         <DashboardIcon name="ReceiptText" size={16} />
         Exporter en PDF

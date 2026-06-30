@@ -8,7 +8,7 @@
   }
 
   body {
-    @apply bg-[#ecf0f5] text-slate-700 antialiased;
+    @apply bg-slate-100 text-slate-700 antialiased;
   }
 
   button,
@@ -17,19 +17,24 @@
   textarea {
     font: inherit;
   }
+
+  :focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--dashboard-primary, #ff6347) 32%, transparent);
+    outline-offset: 2px;
+  }
 }
 
 @layer components {
   /* ===== AdminLTE : Box / Card ===== */
   .lte-card {
-    @apply mb-4 overflow-hidden rounded border-t-[3px] bg-white shadow-sm;
-    border-top-color: var(--dashboard-primary);
+    @apply mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm;
+    border-top-color: transparent;
   }
   .lte-card-header {
-    @apply flex min-h-[44px] items-center gap-3 border-b border-slate-100 px-4 py-2.5;
+    @apply flex min-h-[48px] items-center gap-3 border-b border-slate-100 px-4 py-3;
   }
   .lte-card-title {
-    @apply flex items-center gap-2 text-base font-semibold text-slate-700;
+    @apply flex items-center gap-2 text-base font-bold text-slate-800;
   }
   .lte-card-tools {
     @apply ml-auto flex items-center gap-1 text-slate-400;
@@ -38,10 +43,10 @@
     @apply grid h-6 w-6 place-items-center rounded transition hover:bg-slate-100 hover:text-slate-600;
   }
   .lte-card-body {
-    @apply p-4;
+    @apply p-4 sm:p-5;
   }
   .lte-card-footer {
-    @apply flex flex-wrap items-center gap-3 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-sm text-slate-600;
+    @apply flex flex-wrap items-center gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3 text-sm text-slate-600;
   }
 
   /* ===== AdminLTE : Tables ===== */
@@ -49,17 +54,17 @@
     @apply w-full text-left text-sm;
   }
   .lte-table thead th {
-    @apply whitespace-nowrap border-b-2 border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500;
+    @apply whitespace-nowrap border-b border-slate-200 bg-slate-50/80 px-3 py-3 text-xs font-bold uppercase tracking-wide text-slate-500;
   }
   .lte-table tbody {
     @apply text-slate-600;
   }
   .lte-table tbody td {
-    @apply border-b border-slate-100 px-3 py-2.5 align-middle;
+    @apply border-b border-slate-100 px-3 py-3 align-middle;
   }
   /* rayage par défaut (AdminLTE) ; le survol doit primer => défini avant la règle hover */
   .lte-table tbody tr:nth-child(even) {
-    @apply bg-slate-50/60;
+    @apply bg-white;
   }
   .lte-table tbody tr {
     @apply transition;
@@ -76,13 +81,13 @@
     @apply mb-4 block;
   }
   .lte-label {
-    @apply mb-1.5 block text-sm font-semibold text-slate-700;
+    @apply mb-1.5 block text-sm font-bold text-slate-700;
   }
   .lte-label .req {
     @apply text-red-500;
   }
   .form-control {
-    @apply block h-10 w-full rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400;
+    @apply block h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-400;
   }
   .form-control:focus {
     border-color: var(--dashboard-primary);
@@ -95,19 +100,19 @@
     @apply pr-8;
   }
   .lte-help {
-    @apply mt-1 text-xs text-slate-400;
+    @apply mt-1 text-xs font-medium text-slate-400;
   }
 
   /* ===== AdminLTE : Boutons ===== */
   .lte-btn {
-    @apply inline-flex h-10 items-center justify-center gap-2 rounded px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60;
   }
   .lte-btn-primary {
     @apply text-white shadow-sm hover:brightness-95;
     background-color: var(--dashboard-primary);
   }
   .lte-btn-default {
-    @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-950;
   }
   .lte-btn-danger {
     @apply border border-red-200 bg-white text-red-600 hover:bg-red-50;
@@ -168,5 +173,54 @@
 
   .superadmin-theme .bg-\[\#f04438\] {
     background-image: linear-gradient(135deg, var(--dashboard-primary), var(--dashboard-accent));
+  }
+
+  [data-aos] {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+    transition-duration: 700ms;
+    transition-property: opacity, transform;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--aos-delay, 0ms);
+  }
+
+  [data-aos="fade"] {
+    transform: none;
+  }
+
+  [data-aos="fade-up"] {
+    transform: translate3d(0, 24px, 0);
+  }
+
+  [data-aos="fade-right"] {
+    transform: translate3d(-24px, 0, 0);
+  }
+
+  [data-aos="fade-left"] {
+    transform: translate3d(24px, 0, 0);
+  }
+
+  [data-aos="zoom-in"] {
+    transform: scale(0.96);
+  }
+
+  [data-aos].aos-animate {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  [data-aos-delay="100"] { --aos-delay: 100ms; }
+  [data-aos-delay="150"] { --aos-delay: 150ms; }
+  [data-aos-delay="200"] { --aos-delay: 200ms; }
+  [data-aos-delay="250"] { --aos-delay: 250ms; }
+  [data-aos-delay="300"] { --aos-delay: 300ms; }
+  [data-aos-delay="400"] { --aos-delay: 400ms; }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-aos] {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
   }
 }

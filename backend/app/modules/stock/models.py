@@ -204,6 +204,7 @@ class StockMovement(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
     status: Mapped[StockMovementStatus] = mapped_column(Enum(StockMovementStatus), default=StockMovementStatus.VALIDATED, index=True, nullable=False)
+    created_by_id_legacy: Mapped[str | None] = mapped_column("created_by_id", String(36), ForeignKey("users.id"), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     validated_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -217,23 +218,45 @@ class StockMovement(Base):
         legacy_note = kwargs.pop("note", None)
         legacy_destination = kwargs.pop("destination", None)
         legacy_created_by = kwargs.pop("created_by_id", None)
-        kwargs.pop("cost_center_id", None)
-        kwargs.pop("lot_id", None)
+        legacy_cost_center_id = kwargs.pop("cost_center_id", None)
+        legacy_lot_id = kwargs.pop("lot_id", None)
         kwargs.pop("source_location", None)
         kwargs.pop("destination_location", None)
-        kwargs.pop("valuation_delta", None)
+        legacy_valuation_delta = kwargs.pop("valuation_delta", None)
         if legacy_item_id and "product_id" not in kwargs:
             kwargs["product_id"] = legacy_item_id
+        if legacy_item_id and "item_id_legacy" not in kwargs:
+            kwargs["item_id_legacy"] = legacy_item_id
+        elif kwargs.get("product_id") and "item_id_legacy" not in kwargs:
+            kwargs["item_id_legacy"] = kwargs["product_id"]
         if legacy_value is not None and "total_amount" not in kwargs:
             kwargs["total_amount"] = legacy_value
+        if legacy_value is not None and "value_legacy" not in kwargs:
+            kwargs["value_legacy"] = legacy_value
+        elif kwargs.get("total_amount") is not None and "value_legacy" not in kwargs:
+            kwargs["value_legacy"] = kwargs["total_amount"]
         if legacy_created_by and "created_by" not in kwargs:
             kwargs["created_by"] = legacy_created_by
+        if legacy_created_by and "created_by_id_legacy" not in kwargs:
+            kwargs["created_by_id_legacy"] = legacy_created_by
+        elif kwargs.get("created_by") and "created_by_id_legacy" not in kwargs:
+            kwargs["created_by_id_legacy"] = kwargs["created_by"]
+        if legacy_cost_center_id and "cost_center_id" not in kwargs:
+            kwargs["cost_center_id"] = legacy_cost_center_id
+        elif "cost_center_id" not in kwargs:
+            kwargs["cost_center_id"] = kwargs.get("destination_depot_id") or kwargs.get("source_depot_id")
+        if legacy_lot_id and "lot_id" not in kwargs:
+            kwargs["lot_id"] = legacy_lot_id
+        if legacy_valuation_delta is not None and "valuation_delta" not in kwargs:
+            kwargs["valuation_delta"] = legacy_valuation_delta
         if (legacy_note or legacy_destination) and "reason" not in kwargs:
             kwargs["reason"] = legacy_note or legacy_destination
         if "movement_date" not in kwargs:
             kwargs["movement_date"] = utcnow()
         if "status" not in kwargs:
             kwargs["status"] = StockMovementStatus.VALIDATED
+        if "valuation_delta" not in kwargs:
+            kwargs["valuation_delta"] = Decimal("0")
         if kwargs.get("status") == StockMovementStatus.VALIDATED and "validated_at" not in kwargs:
             kwargs["validated_at"] = utcnow()
         super().__init__(**kwargs)
@@ -337,12 +360,49 @@ class StockLot(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
     product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), index=True, nullable=False)
+    item_id_legacy: Mapped[str | None] = mapped_column("item_id", String(36), index=True, nullable=True)
     depot_id: Mapped[str] = mapped_column(String(36), ForeignKey("depots.id"), index=True, nullable=False)
+    cost_center_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    entry_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
     lot_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
     expiry_date: Mapped[datetime | None] = mapped_column(DateTime, index=True, nullable=True)
+    expiration_date: Mapped[datetime | None] = mapped_column(DateTime, index=True, nullable=True)
     quantity_initial: Mapped[Decimal] = mapped_column(Qty, nullable=False)
     quantity_remaining: Mapped[Decimal] = mapped_column(Qty, index=True, nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Money, default=0, nullable=False)
+    initial_quantity: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    available_quantity: Mapped[float] = mapped_column(Float, default=0, index=True, nullable=False)
+    purchase_unit_price: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    cmup_applied: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    stock_value: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     movement_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    def __init__(self, **kwargs):
+        if kwargs.get("product_id") and "item_id_legacy" not in kwargs:
+            kwargs["item_id_legacy"] = kwargs["product_id"]
+        if kwargs.get("depot_id") and "cost_center_id" not in kwargs:
+            kwargs["cost_center_id"] = kwargs["depot_id"]
+        if "entry_date" not in kwargs:
+            kwargs["entry_date"] = utcnow()
+        if kwargs.get("expiry_date") and "expiration_date" not in kwargs:
+            kwargs["expiration_date"] = kwargs["expiry_date"]
+        quantity_initial = _stock_decimal(kwargs.get("quantity_initial", Decimal("0")))
+        quantity_remaining = _stock_decimal(kwargs.get("quantity_remaining", quantity_initial))
+        unit_cost = _stock_decimal(kwargs.get("unit_cost", Decimal("0")))
+        if "initial_quantity" not in kwargs:
+            kwargs["initial_quantity"] = float(quantity_initial)
+        if "available_quantity" not in kwargs:
+            kwargs["available_quantity"] = float(quantity_remaining)
+        if "purchase_unit_price" not in kwargs:
+            kwargs["purchase_unit_price"] = float(unit_cost)
+        if "cmup_applied" not in kwargs:
+            kwargs["cmup_applied"] = float(unit_cost)
+        if "stock_value" not in kwargs:
+            kwargs["stock_value"] = float(quantity_remaining * unit_cost)
+        super().__init__(**kwargs)
+
+
+def _stock_decimal(value) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value or 0))

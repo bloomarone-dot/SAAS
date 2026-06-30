@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
+import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { menuApi } from "../services/menuApi";
 
 const emptyForm = { name: "", description: "", image_url: "" };
@@ -108,11 +108,14 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
     >
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-600">{error}</div>}
 
-      {!createOnly && <AdminKpis items={[
-        { label: "Nombre de catégories", value: categories.length, icon: "ClipboardList", trend: "à jour" },
-        { label: "Catégories actives", value: categories.filter((category) => category.is_active).length, icon: "CheckCircle2" },
-        { label: "Plats associés", value: dishesCount, icon: "Utensils" },
-      ]} />}
+      {!createOnly && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Catégories" value={categories.length.toLocaleString("fr-FR")} icon="ClipboardList" trend="À jour" tone="info" />
+          <StatCard label="Actives" value={categories.filter((category) => category.is_active).length.toLocaleString("fr-FR")} icon="CheckCircle2" trend="Disponibles" tone="success" />
+          <StatCard label="Plats associés" value={dishesCount.toLocaleString("fr-FR")} icon="Utensils" trend="Carte" tone="default" />
+          <StatCard label="Top catégorie" value={topCategories[0]?.name || "-"} icon="BarChart3" trend={`${dishesByCategory[topCategories[0]?.id]?.length || 0} plat(s)`} tone="warning" />
+        </div>
+      )}
 
       {showForm && (
         <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
@@ -134,7 +137,7 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
             </form>
           </AdminCard>
           <AdminCard title="Aperçu de la catégorie">
-            <div className="rounded-xl border border-slate-200 p-6 text-center">
+            <div className="rounded-lg border border-slate-200 p-6 text-center">
               {form.image_url ? <img src={form.image_url} alt="" className="mx-auto h-20 w-20 rounded-full object-cover" /> : <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 text-[var(--dashboard-primary)]"><DashboardIcon name="Utensils" size={30} /></div>}
               <h3 className="mt-4 text-xl font-black text-slate-950">{form.name || "Entrées"}</h3>
               <StatusPill>Active</StatusPill>
@@ -144,21 +147,24 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
         </div>
       )}
 
-      {!createOnly && <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
-        <AdminCard>
-          <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
+      {!createOnly && <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+        <DashboardSection
+          title="Liste des catégories"
+          description={`${visibleCategories.length.toLocaleString("fr-FR")} catégorie(s) selon la recherche`}
+        >
+          <FilterBar className="mb-5">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une catégorie..." />
-          </div>
+          </FilterBar>
           <CategoriesTable categories={visibleCategories} dishesByCategory={dishesByCategory} onDelete={deleteCategory} role={role} />
-        </AdminCard>
+        </DashboardSection>
         <div className="space-y-5">
-          <AdminCard title="Aperçu rapide">
+          <DashboardSection title="Aperçu rapide">
             <Insight label="Catégories actives" value={categories.filter((category) => category.is_active).length} />
             <Insight label="Catégories inactives" value={categories.filter((category) => !category.is_active).length} />
             <Insight label="Plats sans catégorie" value="0" />
             <Insight label="Catégorie la plus utilisée" value={topCategories[0] ? `${topCategories[0].name} (${dishesByCategory[topCategories[0].id]?.length || 0})` : "-"} />
-          </AdminCard>
-          <AdminCard title="Top catégories">
+          </DashboardSection>
+          <DashboardSection title="Top catégories">
             <div className="space-y-4">
               {topCategories.map((category, index) => (
                 <div key={category.id}>
@@ -170,7 +176,7 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
                 </div>
               ))}
             </div>
-          </AdminCard>
+          </DashboardSection>
         </div>
       </div>}
     </AdminPage>

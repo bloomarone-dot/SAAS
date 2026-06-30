@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { PageHeader } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { menuApi } from "../services/menuApi";
 import { orderApi } from "@/modules/orders/services/orderApi";
@@ -285,29 +286,22 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
   return (
     <section className="space-y-4">
-      <header className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="mt-1 text-2xl font-black text-slate-950">
-              {session
-                ? `${session.tableRoom} · Table ${session.tableName}`
-                : "Choisissez une table"}
-            </h1>
-          </div>
-          {session && (
+      <PageHeader
+        eyebrow="Service"
+        title={session ? `${session.tableRoom} · Table ${session.tableName}` : "Choisissez une table"}
+        subtitle={session ? "Gérez la commande active, l’envoi cuisine et la demande de paiement." : "Ouvrez ou reprenez une table pour démarrer la prise de commande."}
+        primaryAction={session ? (
             <button
               type="button"
               onClick={backToTables}
-              className="inline-flex h-11 items-center gap-2 self-start rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-700 hover:bg-slate-50"
+              className="lte-btn lte-btn-default"
             >
               <DashboardIcon name="ChevronDown" size={16} className="rotate-90" />
               Changer de table
             </button>
-          )}
-        </div>
-
-        <StepBar current={currentStep} />
-      </header>
+          ) : null}
+        meta={<StepBar current={currentStep} />}
+      />
 
       {(message || error || readyAlert) && (
         <div className="space-y-2">
@@ -437,7 +431,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 function StepBar({ current }) {
   const currentIndex = STEPS.findIndex((step) => step.key === current);
   return (
-    <ol className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
+    <ol className="grid grid-cols-2 gap-2 sm:grid-cols-5">
       {STEPS.map((step, index) => {
         const done = index < currentIndex;
         const active = index === currentIndex;
@@ -464,7 +458,7 @@ function StepBar({ current }) {
 function MenuPanel({ hidden, categories, dishes, categoryFilter, onCategoryChange, onAddDish, disabled }) {
   if (hidden) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center shadow-sm">
+      <div className="rounded-lg border border-dashed border-slate-200 bg-white p-8 text-center shadow-sm">
         <DashboardIcon name="UtensilsCrossed" size={28} className="mx-auto text-slate-300" />
         <p className="mt-3 text-sm font-semibold text-slate-500">
           Le menu est masqué. Cliquez sur « Compléter la commande » pour ajouter des plats.
@@ -474,7 +468,7 @@ function MenuPanel({ hidden, categories, dishes, categoryFilter, onCategoryChang
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
           <h2 className="text-lg font-black text-slate-950">Menu</h2>
@@ -524,7 +518,7 @@ function MenuPanel({ hidden, categories, dishes, categoryFilter, onCategoryChang
 
 function ServerDailyStats({ stats, name }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <p className="text-xs font-black uppercase text-slate-500">Vos ventes du jour{name ? ` · ${name}` : ""}</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-4">
         <StatChip label="Commandes" value={stats.orders} />
@@ -587,7 +581,7 @@ function OrderPanel({
   const subtotal = items.reduce((total, item) => total + Number(item.line_total || 0), 0);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="border-b border-slate-100 pb-4">
         <p className="text-xs font-black uppercase text-slate-500">Récapitulatif</p>
         <h2 className="mt-1 text-lg font-black text-slate-950">

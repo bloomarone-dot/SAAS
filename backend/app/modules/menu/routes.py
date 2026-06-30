@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -73,9 +74,17 @@ async def upload_menu_image(
 
 @router.get("/public/{slug}", response_model=PublicRestaurantMenu)
 def get_public_menu(slug: str, db: Session = Depends(get_db)):
+    tenant_key = slug.strip().lower()
     restaurant = (
         db.query(Restaurant)
-        .filter(Restaurant.slug == slug, Restaurant.is_active.is_(True))
+        .filter(
+            Restaurant.is_active.is_(True),
+            or_(
+                func.lower(Restaurant.slug) == tenant_key,
+                func.lower(Restaurant.subdomain) == tenant_key,
+                func.replace(func.lower(Restaurant.slug), "-", "") == tenant_key,
+            ),
+        )
         .one_or_none()
     )
     if not restaurant:
@@ -98,7 +107,10 @@ def get_public_menu(slug: str, db: Session = Depends(get_db)):
             "id": restaurant.id,
             "name": restaurant.name,
             "slug": restaurant.slug,
+            "subdomain": restaurant.subdomain,
+            "custom_domain": restaurant.custom_domain,
             "logo_url": restaurant.logo_url,
+            "cover_image_url": restaurant.cover_image_url,
             "description": restaurant.description,
             "phone": restaurant.phone,
             "whatsapp_phone": restaurant.whatsapp_phone,
@@ -113,6 +125,11 @@ def get_public_menu(slug: str, db: Session = Depends(get_db)):
             "currency": restaurant.currency,
             "primary_color": restaurant.primary_color,
             "secondary_color": restaurant.secondary_color,
+            "accent_color": restaurant.accent_color,
+            "background_color": restaurant.background_color,
+            "text_color": restaurant.text_color,
+            "button_color": restaurant.button_color,
+            "is_active": restaurant.is_active,
         },
         categories=categories,
         dishes=dishes,

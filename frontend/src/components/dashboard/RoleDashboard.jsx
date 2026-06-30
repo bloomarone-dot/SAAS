@@ -17,15 +17,15 @@ const profiles = {
   CAISSE: "cashier",
 };
 
-export function RoleDashboard({ role, overrides = {} }) {
+export function RoleDashboard({ role, overrides = {}, onNavigate }) {
   const profile = profiles[role] ?? "admin";
 
-  if (profile === "superadmin") return <SuperadminDashboard overrides={overrides} />;
-  if (profile === "manager") return <ManagerDashboard overrides={overrides} />;
+  if (profile === "superadmin") return <SuperadminDashboard overrides={overrides} onNavigate={onNavigate} />;
+  if (profile === "manager") return <ManagerDashboard overrides={overrides} onNavigate={onNavigate} />;
   if (profile === "cashier") return <CaisseDashboard overrides={overrides} />;
   if (profile === "server") return <ServerDashboard overrides={overrides} />;
   if (profile === "kitchen") return <CuisineDashboard overrides={overrides} />;
-  if (profile === "stock") return <StockDashboard overrides={overrides} />;
+  if (profile === "stock") return <StockDashboard overrides={overrides} onNavigate={onNavigate} />;
 
   return <AdminDashboard role={role} overrides={overrides} />;
 }

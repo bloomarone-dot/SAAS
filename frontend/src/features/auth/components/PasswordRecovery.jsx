@@ -23,7 +23,7 @@ function Shell({ title, subtitle, children }) {
     <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <img src={logoImage} alt="Logo" className="mx-auto mb-5 h-16 w-16 rounded-xl object-cover shadow-sm ring-1 ring-emerald-100" />
+          <img src={logoImage} alt="Logo" className="mx-auto mb-5 h-16 w-16 rounded-lg object-cover shadow-sm ring-1 ring-emerald-100" />
           <h2 className="mb-2 text-3xl font-black text-[#003f2f]">{title}</h2>
           <p className="text-sm leading-relaxed text-slate-500">{subtitle}</p>
         </div>
@@ -103,12 +103,12 @@ export function PasswordRecovery({ apiBaseUrl, mode = "forgot", token = "", onBa
       title={isReset ? "Nouveau mot de passe" : "Mot de passe oublié"}
       subtitle={isReset ? "Choisissez un nouveau mot de passe pour votre compte." : "Saisissez votre identifiant ; un lien de réinitialisation vous sera envoyé par email."}
     >
-      <form onSubmit={isReset ? submitReset : submitForgot} className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <form onSubmit={isReset ? submitReset : submitForgot} className="space-y-5 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
         {isReset ? (
           <>
             <label className="block">
               <span className="mb-2 block text-xs font-black text-slate-700">Nouveau mot de passe <span className="text-red-500">*</span></span>
-              <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} show={showPassword} onToggle={() => setShowPassword((value) => !value)} required minLength={10} placeholder="Au moins 10 caractères" autoFocus />
+              <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} show={showPassword} onToggle={() => setShowPassword((value) => !value)} required minLength={8} placeholder="Au moins 8 caractères" autoFocus />
             </label>
             <label className="block">
               <span className="mb-2 block text-xs font-black text-slate-700">Confirmer le mot de passe <span className="text-red-500">*</span></span>

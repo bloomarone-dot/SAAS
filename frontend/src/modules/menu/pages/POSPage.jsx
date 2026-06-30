@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { DashboardIcon } from '@/components/dashboard/icons';
+import { PageContainer, PageHeader } from '@/modules/admin/components/AdminUi';
 import TableGrid from '../components/TableGrid';
 import TableSessionModal from '../components/TableSessionModal';
 import DishesPage from './DishesPage';
@@ -8,7 +10,6 @@ export default function POSPage({ restaurantId, role, currentUser }) {
   const [selectedTable, setSelectedTable] = useState(null);
   const [activeOrderContext, setActiveOrderContext] = useState(null);
 
-  // Fonction appelée quand on sélectionne une commande ou qu'on en ouvre une nouvelle
   const handleOpenMenuForOrder = (orderId, tableNumber, tableRoom) => {
     setActiveOrderContext({
       orderId: orderId,
@@ -17,28 +18,23 @@ export default function POSPage({ restaurantId, role, currentUser }) {
     });
   };
 
-  // Quitter le menu de prise de commande pour revenir au plan de salle
   const handleBackToTables = () => {
     setActiveOrderContext(null);
-    // Optionnel : recharger le plan de salle ici si nécessaire
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Si aucune commande n'est active, on affiche le Plan de Salle */}
+    <PageContainer>
       {!activeOrderContext ? (
-        <div className="max-w-7xl mx-auto py-6">
-          <div className="px-6 flex justify-between items-center mb-4">
-            <h1 className="text-2xl font-black text-gray-900 tracking-tight">Espace Prise de Commande</h1>
-          </div>
-
-          {/* Grille des tables */}
+        <>
+          <PageHeader
+            eyebrow="Service"
+            title="Espace prise de commande"
+            subtitle="Sélectionnez une table libre ou occupée pour ouvrir une commande et accéder à la carte."
+          />
           <TableGrid 
             restaurantId={currentRestaurantId} 
             onSelectTable={(table) => setSelectedTable(table)} 
           />
-
-          {/* Fenêtre surgissante au clic sur une table */}
           {selectedTable && (
             <TableSessionModal
               table={selectedTable}
@@ -47,29 +43,24 @@ export default function POSPage({ restaurantId, role, currentUser }) {
               onOpenMenuForOrder={handleOpenMenuForOrder}
             />
           )}
-        </div>
+        </>
       ) : (
-        /* Si une commande est sélectionnée, on affiche l'interface du Menu (Sprint 3) */
-        <div className="animate-fade-in">
-          <div className="bg-white border-b px-6 py-4 flex items-center justify-between shadow-sm">
-            <div>
-              <button 
+        <div className="animate-fade-in space-y-5">
+          <PageHeader
+            eyebrow="Commande en cours"
+            title={`${activeOrderContext.tableRoom} · Table ${activeOrderContext.tableNumber}`}
+            subtitle={`Facture #${activeOrderContext.orderId}`}
+            secondaryActions={
+              <button
+                type="button"
                 onClick={handleBackToTables}
-                className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                className="lte-btn lte-btn-default"
               >
-                ← Retour au Plan de Salle
+                <DashboardIcon name="ArrowLeft" size={16} />
+                Retour au plan
               </button>
-              <h2 className="text-lg font-bold text-gray-900 mt-1">
-                Prise de commande — {activeOrderContext.tableRoom} · Table {activeOrderContext.tableNumber}
-              </h2>
-            </div>
-            <div className="bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-full border border-blue-100">
-              Facture #{activeOrderContext.orderId}
-            </div>
-          </div>
-
-          {/* Ici on charge ta page de gestion du menu et des catégories */}
-          {/* On lui passe l'orderId pour que chaque plat ajouté y soit lié */}
+            }
+          />
           <DishesPage
             restaurantId={currentRestaurantId}
             role={role}
@@ -77,6 +68,6 @@ export default function POSPage({ restaurantId, role, currentUser }) {
           />
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

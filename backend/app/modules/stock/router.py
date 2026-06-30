@@ -88,6 +88,31 @@ DEFAULT_UNITS = [
     ("carton", "ctn"),
     ("paquet", "paquet"),
 ]
+
+
+def normalize_unit_key(name: str | None, symbol: str | None = None) -> str:
+    value = (name or symbol or "").strip().lower()
+    value = value.replace("¼", "1/4")
+    value = " ".join(value.split())
+    aliases = {
+        "quart kg": "1/4 kg",
+        "quart kilo": "1/4 kg",
+        "0.25 kg": "1/4 kg",
+        "250g": "1/4 kg",
+        "250 g": "1/4 kg",
+        "pcs": "piece",
+        "pièce": "piece",
+        "pieces": "piece",
+        "paquets": "paquet",
+        "packet": "paquet",
+    }
+    return aliases.get(value, value)
+
+
+def normalize_depot_code(code: str | None) -> str:
+    return (code or "").strip().upper()
+
+
 LOCATION_DEPOT_CODE = {
     StockLocation.MAGASIN: "MAIN",
     StockLocation.CUISINE: "KITCHEN",
@@ -103,13 +128,20 @@ SQL_OUT_TYPES = [StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovement
 def ensure_default_data(db: Session, restaurant_id: str | None) -> None:
     if not restaurant_id:
         return
-    existing_depots = {depot.code: depot for depot in db.query(Depot).filter(Depot.restaurant_id == restaurant_id).all()}
+    existing_depots = {
+        normalize_depot_code(depot.code): depot
+        for depot in db.query(Depot).filter(Depot.restaurant_id == restaurant_id).all()
+    }
     for code, name, depot_type, description in DEFAULT_DEPOTS:
-        if code not in existing_depots:
+        normalized_code = normalize_depot_code(code)
+        if normalized_code not in existing_depots:
             db.add(Depot(restaurant_id=restaurant_id, code=code, name=name, type=depot_type, description=description))
-    existing_units = {unit.name.lower(): unit for unit in db.query(Unit).filter(Unit.restaurant_id == restaurant_id).all()}
+    existing_units: dict[str, Unit] = {}
+    for unit in db.query(Unit).filter(Unit.restaurant_id == restaurant_id).all():
+        existing_units.setdefault(normalize_unit_key(unit.name, unit.symbol), unit)
+        existing_units.setdefault(normalize_unit_key(unit.symbol, unit.name), unit)
     for name, symbol in DEFAULT_UNITS:
-        if name.lower() not in existing_units:
+        if normalize_unit_key(name, symbol) not in existing_units and normalize_unit_key(symbol, name) not in existing_units:
             db.add(Unit(restaurant_id=restaurant_id, name=name, symbol=symbol))
     db.flush()
     migrate_legacy_stock_items(db, restaurant_id)
@@ -191,6 +223,215 @@ def safe_product_type(value: str | None) -> StockProductType:
         return StockProductType(value or StockProductType.INGREDIENT.value)
     except ValueError:
         return StockProductType.INGREDIENT
+
+
+def ensure_product_creation_columns(db: Session) -> None:
+    """Sécurise les colonnes nécessaires à la création produit sur les bases locales anciennes.
+
+    Le projet n'a pas encore une chaîne Alembic complète. Cette garde évite que
+    l'ancien schéma `products` bloque le formulaire simplifié Code/Nom/Unité/Seuil.
+    """
+    inspector = inspect(db.bind)
+    if "products" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("products")}
+    columns = {
+        "code": "VARCHAR(60) NULL",
+        "product_type": "VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'",
+        "category_id": "VARCHAR(36) NULL",
+        "unit_id": "VARCHAR(36) NULL",
+        "purchase_unit_id": "VARCHAR(36) NULL",
+        "purchase_factor": "DECIMAL(14,4) NOT NULL DEFAULT 1",
+        "purchase_price": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+        "cmup": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+        "minimum_stock": "DECIMAL(14,3) NOT NULL DEFAULT 0",
+        "packaging_sale_price": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+        "sale_margin_rate": "DECIMAL(7,4) NOT NULL DEFAULT 0",
+        "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "created_at": "DATETIME NULL",
+        "updated_at": "DATETIME NULL",
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            db.execute(text(f"ALTER TABLE products ADD COLUMN {name} {definition}"))
+    if "created_at" not in existing:
+        db.execute(text("UPDATE products SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    if "updated_at" not in existing:
+        db.execute(text("UPDATE products SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
+    if db.bind.dialect.name == "mysql":
+        db.execute(text("ALTER TABLE products MODIFY COLUMN product_type VARCHAR(30) NOT NULL DEFAULT 'INGREDIENT'"))
+    db.flush()
+
+
+def ensure_stock_entry_columns(db: Session) -> None:
+    """Prépare les tables nécessaires à l'enregistrement d'une entrée de stock."""
+    ensure_product_creation_columns(db)
+    inspector = inspect(db.bind)
+    tables = set(inspector.get_table_names())
+    if "stock_movements" not in tables:
+        StockMovement.__table__.create(bind=db.bind, checkfirst=True)
+        tables.add("stock_movements")
+    existing = {column["name"] for column in inspector.get_columns("stock_movements")}
+    columns = {
+        "restaurant_id": "VARCHAR(36) NOT NULL",
+        "movement_date": "DATETIME NULL",
+        "movement_type": "VARCHAR(30) NOT NULL",
+        "product_id": "VARCHAR(36) NOT NULL",
+        "item_id": "VARCHAR(36) NULL",
+        "cost_center_id": "VARCHAR(36) NULL",
+        "lot_id": "VARCHAR(36) NULL",
+        "source_depot_id": "VARCHAR(36) NULL",
+        "destination_depot_id": "VARCHAR(36) NULL",
+        "quantity": "DECIMAL(14,3) NOT NULL DEFAULT 0",
+        "unit_price": "DECIMAL(14,2) NULL",
+        "total_amount": "DECIMAL(14,2) NULL",
+        "production_cost": "DECIMAL(14,2) NULL",
+        "value": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+        "valuation_delta": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+        "supplier_id": "VARCHAR(36) NULL",
+        "reason": "TEXT NULL",
+        "reference": "VARCHAR(160) NULL",
+        "status": "VARCHAR(30) NOT NULL DEFAULT 'validated'",
+        "created_by_id": "VARCHAR(36) NULL",
+        "created_by": "VARCHAR(36) NULL",
+        "validated_by": "VARCHAR(36) NULL",
+        "validated_at": "DATETIME NULL",
+        "cancelled_movement_id": "VARCHAR(36) NULL",
+        "created_at": "DATETIME NULL",
+        "updated_at": "DATETIME NULL",
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            db.execute(text(f"ALTER TABLE stock_movements ADD COLUMN {name} {definition}"))
+    if "movement_date" not in existing:
+        db.execute(text("UPDATE stock_movements SET movement_date = CURRENT_TIMESTAMP WHERE movement_date IS NULL"))
+    if "created_at" not in existing:
+        db.execute(text("UPDATE stock_movements SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    if "updated_at" not in existing:
+        db.execute(text("UPDATE stock_movements SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
+    if db.bind.dialect.name == "mysql":
+        db.execute(text("ALTER TABLE stock_movements MODIFY COLUMN movement_type VARCHAR(30) NOT NULL"))
+        db.execute(text("ALTER TABLE stock_movements MODIFY COLUMN status VARCHAR(30) NOT NULL DEFAULT 'validated'"))
+
+    if "stock_lots" not in tables:
+        StockLot.__table__.create(bind=db.bind, checkfirst=True)
+    else:
+        existing_lots = {column["name"] for column in inspector.get_columns("stock_lots")}
+        lot_columns = {
+            "restaurant_id": "VARCHAR(36) NOT NULL",
+            "product_id": "VARCHAR(36) NOT NULL",
+            "item_id": "VARCHAR(36) NULL",
+            "depot_id": "VARCHAR(36) NOT NULL",
+            "cost_center_id": "VARCHAR(36) NULL",
+            "entry_date": "DATETIME NULL",
+            "lot_number": "VARCHAR(80) NULL",
+            "expiry_date": "DATETIME NULL",
+            "expiration_date": "DATETIME NULL",
+            "quantity_initial": "DECIMAL(14,3) NOT NULL DEFAULT 0",
+            "quantity_remaining": "DECIMAL(14,3) NOT NULL DEFAULT 0",
+            "unit_cost": "DECIMAL(14,2) NOT NULL DEFAULT 0",
+            "initial_quantity": "FLOAT NOT NULL DEFAULT 0",
+            "available_quantity": "FLOAT NOT NULL DEFAULT 0",
+            "purchase_unit_price": "FLOAT NOT NULL DEFAULT 0",
+            "cmup_applied": "FLOAT NOT NULL DEFAULT 0",
+            "stock_value": "FLOAT NOT NULL DEFAULT 0",
+            "movement_id": "VARCHAR(36) NULL",
+            "created_at": "DATETIME NULL",
+            "updated_at": "DATETIME NULL",
+        }
+        for name, definition in lot_columns.items():
+            if name not in existing_lots:
+                db.execute(text(f"ALTER TABLE stock_lots ADD COLUMN {name} {definition}"))
+    db.flush()
+
+
+def ensure_legacy_stock_references(
+    db: Session,
+    *,
+    restaurant_id: str,
+    product: Product,
+    source_depot_id: str | None = None,
+    destination_depot_id: str | None = None,
+) -> None:
+    """Synchronise les références legacy encore imposées par certaines bases locales.
+
+    Des installations existantes ont gardé des clés étrangères de `stock_movements`
+    vers `stock_items` et `stock_cost_centers`, alors que le modèle courant utilise
+    `products` et `depots`. On crée seulement les lignes miroir manquantes.
+    """
+    inspector = inspect(db.bind)
+    tables = set(inspector.get_table_names())
+    if "stock_items" in tables:
+        exists = db.execute(text("SELECT 1 FROM stock_items WHERE id = :id"), {"id": product.id}).first()
+        if not exists:
+            unit = db.get(Unit, product.unit_id) if product.unit_id else None
+            unit_label = getattr(unit, "symbol", None) or getattr(unit, "name", None) or "piece"
+            db.execute(
+                text(
+                    """
+                    INSERT INTO stock_items (
+                        id, restaurant_id, name, product_type, unit, quantity, kitchen_quantity,
+                        drink_quantity, alert_threshold, purchase_price, cmup_current,
+                        packaging_sale_price, is_active, sale_margin_rate, created_at, updated_at
+                    )
+                    VALUES (
+                        :id, :restaurant_id, :name, :product_type, :unit, 0, 0,
+                        0, :minimum_stock, :purchase_price, :cmup,
+                        :packaging_sale_price, :is_active, :sale_margin_rate, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                {
+                    "id": product.id,
+                    "restaurant_id": restaurant_id,
+                    "name": product.name,
+                    "product_type": getattr(product.product_type, "value", product.product_type) or StockProductType.INGREDIENT.value,
+                    "unit": unit_label,
+                    "minimum_stock": float(product.minimum_stock or 0),
+                    "purchase_price": float(product.purchase_price or 0),
+                    "cmup": float(product.cmup or 0),
+                    "packaging_sale_price": float(product.packaging_sale_price or 0),
+                    "is_active": bool(product.is_active),
+                    "sale_margin_rate": float(product.sale_margin_rate or 0),
+                },
+            )
+
+    if "stock_cost_centers" not in tables:
+        return
+    for depot_id in {source_depot_id, destination_depot_id}:
+        if not depot_id:
+            continue
+        exists = db.execute(text("SELECT 1 FROM stock_cost_centers WHERE id = :id"), {"id": depot_id}).first()
+        if exists:
+            continue
+        depot = db.get(Depot, depot_id)
+        if not depot or depot.restaurant_id != restaurant_id:
+            continue
+        center_type = StockLocation.MAGASIN.value
+        if depot.type == DepotType.CUISINE:
+            center_type = StockLocation.CUISINE.value
+        elif depot.type == DepotType.BOISSON:
+            center_type = StockLocation.BOISSON.value
+        db.execute(
+            text(
+                """
+                INSERT INTO stock_cost_centers (
+                    id, restaurant_id, name, code, center_type, is_active, created_at, updated_at
+                )
+                VALUES (
+                    :id, :restaurant_id, :name, :code, :center_type, :is_active, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                """
+            ),
+            {
+                "id": depot.id,
+                "restaurant_id": restaurant_id,
+                "name": depot.name,
+                "code": depot.code,
+                "center_type": center_type,
+                "is_active": bool(depot.is_active),
+            },
+        )
 
 
 def default_user_id(db: Session, restaurant_id: str) -> str:
@@ -294,25 +535,54 @@ def _stock_quantity_expr(depot_id: str | None):
     )
 
 
+def stock_movements_support_aggregation(db: Session) -> bool:
+    inspector = inspect(db.bind)
+    if "stock_movements" not in inspector.get_table_names():
+        return False
+    existing = {column["name"] for column in inspector.get_columns("stock_movements")}
+    required = {
+        "restaurant_id",
+        "product_id",
+        "movement_type",
+        "quantity",
+        "status",
+        "source_depot_id",
+        "destination_depot_id",
+    }
+    return required.issubset(existing)
+
+
 def get_current_stock(db: Session, product_id: str, depot_id: str | None = None, restaurant_id: str | None = None) -> Decimal:
     """Stock courant d'un produit, calculé par **agrégation SQL** (pas de scan Python)."""
+    if not stock_movements_support_aggregation(db):
+        return Decimal("0")
     query = db.query(func.coalesce(func.sum(_stock_quantity_expr(depot_id)), 0)).filter(
         StockMovement.product_id == product_id,
         StockMovement.status == StockMovementStatus.VALIDATED,
     )
     if restaurant_id:
         query = query.filter(StockMovement.restaurant_id == restaurant_id)
-    return dec(query.scalar())
+    try:
+        return dec(query.scalar())
+    except SQLAlchemyError:
+        db.rollback()
+        return Decimal("0")
 
 
 def stock_totals_map(db: Session, restaurant_id: str) -> dict[str, Decimal]:
     """Stock courant (tous dépôts) de TOUS les produits du restaurant en une requête (anti N+1)."""
-    rows = (
-        db.query(StockMovement.product_id, func.coalesce(func.sum(_stock_quantity_expr(None)), 0))
-        .filter(StockMovement.restaurant_id == restaurant_id, StockMovement.status == StockMovementStatus.VALIDATED)
-        .group_by(StockMovement.product_id)
-        .all()
-    )
+    if not stock_movements_support_aggregation(db):
+        return {}
+    try:
+        rows = (
+            db.query(StockMovement.product_id, func.coalesce(func.sum(_stock_quantity_expr(None)), 0))
+            .filter(StockMovement.restaurant_id == restaurant_id, StockMovement.status == StockMovementStatus.VALIDATED)
+            .group_by(StockMovement.product_id)
+            .all()
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        return {}
     return {product_id: dec(total) for product_id, total in rows}
 
 
@@ -332,10 +602,16 @@ def get_product_stock_by_depot(db: Session, product: Product) -> list[ProductSto
     return rows
 
 
-def product_public(db: Session, product: Product, *, total_stock: Decimal | None = None) -> dict:
+def product_public(
+    db: Session,
+    product: Product,
+    *,
+    total_stock: Decimal | None = None,
+    include_stock_by_depot: bool = True,
+) -> dict:
     unit = db.get(Unit, product.unit_id)
     purchase_unit = db.get(Unit, product.purchase_unit_id) if product.purchase_unit_id else None
-    stock_by_depot = get_product_stock_by_depot(db, product)
+    stock_by_depot = get_product_stock_by_depot(db, product) if include_stock_by_depot else []
     current_stock = total_stock if total_stock is not None else get_current_stock(db, product.id, restaurant_id=product.restaurant_id)
     return {
         "id": product.id,
@@ -446,6 +722,13 @@ def add_movement(
     else:
         # Sorties / pertes / transferts : valorisées au CMUP courant (repli prix d'achat).
         price = product.cmup if product.cmup else dec(product.purchase_price)
+    ensure_legacy_stock_references(
+        db,
+        restaurant_id=restaurant_id,
+        product=product,
+        source_depot_id=source_depot_id,
+        destination_depot_id=destination_depot_id,
+    )
     movement = StockMovement(
         restaurant_id=restaurant_id,
         movement_date=movement_date or utcnow(),
@@ -547,7 +830,12 @@ def stock_summary(current_user: User = Depends(require_tenant_user), db: Session
     main_value = sum(next((s.value for s in row["stock_by_depot"] if s.depot_code == "MAIN"), 0) for row in public_products)
     kitchen_value = sum(next((s.value for s in row["stock_by_depot"] if s.depot_code == "KITCHEN"), 0) for row in public_products)
     drink_value = sum(next((s.value for s in row["stock_by_depot"] if s.depot_code == "DRINK"), 0) for row in public_products)
-    movements = db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id).order_by(StockMovement.created_at.desc()).all()
+    movements = []
+    if stock_movements_support_aggregation(db):
+        try:
+            movements = db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id).order_by(StockMovement.created_at.desc()).all()
+        except SQLAlchemyError:
+            db.rollback()
     entries = [m for m in movements if normalize_type(m.movement_type) in {StockMovementType.ENTRY, StockMovementType.DIRECT_ENTRY}]
     outputs = [m for m in movements if normalize_type(m.movement_type) in {StockMovementType.OUTPUT, StockMovementType.LOSS}]
     transfers = [m for m in movements if normalize_type(m.movement_type) == StockMovementType.TRANSFER]
@@ -598,13 +886,35 @@ def list_products(current_user: User = Depends(require_tenant_user), db: Session
 @router.post("/items", response_model=ProductPublic, status_code=201)
 def create_product(payload: ProductIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    ensure_default_data(db, current_user.restaurant_id)
+    try:
+        ensure_product_creation_columns(db)
+        ensure_default_data(db, current_user.restaurant_id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Préparation du stock impossible: {exc.__class__.__name__}.") from exc
+    code = payload.code.strip() if payload.code else None
+    name = payload.name.strip()
+    if code:
+        existing_code = (
+            db.query(Product)
+            .filter(Product.restaurant_id == current_user.restaurant_id, Product.code == code)
+            .one_or_none()
+        )
+        if existing_code:
+            raise HTTPException(status_code=400, detail="Un produit avec ce code existe déjà.")
+    existing_name = (
+        db.query(Product)
+        .filter(Product.restaurant_id == current_user.restaurant_id, Product.name == name)
+        .one_or_none()
+    )
+    if existing_name:
+        raise HTTPException(status_code=400, detail="Un produit avec ce nom existe déjà.")
     unit = resolve_unit(db, current_user.restaurant_id, payload.unit_id or payload.unit)
     purchase_unit = resolve_unit(db, current_user.restaurant_id, payload.purchase_unit_id) if payload.purchase_unit_id else None
     product = Product(
         restaurant_id=current_user.restaurant_id,
-        code=payload.code,
-        name=payload.name,
+        code=code,
+        name=name,
         product_type=payload.product_type,
         category_id=payload.category_id,
         unit_id=unit.id,
@@ -618,11 +928,18 @@ def create_product(payload: ProductIn, current_user: User = Depends(require_tena
         is_active=payload.is_active,
     )
     db.add(product)
-    db.flush()
-    log_action(db, current_user, "stock.product_create", "product", product.id, f"Creation produit stock {product.name}")
-    db.commit()
+    try:
+        db.flush()
+        log_action(db, current_user, "stock.product_create", "product", product.id, f"Creation produit stock {product.name}")
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Création du produit impossible: code ou nom déjà utilisé.") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Création du produit impossible: {exc.__class__.__name__}.") from exc
     db.refresh(product)
-    return product_public(db, product)
+    return product_public(db, product, total_stock=Decimal("0"), include_stock_by_depot=False)
 
 
 @router.get("/products/{product_id}", response_model=ProductPublic)
@@ -670,7 +987,16 @@ def list_depots(current_user: User = Depends(require_tenant_user), db: Session =
     assert_permission(current_user, Permission.STOCK_READ)
     ensure_default_data(db, current_user.restaurant_id)
     db.commit()
-    return db.query(Depot).filter(Depot.restaurant_id == current_user.restaurant_id).order_by(Depot.created_at.asc()).all()
+    depots = db.query(Depot).filter(Depot.restaurant_id == current_user.restaurant_id).order_by(Depot.created_at.asc()).all()
+    unique_depots = []
+    seen = set()
+    for depot in depots:
+        key = normalize_depot_code(depot.code) or depot.id
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_depots.append(depot)
+    return unique_depots
 
 
 @router.post("/depots", response_model=DepotPublic, status_code=201)
@@ -730,7 +1056,18 @@ def list_units(current_user: User = Depends(require_tenant_user), db: Session = 
     assert_permission(current_user, Permission.STOCK_READ)
     ensure_default_data(db, current_user.restaurant_id)
     db.commit()
-    return db.query(Unit).filter(Unit.restaurant_id == current_user.restaurant_id).order_by(Unit.name.asc()).all()
+    units = db.query(Unit).filter(Unit.restaurant_id == current_user.restaurant_id).order_by(Unit.name.asc(), Unit.created_at.asc()).all()
+    unique_units = []
+    seen = set()
+    for unit in units:
+        key = normalize_unit_key(unit.name, unit.symbol)
+        symbol_key = normalize_unit_key(unit.symbol, unit.name)
+        if key in seen or symbol_key in seen:
+            continue
+        seen.add(key)
+        seen.add(symbol_key)
+        unique_units.append(unit)
+    return unique_units
 
 
 @router.post("/units", response_model=UnitPublic, status_code=201)
@@ -856,45 +1193,57 @@ def consume_lots_fefo(db: Session, restaurant_id: str, product_id: str, depot_id
 
 
 def create_stock_entry(payload: StockEntryIn, current_user: User, db: Session, movement_type: StockMovementType) -> StockMovement:
-    previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
-    quantity = dec(payload.quantity)
-    unit_price = dec(payload.unit_price) if payload.unit_price is not None else None
-    if payload.in_purchase_unit:
-        # Saisie en unité d'achat (sac, casier) -> conversion en unité de stock.
-        product = get_product_or_404(db, payload.product_id, current_user.restaurant_id)
-        factor = conversion_factor(product)
-        quantity = quantity * factor
-        if unit_price is not None:
-            unit_price = unit_price / factor  # prix par unité de stock (précision conservée)
-    movement = add_movement(
-        db,
-        restaurant_id=current_user.restaurant_id,
-        user_id=current_user.id,
-        movement_type=movement_type,
-        product_id=payload.product_id,
-        destination_depot_id=payload.destination_depot_id,
-        quantity=quantity,
-        unit_price=unit_price,
-        supplier_id=payload.supplier_id,
-        reason=payload.reason,
-        reference=payload.reference,
-        movement_date=payload.movement_date,
-    )
-    if payload.lot_number or payload.expiry_date:
-        create_stock_lot(
-            db, movement,
-            depot_id=payload.destination_depot_id,
-            quantity=movement.quantity,
-            unit_cost=movement.unit_price,
-            lot_number=payload.lot_number,
-            expiry_date=payload.expiry_date,
+    try:
+        ensure_stock_entry_columns(db)
+        previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
+        quantity = dec(payload.quantity)
+        unit_price = dec(payload.unit_price) if payload.unit_price is not None else None
+        if payload.in_purchase_unit:
+            # Saisie en unité d'achat (sac, casier) -> conversion en unité de stock.
+            product = get_product_or_404(db, payload.product_id, current_user.restaurant_id)
+            factor = conversion_factor(product)
+            quantity = quantity * factor
+            if unit_price is not None:
+                unit_price = unit_price / factor  # prix par unité de stock (précision conservée)
+        movement = add_movement(
+            db,
+            restaurant_id=current_user.restaurant_id,
+            user_id=current_user.id,
+            movement_type=movement_type,
+            product_id=payload.product_id,
+            destination_depot_id=payload.destination_depot_id,
+            quantity=quantity,
+            unit_price=unit_price,
+            supplier_id=payload.supplier_id,
+            reason=payload.reason,
+            reference=payload.reference,
+            movement_date=payload.movement_date,
         )
-    notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
-    from app.modules.finance.router import post_stock_reception_entry_safe
+        if payload.lot_number or payload.expiry_date:
+            create_stock_lot(
+                db, movement,
+                depot_id=payload.destination_depot_id,
+                quantity=movement.quantity,
+                unit_cost=movement.unit_price,
+                lot_number=payload.lot_number,
+                expiry_date=payload.expiry_date,
+            )
+        notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
+        from app.modules.finance.router import post_stock_reception_entry_safe
 
-    post_stock_reception_entry_safe(db, movement, current_user.id)
-    log_action(db, current_user, "stock.entry_create", "stock_movement", movement.id, "Entrée de stock")
-    db.commit()
+        post_stock_reception_entry_safe(db, movement, current_user.id)
+        log_action(db, current_user, "stock.entry_create", "stock_movement", movement.id, "Entrée de stock")
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        message = str(getattr(exc, "orig", exc)).splitlines()[0]
+        raise HTTPException(status_code=400, detail=f"Création de l'entrée impossible: contrainte base de données ({message}).") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Création de l'entrée impossible: {exc.__class__.__name__}.") from exc
     db.refresh(movement)
     return movement
 
@@ -914,9 +1263,21 @@ def create_direct_entry(payload: StockEntryIn, current_user: User = Depends(requ
 @router.post("/transfers", response_model=StockMovementPublic, status_code=201)
 def create_transfer(payload: StockTransferIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.TRANSFER, **payload.dict())
-    log_action(db, current_user, "stock.transfer_create", "stock_movement", movement.id, "Transfert de stock")
-    db.commit()
+    try:
+        ensure_stock_entry_columns(db)
+        movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.TRANSFER, **payload.dict())
+        log_action(db, current_user, "stock.transfer_create", "stock_movement", movement.id, "Transfert de stock")
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        message = str(getattr(exc, "orig", exc)).splitlines()[0]
+        raise HTTPException(status_code=400, detail=f"Création du transfert impossible: contrainte base de données ({message}).") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Création du transfert impossible: {exc.__class__.__name__}.") from exc
     db.refresh(movement)
     return movement
 
@@ -995,6 +1356,8 @@ def list_movements(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.STOCK_READ)
+    if not stock_movements_support_aggregation(db):
+        return []
     query = db.query(StockMovement).filter(StockMovement.restaurant_id == current_user.restaurant_id)
     if start_date:
         query = query.filter(StockMovement.movement_date >= start_date)
@@ -1006,7 +1369,11 @@ def list_movements(
         query = query.filter(StockMovement.product_id == product_id)
     if movement_type:
         query = query.filter(StockMovement.movement_type == movement_type)
-    return query.order_by(StockMovement.movement_date.desc(), StockMovement.created_at.desc()).limit(500).all()
+    try:
+        return query.order_by(StockMovement.movement_date.desc(), StockMovement.created_at.desc()).limit(500).all()
+    except SQLAlchemyError:
+        db.rollback()
+        return []
 
 
 @router.get("/entries", response_model=list[StockMovementPublic])
@@ -1079,12 +1446,18 @@ def get_low_stock_products(current_user: User = Depends(require_tenant_user), db
 def list_lots(product_id: str | None = None, depot_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     """Lots de stock encore disponibles (quantité restante > 0)."""
     assert_permission(current_user, Permission.STOCK_READ)
+    if "stock_lots" not in inspect(db.bind).get_table_names():
+        return []
     query = db.query(StockLot).filter(StockLot.restaurant_id == current_user.restaurant_id, StockLot.quantity_remaining > 0)
     if product_id:
         query = query.filter(StockLot.product_id == product_id)
     if depot_id:
         query = query.filter(StockLot.depot_id == depot_id)
-    return query.order_by(StockLot.expiry_date.is_(None).asc(), StockLot.expiry_date.asc()).limit(500).all()
+    try:
+        return query.order_by(StockLot.expiry_date.is_(None).asc(), StockLot.expiry_date.asc()).limit(500).all()
+    except SQLAlchemyError:
+        db.rollback()
+        return []
 
 
 @router.get("/lots/expiring")
@@ -1287,16 +1660,21 @@ def get_stock_movements_report(
     assert_permission(current_user, Permission.STOCK_READ)
     end = end_date or utcnow()
     start = start_date or (end - timedelta(days=7))
-    query = db.query(StockMovement).join(Product, Product.id == StockMovement.product_id).filter(StockMovement.restaurant_id == current_user.restaurant_id, StockMovement.movement_date >= start, StockMovement.movement_date <= end)
-    if depot_id:
-        query = query.filter((StockMovement.source_depot_id == depot_id) | (StockMovement.destination_depot_id == depot_id))
-    if product_id:
-        query = query.filter(StockMovement.product_id == product_id)
-    if category_id:
-        query = query.filter(Product.category_id == category_id)
-    if movement_type:
-        query = query.filter(StockMovement.movement_type == movement_type)
-    movements = query.order_by(StockMovement.movement_date.desc()).all()
+    movements = []
+    if stock_movements_support_aggregation(db):
+        query = db.query(StockMovement).join(Product, Product.id == StockMovement.product_id).filter(StockMovement.restaurant_id == current_user.restaurant_id, StockMovement.movement_date >= start, StockMovement.movement_date <= end)
+        if depot_id:
+            query = query.filter((StockMovement.source_depot_id == depot_id) | (StockMovement.destination_depot_id == depot_id))
+        if product_id:
+            query = query.filter(StockMovement.product_id == product_id)
+        if category_id:
+            query = query.filter(Product.category_id == category_id)
+        if movement_type:
+            query = query.filter(StockMovement.movement_type == movement_type)
+        try:
+            movements = query.order_by(StockMovement.movement_date.desc()).all()
+        except SQLAlchemyError:
+            db.rollback()
     all_products = db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()
     if depot_id:
         depot_rows = get_depot_stock(depot_id, current_user, db)

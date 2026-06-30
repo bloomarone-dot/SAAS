@@ -1,101 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  ArrowLeftRight,
-  BarChart3,
-  Boxes,
-  CalendarClock,
-  ClipboardCheck,
-  ClipboardList,
-  Download,
-  Factory,
-  PackagePlus,
-  PackageX,
-  Plus,
-  Search,
-  Warehouse,
-} from "lucide-react";
 
+import {
+  FilterBar,
+  LoadingState,
+  PageContainer,
+  PageHeader,
+  SecondaryAction,
+} from "@/modules/admin/components/AdminUi";
 import { formatApiError } from "@/utils/network";
 
-const tabs = [
-  { key: "dashboard", label: "Tableau de bord", icon: BarChart3 },
-  { key: "products", label: "Produits", icon: Boxes },
-  { key: "depots", label: "Dépôts", icon: Warehouse },
-  { key: "entries", label: "Entrées", icon: PackagePlus },
-  { key: "transfers", label: "Transferts", icon: ArrowLeftRight },
-  { key: "outputs", label: "Sorties", icon: PackageX },
-  { key: "inventories", label: "Inventaires", icon: ClipboardCheck },
-  { key: "lots", label: "Lots / DLC", icon: CalendarClock },
-  { key: "reports", label: "Rapports", icon: ClipboardList },
-  { key: "alerts", label: "Alertes", icon: AlertTriangle },
-];
-
-const movementLabels = {
-  ENTRY: "Entrée",
-  DIRECT_ENTRY: "Entrée directe",
-  TRANSFER: "Transfert",
-  OUTPUT: "Sortie",
-  LOSS: "Perte",
-  INVENTORY_PLUS: "Inventaire +",
-  INVENTORY_MINUS: "Inventaire -",
-  CANCELLATION: "Annulation",
-};
-
-const depotTypeLabels = {
-  principal: "Principal",
-  cuisine: "Cuisine",
-  boisson: "Boisson",
-  autre: "Autre",
-};
-
-const today = () => new Date().toISOString().slice(0, 10);
-const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
-const qty = (value) => Number(value || 0).toLocaleString("fr-FR", { maximumFractionDigits: 2 });
-
-const emptyProduct = {
-  code: "",
-  name: "",
-  product_type: "INGREDIENT",
-  unit_id: "",
-  minimum_stock: "",
-};
-
-const emptyDepot = { name: "", code: "", type: "autre", description: "" };
-
-const emptyEntry = {
-  movement_date: today(),
-  product_id: "",
-  destination_depot_id: "",
-  quantity: "",
-  unit_price: "",
-  in_purchase_unit: false,
-  lot_number: "",
-  expiry_date: "",
-  supplier_id: "",
-  reason: "",
-  reference: "",
-};
-
-const emptyTransfer = {
-  movement_date: today(),
-  product_id: "",
-  source_depot_id: "",
-  destination_depot_id: "",
-  quantity: "",
-  production_cost: "",
-  reason: "",
-  reference: "",
-};
-
-const emptyOutput = {
-  movement_date: today(),
-  product_id: "",
-  source_depot_id: "",
-  quantity: "",
-  reason: "consommation",
-  reference: "",
-};
+import { today, uniqueDepots } from "./shared/format";
+import {
+  emptyDepot,
+  emptyEntry,
+  emptyOutput,
+  emptyProduct,
+  emptyTransfer,
+  tabs,
+} from "./shared/constants";
+import { Dashboard } from "./Dashboard/Dashboard";
+import { ProductCreate } from "./Produit/Create";
+import { ProductList } from "./Produit/List";
+import { DepotCreate } from "./Depot/Create";
+import { DepotList } from "./Depot/List";
+import { EntryCreate } from "./Entree/Create";
+import { EntryList } from "./Entree/List";
+import { TransferCreate } from "./Transfert/Create";
+import { OutputCreate } from "./Sortie/Create";
+import { InventoryForm } from "./Inventaire/Form";
+import { LotList } from "./Lot/List";
+import { Reports } from "./Rapport/Reports";
+import { Alerts } from "./Alerte/Alerts";
 
 export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   const [activeTab, setActiveTab] = useState(resolveInitialTab(mode));
@@ -114,6 +49,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   const [productForm, setProductForm] = useState(emptyProduct);
   const [depotForm, setDepotForm] = useState(emptyDepot);
   const [entryForm, setEntryForm] = useState(emptyEntry);
+  const [entryView, setEntryView] = useState("list");
   const [directEntry, setDirectEntry] = useState(false);
   const [transferForm, setTransferForm] = useState(emptyTransfer);
   const [outputForm, setOutputForm] = useState(emptyOutput);
@@ -134,19 +70,42 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     setActiveTab(resolveInitialTab(mode));
   }, [mode]);
 
+  const uniqueProducts = useMemo(
+    () =>
+      products.filter(
+        (product, index, list) =>
+          index === list.findIndex((item) => item.id === product.id),
+      ),
+    [products],
+  );
+
   const visibleProducts = useMemo(() => {
     const value = query.trim().toLowerCase();
-    if (!value) return products;
-    return products.filter((product) =>
+    if (!value) return uniqueProducts;
+    return uniqueProducts.filter((product) =>
       [product.code, product.name, product.unit_name, product.unit_symbol]
         .filter(Boolean)
-        .some((field) => String(field).toLowerCase().includes(value))
+        .some((field) => String(field).toLowerCase().includes(value)),
     );
-  }, [products, query]);
+  }, [uniqueProducts, query]);
 
   const lowStock = useMemo(
-    () => products.filter((product) => Number(product.current_stock || 0) <= Number(product.minimum_stock || 0)),
-    [products]
+    () =>
+      uniqueProducts.filter(
+        (product) =>
+          Number(product.current_stock || 0) <=
+          Number(product.minimum_stock || 0),
+      ),
+    [uniqueProducts],
+  );
+
+  const visibleDepots = useMemo(() => uniqueDepots(depots), [depots]);
+  const entryMovements = useMemo(
+    () =>
+      movements.filter((movement) =>
+        ["ENTRY", "DIRECT_ENTRY"].includes(movement.movement_type),
+      ),
+    [movements],
   );
 
   useEffect(() => {
@@ -154,14 +113,41 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   }, []);
 
   useEffect(() => {
-    if (!inventoryDepotId && depots[0]) setInventoryDepotId(depots[0].id);
-    if (!entryForm.destination_depot_id && depots[0]) setEntryForm((form) => ({ ...form, destination_depot_id: depots[0].id }));
-    if (!transferForm.source_depot_id && depots[0]) setTransferForm((form) => ({ ...form, source_depot_id: depots[0].id }));
-    if (!outputForm.source_depot_id && depots[0]) setOutputForm((form) => ({ ...form, source_depot_id: depots[0].id }));
-  }, [depots]);
+    if (!inventoryDepotId && visibleDepots[0])
+      setInventoryDepotId(visibleDepots[0].id);
+    if (!entryForm.destination_depot_id && visibleDepots[0])
+      setEntryForm((form) => ({
+        ...form,
+        destination_depot_id: visibleDepots[0].id,
+      }));
+    if (visibleDepots[0])
+      setTransferForm((form) => {
+        const sourceId = form.source_depot_id || visibleDepots[0].id;
+        const destinationId =
+          form.destination_depot_id && form.destination_depot_id !== sourceId
+            ? form.destination_depot_id
+            : visibleDepots.find((depot) => depot.id !== sourceId)?.id || "";
+        if (
+          sourceId === form.source_depot_id &&
+          destinationId === form.destination_depot_id
+        )
+          return form;
+        return {
+          ...form,
+          source_depot_id: sourceId,
+          destination_depot_id: destinationId,
+        };
+      });
+    if (!outputForm.source_depot_id && visibleDepots[0])
+      setOutputForm((form) => ({
+        ...form,
+        source_depot_id: visibleDepots[0].id,
+      }));
+  }, [visibleDepots]);
 
   useEffect(() => {
-    if (!productForm.unit_id && units[0]) setProductForm((form) => ({ ...form, unit_id: units[0].id }));
+    if (!productForm.unit_id && units[0])
+      setProductForm((form) => ({ ...form, unit_id: units[0].id }));
     if (!entryForm.product_id && products[0]) {
       setEntryForm((form) => ({ ...form, product_id: products[0].id }));
       setTransferForm((form) => ({ ...form, product_id: products[0].id }));
@@ -192,7 +178,17 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
-      throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
+      throw new Error(
+        formatApiError(
+          Array.isArray(data?.detail)
+            ? data.detail
+                .map((item) => item.msg || item.message || item.type)
+                .filter(Boolean)
+                .join(" ")
+            : (data?.detail ?? data?.message ?? data?.error),
+          fallback,
+        ),
+      );
     }
     if (response.status === 204) return null;
     return response.json();
@@ -201,34 +197,110 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   async function loadAll() {
     setIsLoading(true);
     const resources = [
-      ["summary", () => api("/api/v1/stock/summary", { fallback: "Résumé stock indisponible." }), setSummary, null],
-      ["products", () => api("/api/v1/stock/products", { fallback: "Chargement des produits impossible." }), setProducts, []],
-      ["depots", () => api("/api/v1/stock/depots", { fallback: "Chargement des dépôts impossible." }), setDepots, []],
-      ["units", () => api("/api/v1/stock/units", { fallback: "Chargement des unités impossible." }), setUnits, []],
-      ["suppliers", () => api("/api/v1/stock/suppliers", { fallback: "Chargement des fournisseurs impossible." }), setSuppliers, []],
-      ["movements", () => api("/api/v1/stock/movements", { fallback: "Chargement des mouvements impossible." }), setMovements, []],
-      ["inventories", () => api("/api/v1/stock/inventories", { fallback: "Chargement des inventaires impossible." }), setInventories, []],
-      ["lots", () => api("/api/v1/stock/lots", { fallback: "Chargement des lots impossible." }), setLots, []],
-      ["report", () => api("/api/v1/stock/reports", { fallback: "Rapport stock indisponible." }), setReport, null],
+      [
+        "summary",
+        () =>
+          api("/api/v1/stock/summary", {
+            fallback: "Résumé stock indisponible.",
+          }),
+        setSummary,
+        null,
+      ],
+      [
+        "products",
+        () =>
+          api("/api/v1/stock/products", {
+            fallback: "Chargement des produits impossible.",
+          }),
+        setProducts,
+        [],
+      ],
+      [
+        "depots",
+        () =>
+          api("/api/v1/stock/depots", {
+            fallback: "Chargement des dépôts impossible.",
+          }),
+        setDepots,
+        [],
+      ],
+      [
+        "units",
+        () =>
+          api("/api/v1/stock/units", {
+            fallback: "Chargement des unités impossible.",
+          }),
+        setUnits,
+        [],
+      ],
+      [
+        "suppliers",
+        () =>
+          api("/api/v1/stock/suppliers", {
+            fallback: "Chargement des fournisseurs impossible.",
+          }),
+        setSuppliers,
+        [],
+      ],
+      [
+        "movements",
+        () =>
+          api("/api/v1/stock/movements", {
+            fallback: "Chargement des mouvements impossible.",
+          }),
+        setMovements,
+        [],
+      ],
+      [
+        "inventories",
+        () =>
+          api("/api/v1/stock/inventories", {
+            fallback: "Chargement des inventaires impossible.",
+          }),
+        setInventories,
+        [],
+      ],
+      [
+        "lots",
+        () =>
+          api("/api/v1/stock/lots", {
+            fallback: "Chargement des lots impossible.",
+          }),
+        setLots,
+        [],
+      ],
+      [
+        "report",
+        () =>
+          api("/api/v1/stock/reports", {
+            fallback: "Rapport stock indisponible.",
+          }),
+        setReport,
+        null,
+      ],
     ];
-    const results = await Promise.allSettled(resources.map(([, load]) => load()));
-    const errors = [];
+    const results = await Promise.allSettled(
+      resources.map(([, load]) => load()),
+    );
     results.forEach((result, index) => {
-      const [, , setter, fallbackValue] = resources[index];
+      const [resourceName, , setter, fallbackValue] = resources[index];
       if (result.status === "fulfilled") {
         setter(result.value);
         return;
       }
       setter(fallbackValue);
-      errors.push(result.reason?.message || "Chargement partiel du stock impossible.");
+      if (["products", "depots", "units"].includes(resourceName)) {
+        emit(result.reason?.message || "Chargement partiel du stock impossible.");
+      }
     });
-    if (errors.length) emit([...new Set(errors)].join(" "));
     setIsLoading(false);
   }
 
   async function loadInventoryRows(depotId) {
     try {
-      const rows = await api(`/api/v1/stock/depots/${depotId}/stock`, { fallback: "Chargement du stock du dépôt impossible." });
+      const rows = await api(`/api/v1/stock/depots/${depotId}/stock`, {
+        fallback: "Chargement du stock du dépôt impossible.",
+      });
       setInventoryRows(
         rows.map((row) => ({
           product_id: row.product_id,
@@ -236,7 +308,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
           theoretical_quantity: Number(row.quantity || 0),
           real_quantity: Number(row.quantity || 0),
           justification: "",
-        }))
+        })),
       );
     } catch (error) {
       setInventoryRows([]);
@@ -253,62 +325,146 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   }
 
   function depotName(id) {
-    return depots.find((depot) => depot.id === id)?.name || "-";
+    return visibleDepots.find((depot) => depot.id === id)?.name || "-";
   }
 
   function numericPayload(payload, fields) {
     return Object.fromEntries(
-      Object.entries(payload).map(([key, value]) => [key, fields.includes(key) ? Number(value || 0) : value || null])
+      Object.entries(payload).map(([key, value]) => [
+        key,
+        fields.includes(key) ? Number(value || 0) : value || null,
+      ]),
     );
+  }
+
+  function optionalText(value) {
+    const normalized = String(value || "").trim();
+    return normalized || undefined;
+  }
+
+  function dateToApiDateTime(value) {
+    return value ? new Date(`${value}T00:00:00`).toISOString() : undefined;
   }
 
   async function submitProduct(event) {
     event.preventDefault();
-    await submit("/api/v1/stock/products", numericPayload(productForm, ["minimum_stock"]), () => {
-      setProductForm({ ...emptyProduct, unit_id: units[0]?.id || "" });
-      setActiveTab("products");
-      emit("Produit stock créé.");
-    });
+    const productPayload = {
+      code: productForm.code?.trim() || null,
+      name: productForm.name?.trim(),
+      unit_id: productForm.unit_id || null,
+      minimum_stock: Number(productForm.minimum_stock || 0),
+      product_type: productForm.product_type || "INGREDIENT",
+    };
+    await submit(
+      "/api/v1/stock/products",
+      productPayload,
+      () => {
+        setProductForm({ ...emptyProduct, unit_id: units[0]?.id || "" });
+        setActiveTab("products");
+        emit("Produit stock créé.");
+      },
+      "Création du produit impossible.",
+    );
   }
 
   async function submitDepot(event) {
     event.preventDefault();
-    await submit("/api/v1/stock/depots", depotForm, () => {
-      setDepotForm(emptyDepot);
-      emit("Dépôt créé.");
-    }, "Création du dépôt impossible.");
+    await submit(
+      "/api/v1/stock/depots",
+      depotForm,
+      () => {
+        setDepotForm(emptyDepot);
+        emit("Dépôt créé.");
+      },
+      "Création du dépôt impossible.",
+    );
   }
 
   async function submitEntry(event) {
     event.preventDefault();
-    const path = directEntry ? "/api/v1/stock/direct-entries" : "/api/v1/stock/entries";
+    const path = directEntry
+      ? "/api/v1/stock/direct-entries"
+      : "/api/v1/stock/entries";
     const payload = {
       ...numericPayload(entryForm, ["quantity", "unit_price"]),
       in_purchase_unit: !!entryForm.in_purchase_unit,
       lot_number: entryForm.lot_number || null,
       expiry_date: entryForm.expiry_date || null,
     };
-    await submit(path, payload, () => {
-      setEntryForm({ ...emptyEntry, product_id: products[0]?.id || "", destination_depot_id: depots[0]?.id || "" });
-      setActiveTab("entries");
-      emit(directEntry ? "Entrée directe validée." : "Entrée stock validée.");
-    });
+    await submit(
+      path,
+      payload,
+      () => {
+        setEntryForm({
+          ...emptyEntry,
+          product_id: products[0]?.id || "",
+          destination_depot_id: visibleDepots[0]?.id || "",
+        });
+        setActiveTab("entries");
+        setEntryView("list");
+        emit(directEntry ? "Entrée directe validée." : "Entrée stock validée.");
+      },
+      directEntry ? "Création de l'entrée directe impossible." : "Création de l'entrée stock impossible.",
+    );
   }
 
   async function submitTransfer(event) {
     event.preventDefault();
-    await submit("/api/v1/stock/transfers", numericPayload(transferForm, ["quantity", "production_cost"]), () => {
-      setTransferForm({ ...emptyTransfer, product_id: products[0]?.id || "", source_depot_id: depots[0]?.id || "" });
-      setActiveTab("transfers");
-      emit("Transfert validé.");
-    });
+    if (!transferForm.product_id) {
+      emit("Sélectionnez un produit à transférer.");
+      return;
+    }
+    if (!transferForm.source_depot_id || !transferForm.destination_depot_id) {
+      emit("Sélectionnez un dépôt source et un dépôt destination.");
+      return;
+    }
+    if (transferForm.source_depot_id === transferForm.destination_depot_id) {
+      emit("Le dépôt source et le dépôt destination doivent être différents.");
+      return;
+    }
+    const payload = {
+      movement_date: dateToApiDateTime(transferForm.movement_date),
+      product_id: String(transferForm.product_id || ""),
+      source_depot_id: String(transferForm.source_depot_id || ""),
+      destination_depot_id: String(transferForm.destination_depot_id || ""),
+      quantity: Number(transferForm.quantity || 0),
+      production_cost:
+        transferForm.production_cost === "" || transferForm.production_cost == null
+          ? undefined
+          : Number(transferForm.production_cost),
+      reason: optionalText(transferForm.reason),
+      reference: optionalText(transferForm.reference),
+    };
+    await submit(
+      "/api/v1/stock/transfers",
+      Object.fromEntries(
+        Object.entries(payload).filter(([, value]) => value !== undefined),
+      ),
+      () => {
+        setTransferForm({
+          ...emptyTransfer,
+          product_id: products[0]?.id || "",
+          source_depot_id: visibleDepots[0]?.id || "",
+          destination_depot_id:
+            visibleDepots.find((depot) => depot.id !== visibleDepots[0]?.id)
+              ?.id || "",
+        });
+        setActiveTab("transfers");
+        emit("Transfert validé.");
+      },
+      "Création du transfert impossible.",
+    );
   }
 
   async function submitOutput(event) {
     event.preventDefault();
     const path = isLoss ? "/api/v1/stock/losses" : "/api/v1/stock/outputs";
     await submit(path, numericPayload(outputForm, ["quantity"]), () => {
-      setOutputForm({ ...emptyOutput, product_id: products[0]?.id || "", source_depot_id: depots[0]?.id || "" });
+      setOutputForm({
+        ...emptyOutput,
+        product_id: products[0]?.id || "",
+        source_depot_id: visibleDepots[0]?.id || "",
+      });
       setActiveTab("outputs");
       emit(isLoss ? "Perte enregistrée." : "Sortie validée.");
     });
@@ -322,13 +478,19 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
         depot_id: inventoryDepotId,
         inventory_date: new Date().toISOString(),
         observation: "Inventaire saisi depuis l'interface stock",
-        details: inventoryRows.map((row) => ({ product_id: row.product_id, real_quantity: Number(row.real_quantity || 0), justification: row.justification || null })),
+        details: inventoryRows.map((row) => ({
+          product_id: row.product_id,
+          real_quantity: Number(row.real_quantity || 0),
+          justification: row.justification || null,
+        })),
       },
       async (inventory) => {
-        await api(`/api/v1/stock/inventories/${inventory.id}/validate`, { method: "PATCH" });
+        await api(`/api/v1/stock/inventories/${inventory.id}/validate`, {
+          method: "PATCH",
+        });
         setActiveTab("inventories");
         emit("Inventaire validé et ajustements générés.");
-      }
+      },
     );
   }
 
@@ -348,13 +510,28 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     }
   }
 
-  async function submit(path, payload, afterSuccess, fallback = "Action stock impossible.") {
+  async function submit(
+    path,
+    payload,
+    afterSuccess,
+    fallback = "Action stock impossible.",
+  ) {
+    let result = null;
     try {
-      const result = await api(path, { method: "POST", body: JSON.stringify(payload), fallback });
-      if (afterSuccess) await afterSuccess(result);
-      await loadAll();
+      result = await api(path, {
+        method: "POST",
+        body: JSON.stringify(payload),
+        fallback,
+      });
     } catch (error) {
       emit(error.message || fallback);
+      return;
+    }
+    if (afterSuccess) await afterSuccess(result);
+    try {
+      await loadAll();
+    } catch (error) {
+      emit(error.message || "Action effectuée, mais le rafraîchissement des données a échoué.");
     }
   }
 
@@ -370,66 +547,139 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     }
   }
 
-  return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-950">Gestion de stock multi-dépôts</h2>
-        </div>
-      </header>
+  const activeTabLabel =
+    tabs.find((tab) => tab.key === activeTab)?.label || "Stock";
 
-      <nav className="flex gap-2 overflow-x-auto border-b border-slate-200 pb-2">
+  return (
+    <PageContainer>
+      <PageHeader
+        eyebrow="Gestionnaire de stock"
+        title="Gestion de stock multi-dépôts"
+        subtitle="Pilotez les produits, dépôts, mouvements, inventaires et rapports depuis une interface unifiée."
+        primaryAction={
+          <SecondaryAction
+            icon="Plus"
+            onClick={() => {
+              setActiveTab("entries");
+              setEntryView("create");
+            }}
+          >
+            Nouvelle entrée
+          </SecondaryAction>
+        }
+        secondaryActions={
+          <SecondaryAction icon="BarChart3" onClick={() => setActiveTab("reports")}>
+            Rapports
+          </SecondaryAction>
+        }
+        meta={[
+          <span key="active">Vue active : {activeTabLabel}</span>,
+          <span key="products">{uniqueProducts.length.toLocaleString("fr-FR")} produit(s)</span>,
+          <span key="depots">{visibleDepots.length.toLocaleString("fr-FR")} dépôt(s)</span>,
+          <span key="alerts">{lowStock.length.toLocaleString("fr-FR")} alerte(s)</span>,
+        ]}
+      />
+      <FilterBar className="overflow-x-auto">
         {tabs.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
-            onClick={() => setActiveTab(key)}
-            className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium ${
-              activeTab === key ? "bg-slate-950 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+            onClick={() => {
+              setActiveTab(key);
+              if (key === "entries") setEntryView("list");
+            }}
+            className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-black transition ${
+              activeTab === key
+                ? "bg-slate-950 text-white"
+                : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
             }`}
           >
             <Icon size={16} />
             {label}
           </button>
         ))}
-      </nav>
+      </FilterBar>
 
-      {isLoading && <div className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">Chargement...</div>}
+      {isLoading && <LoadingState label="Chargement des données stock..." />}
 
       {activeTab === "dashboard" && <Dashboard summary={summary} />}
+
       {activeTab === "products" && (
-        <Products
-          products={visibleProducts}
-          units={units}
-          query={query}
-          setQuery={setQuery}
-          form={productForm}
-          setForm={setProductForm}
-          onSubmit={submitProduct}
-        />
+        <section className="grid gap-4 xl:grid-cols-[380px_1fr]">
+          <ProductCreate
+            units={units}
+            form={productForm}
+            setForm={setProductForm}
+            onSubmit={submitProduct}
+          />
+          <ProductList
+            products={visibleProducts}
+            query={query}
+            setQuery={setQuery}
+          />
+        </section>
       )}
-      {activeTab === "depots" && <Depots depots={depots} form={depotForm} setForm={setDepotForm} onSubmit={submitDepot} />}
+
+      {activeTab === "depots" && (
+        <section className="grid gap-4 xl:grid-cols-[380px_1fr]">
+          <DepotCreate
+            form={depotForm}
+            setForm={setDepotForm}
+            onSubmit={submitDepot}
+          />
+          <DepotList depots={visibleDepots} />
+        </section>
+      )}
+
       {activeTab === "entries" && (
-        <EntryForm
-          form={entryForm}
-          setForm={setEntryForm}
+        <>
+          {entryView === "create" ? (
+            <EntryCreate
+              form={entryForm}
+              setForm={setEntryForm}
+              products={products}
+              depots={visibleDepots}
+              suppliers={suppliers}
+              directEntry={directEntry}
+              setDirectEntry={setDirectEntry}
+              onSubmit={submitEntry}
+            />
+          ) : (
+            <EntryList
+              entries={entryMovements}
+              productName={productName}
+              depotName={depotName}
+              onCreate={() => setEntryView("create")}
+            />
+          )}
+        </>
+      )}
+
+      {activeTab === "transfers" && (
+        <TransferCreate
+          form={transferForm}
+          setForm={setTransferForm}
           products={products}
-          depots={depots}
-          suppliers={suppliers}
-          directEntry={directEntry}
-          setDirectEntry={setDirectEntry}
-          onSubmit={submitEntry}
+          depots={visibleDepots}
+          onSubmit={submitTransfer}
         />
       )}
-      {activeTab === "transfers" && (
-        <TransferForm form={transferForm} setForm={setTransferForm} products={products} depots={depots} onSubmit={submitTransfer} />
-      )}
+
       {activeTab === "outputs" && (
-        <OutputForm form={outputForm} setForm={setOutputForm} products={products} depots={depots} isLoss={isLoss} setIsLoss={setIsLoss} onSubmit={submitOutput} />
+        <OutputCreate
+          form={outputForm}
+          setForm={setOutputForm}
+          products={products}
+          depots={visibleDepots}
+          isLoss={isLoss}
+          setIsLoss={setIsLoss}
+          onSubmit={submitOutput}
+        />
       )}
+
       {activeTab === "inventories" && (
         <InventoryForm
-          depots={depots}
+          depots={visibleDepots}
           depotId={inventoryDepotId}
           setDepotId={setInventoryDepotId}
           rows={inventoryRows}
@@ -439,11 +689,12 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
           inventories={inventories}
         />
       )}
+
       {activeTab === "reports" && (
         <Reports
           filters={filters}
           setFilters={setFilters}
-          depots={depots}
+          depots={visibleDepots}
           products={products}
           report={report}
           movements={movements}
@@ -454,54 +705,21 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
           depotName={depotName}
         />
       )}
-      {activeTab === "lots" && <Lots lots={lots} productName={productName} depotName={depotName} />}
-      {activeTab === "alerts" && <Alerts products={lowStock} />}
-    </div>
-  );
-}
 
-function Lots({ lots, productName, depotName }) {
-  const now = Date.now();
-  const soon = now + 7 * 24 * 3600 * 1000;
-  const status = (lot) => {
-    if (!lot.expiry_date) return null;
-    const t = new Date(lot.expiry_date).getTime();
-    if (t < now) return { label: "Périmé", cls: "bg-red-100 text-red-700" };
-    if (t <= soon) return { label: "Périme bientôt", cls: "bg-amber-100 text-amber-700" };
-    return { label: "OK", cls: "bg-emerald-100 text-emerald-700" };
-  };
-  const sorted = [...lots].sort((a, b) => new Date(a.expiry_date || "2999-01-01") - new Date(b.expiry_date || "2999-01-01"));
-  return (
-    <Panel title="Lots & péremption (FEFO)">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
-          <thead><tr className="border-b border-slate-200 text-slate-500"><th className="px-3 py-2">Produit</th><th className="px-3 py-2">Dépôt</th><th className="px-3 py-2">N° lot</th><th className="px-3 py-2">Péremption</th><th className="px-3 py-2">Restant</th><th className="px-3 py-2">État</th></tr></thead>
-          <tbody>
-            {sorted.map((lot) => {
-              const s = status(lot);
-              return (
-                <tr key={lot.id} className="border-b border-slate-100">
-                  <td className="px-3 py-2">{productName ? productName(lot.product_id) : lot.product_id}</td>
-                  <td className="px-3 py-2">{depotName ? depotName(lot.depot_id) : lot.depot_id}</td>
-                  <td className="px-3 py-2">{lot.lot_number || "-"}</td>
-                  <td className="px-3 py-2">{lot.expiry_date ? String(lot.expiry_date).slice(0, 10) : "—"}</td>
-                  <td className="px-3 py-2 font-semibold">{qty(lot.quantity_remaining)}</td>
-                  <td className="px-3 py-2">{s ? <span className={`rounded px-2 py-1 text-xs font-bold ${s.cls}`}>{s.label}</span> : <span className="text-slate-400">non daté</span>}</td>
-                </tr>
-              );
-            })}
-            {!sorted.length && <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">Aucun lot suivi. Renseignez un n° de lot / date de péremption à la réception.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
+      {activeTab === "lots" && (
+        <LotList lots={lots} productName={productName} depotName={depotName} />
+      )}
+
+      {activeTab === "alerts" && <Alerts products={lowStock} />}
+    </PageContainer>
   );
 }
 
 function resolveInitialTab(mode) {
   // Clés d'onglet directes (menu nettoyé) : mapping 1:1.
   if (tabs.some((tab) => tab.key === mode)) return mode;
-  if (["stock", "stocks", "create-stock-product"].includes(mode)) return "products";
+  if (["stock", "stocks", "create-stock-product"].includes(mode))
+    return "products";
   if (["movements", "stock-in"].includes(mode)) return "entries";
   if (mode === "transfer") return "transfers";
   if (["stock-out", "damages"].includes(mode)) return "outputs";
@@ -509,436 +727,4 @@ function resolveInitialTab(mode) {
   if (["reports", "stock-report", "rotation"].includes(mode)) return "reports";
   if (mode === "low-stock") return "alerts";
   return "dashboard";
-}
-
-function Dashboard({ summary }) {
-  const cards = [
-    ["Produits", summary?.product_count, Boxes],
-    ["Valeur stock", money(summary?.stock_value), Factory],
-    ["Sous seuil", summary?.low_stock_count, AlertTriangle],
-    ["Ruptures", summary?.out_of_stock_count, PackageX],
-  ];
-  return (
-    <section className="space-y-5">
-      <div className="grid gap-3 md:grid-cols-4">
-        {cards.map(([label, value, Icon]) => (
-          <div key={label} className="rounded-md border border-slate-200 bg-white p-4">
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-sm">{label}</span>
-              <Icon size={18} />
-            </div>
-            <strong className="mt-3 block text-2xl text-slate-950">{value ?? 0}</strong>
-          </div>
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <MovementList title="Dernières entrées" rows={summary?.latest_entries || []} />
-        <MovementList title="Dernières sorties" rows={summary?.latest_outputs || []} />
-        <MovementList title="Derniers transferts" rows={summary?.latest_transfers || []} />
-      </div>
-    </section>
-  );
-}
-
-function MovementList({ title, rows }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-white p-4">
-      <h3 className="font-semibold text-slate-950">{title}</h3>
-      <div className="mt-3 space-y-2">
-        {rows.slice(0, 5).map((row) => (
-          <div key={row.id} className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-2 text-sm">
-            <span>{movementLabels[row.movement_type] || row.movement_type}</span>
-            <strong>{qty(row.quantity)}</strong>
-          </div>
-        ))}
-        {!rows.length && <p className="text-sm text-slate-500">Aucun mouvement.</p>}
-      </div>
-    </div>
-  );
-}
-
-function Products({ products, units, query, setQuery, form, setForm, onSubmit }) {
-  return (
-    <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
-      <Panel title="Ajouter un produit">
-        <form onSubmit={onSubmit} className="space-y-3">
-          <Input label="Code" value={form.code} onChange={(code) => setForm({ ...form, code })} />
-          <Input label="Nom" required value={form.name} onChange={(name) => setForm({ ...form, name })} />
-          <Select label="Unité" value={form.unit_id} onChange={(unit_id) => setForm({ ...form, unit_id })} options={units.map((unit) => [unit.id, `${unit.name} (${unit.symbol})`])} />
-          <Select label="Type" value={form.product_type} onChange={(product_type) => setForm({ ...form, product_type })} options={[["INGREDIENT", "Ingrédient"], ["BOISSON", "Boisson"], ["EMBALLAGE", "Emballage"]]} />
-          <Input label="Seuil minimum" type="number" value={form.minimum_stock} onChange={(minimum_stock) => setForm({ ...form, minimum_stock })} />
-          <Submit label="Créer" />
-        </form>
-      </Panel>
-      <Panel title="Produits">
-        <div className="mb-3 flex items-center gap-2 rounded-md border border-slate-200 px-3">
-          <Search size={16} className="text-slate-400" />
-          <input className="min-h-10 flex-1 outline-none" placeholder="Rechercher un produit" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </div>
-        <Table
-          columns={["Produit", "Unité", "Stock total", "Seuil", "Valeur", "Stock par dépôt"]}
-          rows={products.map((product) => [
-            <span key="p"><strong>{product.name}</strong><br /><small className="text-slate-500">{product.code || "-"}</small></span>,
-            product.unit_symbol || product.unit_name,
-            qty(product.current_stock),
-            qty(product.minimum_stock),
-            money(product.stock_value),
-            product.stock_by_depot?.map((row) => `${row.depot_name}: ${qty(row.quantity)}`).join(" | ") || "-",
-          ])}
-        />
-      </Panel>
-    </section>
-  );
-}
-
-function Depots({ depots, form, setForm, onSubmit }) {
-  return (
-    <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
-      <Panel title="Créer un dépôt">
-        <form onSubmit={onSubmit} className="space-y-3">
-          <Input label="Nom" required value={form.name} onChange={(name) => setForm({ ...form, name })} />
-          <Input label="Code" required value={form.code} onChange={(code) => setForm({ ...form, code: code.toUpperCase() })} />
-          <Select label="Type" value={form.type} onChange={(type) => setForm({ ...form, type })} options={[["principal", "Principal"], ["cuisine", "Cuisine"], ["boisson", "Boisson"], ["autre", "Autre"]]} />
-          <Input label="Description" value={form.description} onChange={(description) => setForm({ ...form, description })} />
-          <Submit label="Créer" />
-        </form>
-      </Panel>
-      <Panel title="Dépôts">
-        <Table columns={["Nom", "Code", "Type", "Statut"]} rows={depots.map((depot) => [depot.name, depot.code, depotTypeLabels[depot.type], depot.is_active ? "Actif" : "Inactif"])} />
-      </Panel>
-    </section>
-  );
-}
-
-function EntryForm({ form, setForm, products, depots, suppliers, directEntry, setDirectEntry, onSubmit }) {
-  return (
-    <Panel title="Entrée de stock">
-      <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <Input label="Date" type="date" value={form.movement_date} onChange={(movement_date) => setForm({ ...form, movement_date })} />
-        <Select label="Produit" value={form.product_id} onChange={(product_id) => setForm({ ...form, product_id })} options={products.map((p) => [p.id, p.name])} />
-        <Select label="Dépôt destination" value={form.destination_depot_id} onChange={(destination_depot_id) => setForm({ ...form, destination_depot_id })} options={depots.map((d) => [d.id, d.name])} />
-        <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
-        <Input label="Prix d'achat" type="number" value={form.unit_price} onChange={(unit_price) => setForm({ ...form, unit_price })} />
-        <Select label="Fournisseur" value={form.supplier_id} onChange={(supplier_id) => setForm({ ...form, supplier_id })} options={[["", "Non renseigné"], ...suppliers.map((s) => [s.id, s.name])]} />
-        <Input label="N° de lot (optionnel)" value={form.lot_number} onChange={(lot_number) => setForm({ ...form, lot_number })} />
-        <Input label="Date de péremption (DLC/DLUO)" type="date" value={form.expiry_date} onChange={(expiry_date) => setForm({ ...form, expiry_date })} />
-        <Input label="Observation" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} />
-        <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={form.in_purchase_unit} onChange={(event) => setForm({ ...form, in_purchase_unit: event.target.checked })} /> Saisie en unité d'achat (sac, casier…)</label>
-        <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={directEntry} onChange={(event) => setDirectEntry(event.target.checked)} /> Entrée directe</label>
-        <Submit label="Valider l'entrée" />
-      </form>
-    </Panel>
-  );
-}
-
-function TransferForm({ form, setForm, products, depots, onSubmit }) {
-  return (
-    <Panel title="Transfert entre dépôts">
-      <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <Input label="Date" type="date" value={form.movement_date} onChange={(movement_date) => setForm({ ...form, movement_date })} />
-        <Select label="Produit" value={form.product_id} onChange={(product_id) => setForm({ ...form, product_id })} options={products.map((p) => [p.id, p.name])} />
-        <Select label="Dépôt source" value={form.source_depot_id} onChange={(source_depot_id) => setForm({ ...form, source_depot_id })} options={depots.map((d) => [d.id, d.name])} />
-        <Select label="Dépôt destination" value={form.destination_depot_id} onChange={(destination_depot_id) => setForm({ ...form, destination_depot_id })} options={depots.map((d) => [d.id, d.name])} />
-        <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
-        <Input label="Coût de production" type="number" value={form.production_cost} onChange={(production_cost) => setForm({ ...form, production_cost })} />
-        <Input label="Motif" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} />
-        <Input label="Référence" value={form.reference} onChange={(reference) => setForm({ ...form, reference })} />
-        <Submit label="Valider le transfert" />
-      </form>
-    </Panel>
-  );
-}
-
-function OutputForm({ form, setForm, products, depots, isLoss, setIsLoss, onSubmit }) {
-  return (
-    <Panel title="Sortie de stock">
-      <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <Input label="Date" type="date" value={form.movement_date} onChange={(movement_date) => setForm({ ...form, movement_date })} />
-        <Select label="Produit" value={form.product_id} onChange={(product_id) => setForm({ ...form, product_id })} options={products.map((p) => [p.id, p.name])} />
-        <Select label="Dépôt source" value={form.source_depot_id} onChange={(source_depot_id) => setForm({ ...form, source_depot_id })} options={depots.map((d) => [d.id, d.name])} />
-        <Input label="Quantité" type="number" required value={form.quantity} onChange={(quantity) => setForm({ ...form, quantity })} />
-        <Select label="Motif" value={form.reason} onChange={(reason) => setForm({ ...form, reason })} options={[["consommation", "Consommation"], ["vente", "Vente"], ["perte", "Perte"], ["casse", "Casse"], ["perime", "Périmé"], ["autre", "Autre"]]} />
-        <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={isLoss} onChange={(event) => setIsLoss(event.target.checked)} /> Comptabiliser comme perte</label>
-        <Submit label="Valider la sortie" />
-      </form>
-    </Panel>
-  );
-}
-
-function InventoryForm({ depots, depotId, setDepotId, rows, setRows, onSubmit, onExport, inventories }) {
-  const exportRows = rows.map((row) => ({
-    product: row.name,
-    theoretical: qty(row.theoretical_quantity),
-    real: qty(row.real_quantity),
-    gap: qty(Number(row.theoretical_quantity || 0) - Number(row.real_quantity || 0)),
-    justification: row.justification || "",
-  }));
-  const exportColumns = [
-    ["product", "Produit"],
-    ["theoretical", "Stock théorique"],
-    ["real", "Stock réel"],
-    ["gap", "Écart"],
-    ["justification", "Justification"],
-  ];
-  return (
-    <section className="space-y-4">
-      <Panel title="Inventaire">
-        <form onSubmit={onSubmit} className="space-y-3">
-          <Select label="Dépôt" value={depotId} onChange={setDepotId} options={depots.map((d) => [d.id, d.name])} />
-          <ExportActions title="Inventaire" filename="inventaire" rows={exportRows} columns={exportColumns} onExport={(format) => onExport?.("inventory", format)} />
-          <Table
-            columns={["Produit", "Théorique", "Réel", "Écart", "Justification"]}
-            rows={rows.map((row, index) => [
-              row.name,
-              qty(row.theoretical_quantity),
-              <input key={row.product_id} className="min-h-9 w-28 rounded-md border border-slate-200 px-2" type="number" value={row.real_quantity} onChange={(event) => {
-                const next = [...rows];
-                next[index] = { ...row, real_quantity: event.target.value };
-                setRows(next);
-              }} />,
-              qty(Number(row.theoretical_quantity || 0) - Number(row.real_quantity || 0)),
-              <input key={`${row.product_id}-justification`} className="min-h-9 w-64 rounded-md border border-slate-200 px-2" value={row.justification || ""} onChange={(event) => {
-                const next = [...rows];
-                next[index] = { ...row, justification: event.target.value };
-                setRows(next);
-              }} placeholder="Motif de l'écart" />,
-            ])}
-          />
-          <Submit label="Valider l'inventaire" />
-        </form>
-      </Panel>
-      <Panel title="Historique inventaires">
-        <Table columns={["Date", "Dépôt", "Statut", "Lignes"]} rows={inventories.map((inventory) => [new Date(inventory.inventory_date).toLocaleDateString("fr-FR"), inventory.depot_id, inventory.status, inventory.details?.length || 0])} />
-      </Panel>
-    </section>
-  );
-}
-
-function Reports({ filters, setFilters, depots, products, report, movements, onSubmit, isLoading, onExport, productName, depotName }) {
-  const rows = report?.movements || movements;
-  const exportRows = rows.map((movement) => ({
-    date: new Date(movement.movement_date || movement.created_at).toLocaleDateString("fr-FR"),
-    type: movementLabels[movement.movement_type] || movement.movement_type,
-    product: productName(movement.product_id),
-    source: depotName(movement.source_depot_id),
-    destination: depotName(movement.destination_depot_id),
-    quantity: qty(movement.quantity),
-    amount: money(movement.total_amount),
-    production_cost: money(movement.production_cost),
-  }));
-  const exportColumns = [
-    ["date", "Date"],
-    ["type", "Type"],
-    ["product", "Produit"],
-    ["source", "Source"],
-    ["destination", "Destination"],
-    ["quantity", "Quantité"],
-    ["amount", "Montant"],
-    ["production_cost", "Coût production"],
-  ];
-  return (
-    <Panel title="Rapports de stock">
-      <form onSubmit={onSubmit} className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <Input label="Début" type="date" value={filters.start_date} onChange={(start_date) => setFilters({ ...filters, start_date })} />
-        <Input label="Fin" type="date" value={filters.end_date} onChange={(end_date) => setFilters({ ...filters, end_date })} />
-        <Select label="Dépôt" value={filters.depot_id} onChange={(depot_id) => setFilters({ ...filters, depot_id })} options={[["", "Tous"], ...depots.map((d) => [d.id, d.name])]} />
-        <Select label="Produit" value={filters.product_id} onChange={(product_id) => setFilters({ ...filters, product_id })} options={[["", "Tous"], ...products.map((p) => [p.id, p.name])]} />
-        <Select label="Type" value={filters.movement_type} onChange={(movement_type) => setFilters({ ...filters, movement_type })} options={[["", "Tous"], ...Object.entries(movementLabels)]} />
-        <Submit label="Filtrer" />
-      </form>
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <p className="text-sm text-slate-500">
-          Période {filters.start_date || "-"} au {filters.end_date || "-"} · Dépôt {filters.depot_id ? depotName(filters.depot_id) : "Tous"}
-        </p>
-        <ExportActions title="Rapport stock" filename="rapport-stock" rows={exportRows} columns={exportColumns} onExport={(format) => onExport?.("stock-report", format)} />
-      </div>
-      {isLoading && <div className="mb-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-500">Chargement du rapport...</div>}
-      <div className="mb-4 grid gap-3 md:grid-cols-4">
-        <MiniStat label="Valeur stock" value={money(report?.stock_value)} />
-        <MiniStat label="Entrées" value={money(report?.entries_value)} />
-        <MiniStat label="Sorties" value={money(report?.outputs_value)} />
-        <MiniStat label="Stock faible" value={report?.low_stock_count || 0} />
-      </div>
-      <Table
-        columns={["Date", "Type", "Produit", "Source", "Destination", "Quantité", "Montant", "Coût production"]}
-        rows={rows.map((movement) => [
-          new Date(movement.movement_date || movement.created_at).toLocaleDateString("fr-FR"),
-          movementLabels[movement.movement_type] || movement.movement_type,
-          productName(movement.product_id),
-          depotName(movement.source_depot_id),
-          depotName(movement.destination_depot_id),
-          qty(movement.quantity),
-          money(movement.total_amount),
-          money(movement.production_cost),
-        ])}
-      />
-    </Panel>
-  );
-}
-
-function Alerts({ products }) {
-  return (
-    <Panel title="Produits sous seuil minimum">
-      <Table columns={["Produit", "Stock", "Seuil", "Valeur"]} rows={products.map((product) => [product.name, qty(product.current_stock), qty(product.minimum_stock), money(product.stock_value)])} />
-    </Panel>
-  );
-}
-
-function Panel({ title, children }) {
-  return (
-    <section className="rounded-md border border-slate-200 bg-white p-4">
-      <h3 className="mb-4 text-lg font-semibold text-slate-950">{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function MiniStat({ label, value }) {
-  return (
-    <div className="rounded-md bg-slate-50 p-3">
-      <span className="text-xs uppercase tracking-wide text-slate-500">{label}</span>
-      <strong className="mt-1 block text-lg text-slate-950">{value}</strong>
-    </div>
-  );
-}
-
-function ExportActions({ title, filename, rows, columns, onExport }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      <button type="button" onClick={async () => { await onExport?.("excel"); exportExcel(`${filename}-${today()}.xls`, title, rows, columns); }} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700">
-        <Download size={16} />
-        Exporter Excel
-      </button>
-      <button type="button" onClick={async () => { await onExport?.("pdf"); exportPdf(title, rows, columns); }} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700">
-        <Download size={16} />
-        Exporter PDF
-      </button>
-    </div>
-  );
-}
-
-function exportExcel(filename, title, rows, columns) {
-  const blob = new Blob([buildExportDocument(title, rows, columns)], { type: "application/vnd.ms-excel;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function exportPdf(title, rows, columns) {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) {
-    window.alert("Export PDF bloqué par le navigateur.");
-    return;
-  }
-  printWindow.document.open();
-  printWindow.document.write(buildExportDocument(title, rows, columns, true));
-  printWindow.document.close();
-  setTimeout(() => {
-    printWindow.focus();
-    printWindow.print();
-  }, 250);
-}
-
-function buildExportDocument(title, rows, columns, printable = false) {
-  const exportedAt = new Date().toLocaleString("fr-FR");
-  return `
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          body { font-family: Arial, sans-serif; color: #172033; padding: ${printable ? "28px" : "12px"}; }
-          h1 { margin: 0 0 6px; color: #0f172a; }
-          p { margin: 0 0 16px; color: #475569; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th { background: #0f172a; color: white; text-align: left; }
-          th, td { border: 1px solid #d8dee9; padding: 8px; }
-          tr:nth-child(even) td { background: #f8fafc; }
-        </style>
-      </head>
-      <body>
-        <h1>${escapeHtml(title)}</h1>
-        <p>Exporté le ${escapeHtml(exportedAt)}</p>
-        <table>
-          <thead><tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr></thead>
-          <tbody>
-            ${rows.map((row) => `<tr>${columns.map(([key]) => `<td>${escapeHtml(row[key])}</td>`).join("")}</tr>`).join("")}
-          </tbody>
-        </table>
-      </body>
-    </html>
-  `;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function Input({ label, value, onChange, type = "text", required = false }) {
-  return (
-    <label className="block text-sm">
-      <span className="mb-1 block font-medium text-slate-700">{label}</span>
-      <input
-        required={required}
-        type={type}
-        step={type === "number" ? "0.01" : undefined}
-        className="min-h-10 w-full rounded-md border border-slate-200 px-3 outline-none focus:border-slate-500"
-        value={value || ""}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function Select({ label, value, onChange, options }) {
-  return (
-    <label className="block text-sm">
-      <span className="mb-1 block font-medium text-slate-700">{label}</span>
-      <select className="min-h-10 w-full rounded-md border border-slate-200 px-3 outline-none focus:border-slate-500" value={value || ""} onChange={(event) => onChange(event.target.value)}>
-        {options.map(([optionValue, labelText]) => <option key={optionValue || "empty"} value={optionValue}>{labelText}</option>)}
-      </select>
-    </label>
-  );
-}
-
-function Submit({ label }) {
-  return (
-    <button type="submit" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-medium text-white">
-      <Plus size={16} />
-      {label}
-    </button>
-  );
-}
-
-function Table({ columns, rows }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-slate-500">
-            {columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-b border-slate-100">
-              {row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-3 align-top text-slate-700">{cell}</td>)}
-            </tr>
-          ))}
-          {!rows.length && (
-            <tr><td className="px-3 py-6 text-center text-slate-500" colSpan={columns.length}>Aucune donnée.</td></tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
 }

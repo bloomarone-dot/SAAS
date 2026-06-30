@@ -9,16 +9,18 @@ function formatPrice(value) {
 
 export default function DishCard({ dish, onDishUpdated, onDishDeleted, canDelete = true }) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleToggleAvailability = async () => {
     setLoading(true);
+    setError("");
     try {
       const updatedDish = await menuApi.toggleDishAvailability(dish.id);
       if (onDishUpdated) {
         onDishUpdated(updatedDish);
       }
     } catch (err) {
-      alert(err.message || "Impossible de changer la disponibilité");
+      setError(err.message || "Impossible de changer la disponibilité");
     } finally {
       setLoading(false);
     }
@@ -30,13 +32,14 @@ export default function DishCard({ dish, onDishUpdated, onDishDeleted, canDelete
     }
 
     setLoading(true);
+    setError("");
     try {
       await menuApi.softDeleteDish(dish.id);
       if (onDishDeleted) {
         onDishDeleted(dish.id);
       }
     } catch (err) {
-      alert(err.message || "Erreur lors de la suppression du plat");
+      setError(err.message || "Erreur lors de la suppression du plat");
     } finally {
       setLoading(false);
     }
@@ -61,6 +64,11 @@ export default function DishCard({ dish, onDishUpdated, onDishDeleted, canDelete
         <p className="mb-4 line-clamp-3 text-sm font-medium text-slate-500">
           {dish.description || "Sans description"}
         </p>
+        {error && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+            {error}
+          </p>
+        )}
       </div>
 
       <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-4">

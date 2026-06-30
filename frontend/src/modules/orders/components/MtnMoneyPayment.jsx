@@ -135,10 +135,10 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
+    <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-lg">
       <div className="mb-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-yellow-500">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-500">
             <span className="text-lg font-black text-white">M</span>
           </div>
           <div>
@@ -169,7 +169,7 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
             <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
               Numéro MTN du client
             </label>
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-yellow-400 focus-within:ring-2 focus-within:ring-yellow-100">
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-yellow-400 focus-within:ring-2 focus-within:ring-yellow-100">
               <Phone size={16} className="shrink-0 text-slate-400" />
               <input
                 type="tel"
@@ -196,7 +196,7 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
             type="button"
             onClick={initiate}
             disabled={isSubmitting || !msisdn.trim()}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-3 text-sm font-black text-white shadow-sm hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-yellow-500 py-3 text-sm font-black text-white shadow-sm transition hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? (
               <>
@@ -227,7 +227,7 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
             </p>
           </div>
 
-          <div className="rounded-xl border border-yellow-100 bg-yellow-50 px-4 py-3">
+          <div className="rounded-lg border border-yellow-100 bg-yellow-50 px-4 py-3">
             <p className="text-xs font-semibold text-yellow-700">
               Vérification automatique en cours ({pollCount * 5}s / {MAX_POLLS * 5}s max)
             </p>
@@ -247,12 +247,12 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
                 startPolling(txId);
                 setPollCount(0);
               }}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 transition"
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
             >
               <RefreshCw size={14} />
               Rafraîchir
             </button>
-            <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 transition">
+            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50">
               Fermer
             </button>
           </div>
@@ -300,14 +300,14 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
             <button
               type="button"
               onClick={retry}
-              className="flex-1 rounded-xl border border-yellow-200 bg-yellow-50 py-3 text-sm font-black text-yellow-700 hover:bg-yellow-100 transition"
+              className="flex-1 rounded-lg border border-yellow-200 bg-yellow-50 py-3 text-sm font-black text-yellow-700 transition hover:bg-yellow-100"
             >
               Réessayer
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 transition"
+              className="flex-1 rounded-lg border border-slate-200 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
             >
               Fermer
             </button>

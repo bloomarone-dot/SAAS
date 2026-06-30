@@ -227,6 +227,7 @@ export const APP_MENUS = {
       key: "performance",
       label: "Performances",
       icon: "BarChart3",
+      defaultView: "server-performance",
       children: [
         { key: "server-performance", label: "Performance serveurs", icon: "Users" },
         { key: "cashier-performance", label: "Performance caissiers", icon: "CreditCard" },
@@ -368,8 +369,8 @@ export const APP_MENUS = {
       key: "comptabilite",
       label: "Comptabilité",
       icon: "Calculator",
+      defaultView: "accounts",
       children: [
-        { key: "comptabilite", label: "Tableau de bord", icon: "LayoutDashboard" },
         { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
         { key: "journals", label: "Journaux", icon: "ReceiptText" },
         { key: "accounting-entries", label: "Écritures", icon: "Calculator" },
@@ -451,7 +452,7 @@ export const APP_MENUS = {
 
 export const ROLE_DASHBOARDS = {
   SUPERADMIN: {
-    title: "Dashboard Superadmin",
+    title: "Tableau de bord Superadmin",
     subtitle:
       "Création des restaurants, suivi de la plateforme et activation des comptes.",
     accent: "#0F8AB1",
@@ -463,7 +464,7 @@ export const ROLE_DASHBOARDS = {
     ],
   },
   ADMIN: {
-    title: "Dashboard Administrateur",
+    title: "Tableau de bord Administrateur",
     subtitle:
       "Pilotage global du restaurant, des équipes, des ventes et des performances.",
     accent: "#0F8AB1",
@@ -475,7 +476,7 @@ export const ROLE_DASHBOARDS = {
     ],
   },
   MANAGER: {
-    title: "Dashboard Manager",
+    title: "Tableau de bord Manager",
     subtitle:
       "Supervision opérationnelle du service, de la cuisine, du stock et des objectifs.",
     accent: "#7c3aed",
@@ -494,7 +495,7 @@ export const ROLE_DASHBOARDS = {
     cards: [],
   },
   CUISINE: {
-    title: "Dashboard Cuisine",
+    title: "Tableau de bord Cuisine",
     subtitle:
       "Organisation des préparations et priorisation des commandes urgentes.",
     accent: "#10b981",
@@ -505,7 +506,7 @@ export const ROLE_DASHBOARDS = {
     ],
   },
   STOCK: {
-    title: "Dashboard Stock / Comptabilité",
+    title: "Tableau de bord Stock / Comptabilité",
     subtitle:
       "Contrôle des produits, livraisons, dépenses et alertes de stock.",
     accent: "#2563eb",
@@ -517,7 +518,7 @@ export const ROLE_DASHBOARDS = {
     ],
   },
   COMPTABLE: {
-    title: "Dashboard Comptable",
+    title: "Tableau de bord Comptable",
     subtitle:
       "Synthèse des recettes, dépenses, marges et clôtures financières.",
     accent: "#2563eb",
@@ -529,7 +530,7 @@ export const ROLE_DASHBOARDS = {
     ],
   },
   CAISSE: {
-    title: "Dashboard Caisse",
+    title: "Tableau de bord Caisse",
     subtitle:
       "Encaissements, tickets, paiements en attente et clôture de caisse.",
     accent: "#f59e0b",

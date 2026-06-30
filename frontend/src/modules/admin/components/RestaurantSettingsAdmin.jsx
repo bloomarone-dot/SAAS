@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { PageHeader } from "@/modules/admin/components/AdminUi";
 import { formatApiError } from "@/utils/network";
 import { validationFor } from "@/utils/validation";
 
 const emptySettings = {
   name: "",
   legal_name: "",
+  subdomain: "",
+  custom_domain: "",
   description: "",
   logo_url: "",
+  cover_image_url: "",
   address: "",
   city: "",
   country: "",
@@ -25,6 +29,10 @@ const emptySettings = {
   tax_id: "",
   primary_color: "#E4572E",
   secondary_color: "#1F2937",
+  accent_color: "#F59E0B",
+  background_color: "#FFFFFF",
+  text_color: "#0F172A",
+  button_color: "#078D50",
   currency: "XAF",
   timezone: "Africa/Douala",
 };
@@ -69,8 +77,11 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
       setForm({
         name: data.name ?? "",
         legal_name: data.legal_name ?? "",
+        subdomain: data.subdomain ?? data.slug ?? "",
+        custom_domain: data.custom_domain ?? "",
         description: data.description ?? "",
         logo_url: data.logo_url ?? "",
+        cover_image_url: data.cover_image_url ?? "",
         address: data.address ?? "",
         city: data.city ?? "",
         country: data.country ?? "",
@@ -87,6 +98,10 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         tax_id: data.tax_id ?? "",
         primary_color: data.primary_color ?? "#E4572E",
         secondary_color: data.secondary_color ?? "#1F2937",
+        accent_color: data.accent_color ?? "#F59E0B",
+        background_color: data.background_color ?? "#FFFFFF",
+        text_color: data.text_color ?? "#0F172A",
+        button_color: data.button_color ?? "#078D50",
         currency: data.currency ?? "XAF",
         timezone: data.timezone ?? "Africa/Douala",
       });
@@ -167,8 +182,11 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
       const payload = {
         name: form.name.trim(),
         legal_name: optionalText(form.legal_name),
+        subdomain: optionalText(form.subdomain),
+        custom_domain: optionalText(form.custom_domain),
         description: optionalText(form.description),
         logo_url: optionalText(form.logo_url),
+        cover_image_url: optionalText(form.cover_image_url),
         address: optionalText(form.address),
         city: optionalText(form.city),
         country: optionalText(form.country),
@@ -185,6 +203,10 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         tax_id: optionalText(form.tax_id),
         primary_color: form.primary_color,
         secondary_color: form.secondary_color,
+        accent_color: form.accent_color,
+        background_color: form.background_color,
+        text_color: form.text_color,
+        button_color: form.button_color,
         currency: form.currency.trim().toUpperCase(),
         timezone: form.timezone.trim(),
       };
@@ -237,11 +259,11 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
-        <div>
-          <h1 className="mt-2 text-4xl font-black text-[#070528]">Paramètres restaurant</h1>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Paramètres"
+        title="Paramètres restaurant"
+        subtitle="Gérez l’identité, les coordonnées, les reçus et les informations légales du restaurant."
+      />
 
       {!canUpdate && (
         <div className="border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-700">
@@ -275,6 +297,8 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
               <div className="grid gap-4 md:grid-cols-2">
                 <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={fieldsDisabled} />
                 <Field name="legal_name" label="Raison sociale" value={form.legal_name} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="subdomain" label="Sous-domaine public" value={form.subdomain} onChange={updateField} placeholder="ex: leboncoin" disabled={fieldsDisabled} />
+                <Field name="custom_domain" label="Domaine personnalisé" value={form.custom_domain} onChange={updateField} placeholder="ex: commande.restaurant.cm" disabled={fieldsDisabled} />
                 <Field name="nui" label="NUI (Numéro d’identifiant unique)" value={form.nui} onChange={updateField} disabled={fieldsDisabled} />
                 <Field name="tax_id" label="Registre de commerce / autre identifiant" value={form.tax_id} onChange={updateField} disabled={fieldsDisabled} />
                 <Field name="currency" label="Devise" value={form.currency} onChange={updateField} maxLength={3} required disabled={fieldsDisabled} />
@@ -360,9 +384,14 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
             <SettingsGroup title="Marque">
               <div className="grid gap-4 md:grid-cols-2">
                 <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="cover_image_url" label="Image de couverture" value={form.cover_image_url} onChange={updateField} placeholder="URL de l'image principale" disabled={fieldsDisabled} />
                 <LogoUpload onChange={uploadLogo} disabled={fieldsDisabled} />
                 <ColorField name="primary_color" label="Couleur principale" value={form.primary_color} onChange={updateField} disabled={fieldsDisabled} />
                 <ColorField name="secondary_color" label="Couleur secondaire" value={form.secondary_color} onChange={updateField} disabled={fieldsDisabled} />
+                <ColorField name="accent_color" label="Couleur accent" value={form.accent_color} onChange={updateField} disabled={fieldsDisabled} />
+                <ColorField name="button_color" label="Boutons" value={form.button_color} onChange={updateField} disabled={fieldsDisabled} />
+                <ColorField name="background_color" label="Fond vitrine" value={form.background_color} onChange={updateField} disabled={fieldsDisabled} />
+                <ColorField name="text_color" label="Texte vitrine" value={form.text_color} onChange={updateField} disabled={fieldsDisabled} />
               </div>
             </SettingsGroup>
           </div>
@@ -406,9 +435,19 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
                   <PreviewLine icon="Chrome" value={form.website_url || "Site web non renseigné"} />
                 </div>
 
+                <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                  <p className="text-xs font-black uppercase text-slate-400">Adresse publique</p>
+                  <p className="mt-1 break-all text-sm font-black text-[#070528]">
+                    {form.subdomain ? `${form.subdomain}.bloomarone.com` : "Sous-domaine non renseigné"}
+                  </p>
+                  {form.custom_domain && <p className="mt-1 break-all text-xs font-bold text-slate-500">{form.custom_domain}</p>}
+                </div>
+
                 <div className="mt-5 grid grid-cols-2 gap-3">
                   <Swatch label="Principale" value={form.primary_color} />
                   <Swatch label="Secondaire" value={form.secondary_color} />
+                  <Swatch label="Accent" value={form.accent_color} />
+                  <Swatch label="Boutons" value={form.button_color} />
                 </div>
               </div>
             </div>
