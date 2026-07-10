@@ -91,7 +91,7 @@ export function Stat({ label, value }) {
       <span className="text-xs font-black uppercase tracking-wide text-slate-500">
         {label}
       </span>
-      <strong className="mt-2 block text-xl text-slate-950">{value}</strong>
+      <strong className="mt-2 block break-words text-xl font-black tabular-nums leading-tight text-slate-950">{value}</strong>
     </div>
   );
 }

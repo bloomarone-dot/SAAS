@@ -23,7 +23,7 @@ export function DashboardLayout({
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
   const roleMeta = getRoleMeta(role);
-  const hideSidebar = role === "SERVEUR" || role === "CUISINE";
+  const hideSidebar = role === "SERVEUR" || role === "CUISINE" || role === "COMPTABLE";
   const isSuperadmin = role === "SUPERADMIN";
   const primary = isSuperadmin ? "#a855f7" : "#FF6347";
   const secondary =

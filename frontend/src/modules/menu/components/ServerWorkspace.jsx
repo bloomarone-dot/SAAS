@@ -11,6 +11,7 @@ import TableSessionModal from "./TableSessionModal";
 import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnapshot, saveServerSession } from "../utils/serverSessionStorage";
 import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
+import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 const PAID_STATUSES = ["Payée", "Payee", "Annulée", "Annulee"];
@@ -74,6 +75,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const [dishes, setDishes] = useState([]);
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [message, setMessage] = useState("");
+  useAutoClearMessage(message, setMessage);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [menuMode, setMenuMode] = useState(true);

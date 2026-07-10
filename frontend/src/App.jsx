@@ -50,8 +50,9 @@ const AccountingOperations = lazyNamed(
   () => import("@/modules/finance/components/AccountingOperations"),
   "AccountingOperations",
 );
-import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
+import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { getApiBaseUrl } from "@/config/api";
 import { apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/config/http";
 import { getPublicHostKind, shouldResolveTenantFromHost } from "@/tenancy/tenantResolver";
@@ -166,6 +167,7 @@ export default function App() {
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
   const [message, setMessage] = useState("");
+  useAutoClearMessage(message, setMessage);
   const [isLoading, setIsLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
   const [showLogin, setShowLogin] = useState(() => shouldShowLoginForPath());
@@ -540,9 +542,17 @@ export default function App() {
       </Suspense>
 
       {message && (
-        <p className="mt-8 max-w-3xl rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
-          {friendlyNetworkMessage(message, message)}
-        </p>
+        <div className="mt-8 flex max-w-3xl items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
+          <p>{friendlyNetworkMessage(message, message)}</p>
+          <button
+            type="button"
+            onClick={() => setMessage("")}
+            className="shrink-0 text-emerald-800 hover:text-emerald-950"
+            aria-label="Fermer le message"
+          >
+            ×
+          </button>
+        </div>
       )}
     </DashboardLayout>
   );
@@ -564,13 +574,33 @@ export default function App() {
 
       // Comptabilité (partie double) : le rôle COMPTABLE utilise le nouveau module dédié.
       if (session.role === "COMPTABLE") {
-        return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
+        return (
+          <AccountingOperations
+            apiBaseUrl={apiBaseUrl}
+            mode={activeView}
+            onMessage={setMessage}
+            onNavigate={(view) => {
+              setActiveView(view);
+              pushAppRoute(session, view);
+            }}
+          />
+        );
       }
 
       // Accès comptabilité (vues dédiées sans collision avec le stock).
       const accountingViews = ["comptabilite", "accounts", "journals", "entries", "expenses", "encaissements", "revenues", "cash", "banks", "statements"];
       if (accountingViews.includes(activeView) && session.role === "ADMIN") {
-        return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
+        return (
+          <AccountingOperations
+            apiBaseUrl={apiBaseUrl}
+            mode={activeView}
+            onMessage={setMessage}
+            onNavigate={(view) => {
+              setActiveView(view);
+              pushAppRoute(session, view);
+            }}
+          />
+        );
       }
       if (activeView === "comptabilite" && session.role === "STOCK") {
         return <RoleDashboard role={session.role} overrides={overrides} onNavigate={navigateFromDashboard} />;
@@ -709,7 +739,7 @@ export default function App() {
         ["menu-catalog", "menu-categories", "menu-dishes", "availability", "create-category", "create-dish", "dish-unavailable"].includes(activeView) &&
         ["ADMIN", "CUISINE", "STOCK"].includes(session.role)
       ) {
-        return <MenuCatalogAdmin restaurantId={session.restaurant_id} role={session.role} />;
+        return <MenuCatalogAdmin restaurantId={session.restaurant_id} role={session.role} onMessage={setMessage} />;
       }
 
       if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
@@ -730,6 +760,7 @@ export default function App() {
           "create-stock-product": "stock",
           transfer: "movements",
           damages: "outputs",
+          inventory: "reports",
           purchases: "entries",
           accounting: "reports",
           "stock-report": "reports",

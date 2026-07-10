@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "../icons";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { apiFetch } from "@/config/http";
-import { DashboardSection, ErrorState, LoadingState, PageContainer, PageHeader, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
+import { DashboardSection, ErrorState, LoadingState, PageContainer, PageHeader, SecondaryAction } from "@/modules/admin/components/AdminUi";
 
 const locationLabels = {
   MAGASIN: "Magasin",
@@ -142,7 +142,7 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
     }, {});
   }, [items]);
 
-  const recentMovements = movements.slice(0, 7).map((movement) => {
+  const recentMovements = movements.slice(0, 10).map((movement) => {
     const item = items.find((entry) => entry.id === movementProductId(movement));
     const type = movementType(movement);
     const sign = isEntryMovement(movement) ? "+" : ["ADJUSTMENT", "INVENTORY_PLUS", "INVENTORY_MINUS"].includes(type) ? "=" : "-";
@@ -151,18 +151,18 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
       item?.name ?? "Produit supprimé",
       formatDate(movement.movement_date || movement.created_at),
       `${sign} ${Number(movement.quantity || 0).toLocaleString("fr-FR")} ${unitLabel(item)}`,
-      String(movement.id || movement.reference || "-").slice(0, 8).toUpperCase(),
+      money(movement.total_amount),
     ];
   });
 
-  const lowStockRows = lowStockItems.slice(0, 7).map((item) => [
+  const lowStockRows = lowStockItems.slice(0, 10).map((item) => [
     item.name,
     `${quantity(item).toLocaleString("fr-FR")} ${unitLabel(item)}`,
     `${minimumStock(item).toLocaleString("fr-FR")} ${unitLabel(item)}`,
     quantity(item) <= minimumStock(item) / 2 ? "Critique" : "Faible",
   ]);
 
-  const damageRows = damages.slice(0, 6).map((damage) => {
+  const damageRows = damages.slice(0, 8).map((damage) => {
     const item = items.find((entry) => entry.id === movementProductId(damage));
     return [
       item?.name ?? "Produit supprimé",
@@ -176,14 +176,33 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => [label, money(value), value > 0 ? "Actif" : "Vide"]);
 
+  const entryTotalToday = todayMovements
+    .filter(isEntryMovement)
+    .reduce((total, movement) => total + Number(movement.total_amount || Number(movement.quantity || 0) * Number(movement.unit_price || 0)), 0);
+  const outputTotalToday = todayMovements
+    .filter(isOutputMovement)
+    .reduce((total, movement) => total + Number(movement.total_amount || Number(movement.quantity || 0) * Number(movement.unit_price || 0)), 0);
+
   return (
     <PageContainer>
       <PageHeader
         eyebrow={isStockView ? "Gestion stock" : "Stock & comptabilité"}
         title={isStockView ? "Tableau de bord Stock" : "Tableau de bord Stock & Comptabilité"}
-        subtitle={isStockView ? "Surveillez la valeur du stock, les alertes et les derniers mouvements." : "Suivez la valorisation, les pertes et l’impact comptable du stock."}
-        primaryAction={<SecondaryAction icon="Plus" onClick={() => onNavigate?.("entries")}>Nouvelle entrée</SecondaryAction>}
-        secondaryActions={<SecondaryAction icon="BarChart3" onClick={() => onNavigate?.("reports")}>Rapports</SecondaryAction>}
+        subtitle={
+          isStockView
+            ? "Surveillez la valeur du stock, les alertes et les derniers mouvements."
+            : "Valorisation du stock, pertes et impact comptable en un coup d'œil."
+        }
+        primaryAction={
+          <SecondaryAction icon="Plus" onClick={() => onNavigate?.("entries")}>
+            Nouvelle entrée
+          </SecondaryAction>
+        }
+        secondaryActions={
+          <SecondaryAction icon="BarChart3" onClick={() => onNavigate?.("reports")}>
+            Mouvements
+          </SecondaryAction>
+        }
       />
 
       {message && <ErrorState title="Stock indisponible" text={message} />}
@@ -191,129 +210,139 @@ export function StockDashboard({ variant = "accounting", overrides = {}, onNavig
       {isLoading ? (
         <LoadingState label="Chargement du dashboard stock..." />
       ) : (
-        <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Valeur du stock" value={money(summary?.stock_value)} trend={`${items.length} produits suivis`} icon="Wallet" tone="success" />
-            <StatCard label="Stock faible" value={Number(summary?.low_stock_count || 0).toLocaleString("fr-FR")} trend={lowStockItems[0]?.name ?? "Aucune alerte"} icon="AlertTriangle" tone={Number(summary?.low_stock_count || 0) ? "warning" : "success"} />
-            <StatCard label={isStockView ? "Entrées du jour" : "Pertes avaries"} value={isStockView ? money(todayMovements.filter(isEntryMovement).reduce((total, m) => total + Number(m.total_amount || Number(m.quantity || 0) * Number(m.unit_price || 0)), 0)) : money(summary?.total_damage_loss)} trend={isStockView ? `${todayMovements.filter(isEntryMovement).length} mouvement(s)` : `${damages.length} avarie(s)`} icon={isStockView ? "ShoppingCart" : "AlertTriangle"} tone={isStockView ? "success" : "warning"} />
-            <StatCard label={isStockView ? "Sorties du jour" : "Bénéfice estimé"} value={isStockView ? money(todayMovements.filter(isOutputMovement).reduce((total, m) => total + Number(m.total_amount || Number(m.quantity || 0) * Number(m.unit_price || 0)), 0)) : money(report?.estimated_profit)} trend={isStockView ? `${todayMovements.filter(isOutputMovement).length} mouvement(s)` : "Selon taux de marge"} icon={isStockView ? "Package" : "TrendingUp"} tone="info" />
-          </div>
-
+        <div className="space-y-6">
           {isStockView ? (
-            <StockOnlyContent
-              lowStockRows={lowStockRows}
-              recentMovements={recentMovements}
-              categoryRows={categoryRows}
-              damageRows={damageRows}
-              stockByType={stockByType}
-              summary={summary}
-            />
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+                <MetricCard label="Valeur du stock" value={money(summary?.stock_value)} hint={`${items.length} produit(s) suivis`} icon="Wallet" tone="emerald" />
+                <MetricCard label="Stock faible" value={Number(summary?.low_stock_count || 0).toLocaleString("fr-FR")} hint={lowStockItems[0]?.name ?? "Aucune alerte"} icon="AlertTriangle" tone="amber" />
+                <MetricCard label="Entrées du jour" value={money(entryTotalToday)} hint={`${todayMovements.filter(isEntryMovement).length} mouvement(s)`} icon="ShoppingCart" tone="sky" />
+                <MetricCard label="Sorties du jour" value={money(outputTotalToday)} hint={`${todayMovements.filter(isOutputMovement).length} mouvement(s)`} icon="Package" tone="slate" />
+              </div>
+
+              <div className="grid gap-6 2xl:grid-cols-2">
+                <DashboardSection title="Produits en alerte" description={`${lowStockItems.length} alerte(s) à traiter`}>
+                  <DataTable headers={["Produit", "Stock actuel", "Seuil", "Statut"]} rows={lowStockRows} empty="Aucun produit en stock faible." />
+                </DashboardSection>
+                <DashboardSection title="Mouvements récents" description="Dernières entrées, sorties et corrections.">
+                  <DataTable headers={["Type", "Produit", "Date", "Quantité", "Montant"]} rows={recentMovements} movement empty="Aucun mouvement enregistré." />
+                </DashboardSection>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-3">
+                <DashboardSection title="Répartition du stock">
+                  <ValueList rows={Object.entries(stockByType).slice(0, 6).map(([label, value]) => [label, money(value), "Valorisé"]) || [["Aucun stock", "0 FCFA", "Vide"]]} />
+                </DashboardSection>
+                <DashboardSection title="Stock par catégorie">
+                  <ValueList rows={categoryRows.length ? categoryRows : [["Aucune catégorie", "0 FCFA", "Vide"]]} />
+                </DashboardSection>
+                <DashboardSection title="Avaries récentes">
+                  <ValueList rows={damageRows.length ? damageRows : [["Aucune avarie", "-", "RAS"]]} />
+                </DashboardSection>
+              </div>
+            </>
           ) : (
-            <AccountingContent
-              lowStockRows={lowStockRows}
-              recentMovements={recentMovements}
-              damageRows={damageRows}
-              report={report}
-              summary={summary}
-            />
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+                <MetricCard label="Valeur d'achat" value={money(summary?.stock_value)} hint="Stock courant" icon="Wallet" tone="emerald" />
+                <MetricCard label="Vente estimée" value={money(report?.estimated_sales_value)} hint="Avec taux de marge" icon="TrendingUp" tone="sky" />
+                <MetricCard label="Bénéfice estimé" value={money(report?.estimated_profit)} hint="Selon marge appliquée" icon="BarChart3" tone="emerald" />
+                <MetricCard label="Entrées période" value={money(report?.entries_value)} hint="Achats enregistrés" icon="ShoppingCart" tone="slate" />
+                <MetricCard label="Avaries / pertes" value={money(report?.damage_loss ?? summary?.total_damage_loss)} hint={`${damages.length} avarie(s)`} icon="AlertTriangle" tone="amber" />
+              </div>
+
+              <DashboardSection title="Valorisation par emplacement" description="Répartition de la valeur du stock sur les dépôts principaux.">
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <MetricCard label="Magasin" value={money(summary?.main_stock_value)} hint="Dépôt principal" icon="Box" tone="slate" compact />
+                  <MetricCard label="Cuisine" value={money(summary?.kitchen_stock_value)} hint="Production" icon="Utensils" tone="slate" compact />
+                  <MetricCard label="Boisson" value={money(summary?.drink_stock_value)} hint="Bar / boissons" icon="Package" tone="slate" compact />
+                </div>
+              </DashboardSection>
+
+              <div className="grid gap-6 2xl:grid-cols-2">
+                <DashboardSection title="Produits en alerte" description="Produits sous le seuil minimum.">
+                  <DataTable headers={["Produit", "Stock actuel", "Stock min.", "Statut"]} rows={lowStockRows} empty="Aucune alerte." />
+                </DashboardSection>
+                <DashboardSection title="Mouvements de stock" description="Dernières opérations validées.">
+                  <DataTable headers={["Type", "Produit", "Date", "Quantité", "Montant"]} rows={recentMovements} movement empty="Aucun mouvement enregistré." />
+                </DashboardSection>
+              </div>
+
+              <DashboardSection title="Avaries récentes" description="Pertes et casse à suivre côté comptabilité.">
+                <DataTable headers={["Produit", "Quantité", "Emplacement", "Statut"]} rows={damageRows} empty="Aucune avarie enregistrée." />
+              </DashboardSection>
+            </>
           )}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <QuickAction icon="Plus" label="Nouvelle entrée" tone="green" onClick={() => onNavigate?.("entries")} />
             <QuickAction icon="Activity" label="Nouvelle sortie" tone="orange" onClick={() => onNavigate?.("outputs")} />
-            <QuickAction icon="FileText" label="Inventaire" tone="amber" onClick={() => onNavigate?.("inventories")} />
-            <QuickAction icon="BarChart3" label="Rapports" tone="greenSoft" onClick={() => onNavigate?.("reports")} />
+            <QuickAction icon="FileText" label="Inventaire" tone="amber" onClick={() => onNavigate?.("reports")} />
+            <QuickAction icon="BarChart3" label="Mouvements" tone="greenSoft" onClick={() => onNavigate?.("reports")} />
           </div>
-        </>
+        </div>
       )}
     </PageContainer>
   );
 }
 
-function StockOnlyContent({ lowStockRows, recentMovements, categoryRows, damageRows, stockByType, summary }) {
-  const legendItems = Object.entries(stockByType).slice(0, 4).map(([label, value], index) => [
-    label,
-    money(value),
-    ["bg-emerald-600", "bg-orange-500", "bg-amber-400", "bg-blue-500"][index] ?? "bg-slate-400",
-  ]);
-
+function MetricCard({ label, value, hint, icon, tone = "slate", compact = false }) {
+  const tones = {
+    emerald: "bg-emerald-50 text-emerald-700",
+    amber: "bg-amber-50 text-amber-700",
+    sky: "bg-sky-50 text-sky-700",
+    slate: "bg-slate-100 text-slate-600",
+  };
   return (
-    <>
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr]">
-        <DashboardSection title="Produits en alerte" description={`${lowStockRows.length} alerte(s) à traiter`}>
-          <DataTable headers={["Produit", "Stock actuel", "Seuil d'alerte", "Statut"]} rows={lowStockRows} empty="Aucun produit en stock faible." />
-        </DashboardSection>
-        <DashboardSection title="Mouvements récents" description="Dernières entrées, sorties et corrections.">
-          <DataTable headers={["Type", "Produit", "Date", "Quantité", "Référence"]} rows={recentMovements} movement empty="Aucun mouvement enregistré." />
-        </DashboardSection>
+    <div className={`rounded-xl border border-slate-200 bg-white shadow-sm ${compact ? "p-4" : "p-5"}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+          <p className={`mt-2 break-words font-black tabular-nums leading-tight text-slate-950 ${compact ? "text-lg" : "text-xl sm:text-2xl"}`}>
+            {value}
+          </p>
+          {hint && <p className="mt-2 text-sm font-semibold text-slate-500">{hint}</p>}
+        </div>
+        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${tones[tone] ?? tones.slate}`}>
+          <DashboardIcon name={icon} size={20} />
+        </span>
       </div>
-      <div className="grid gap-4 xl:grid-cols-3">
-        <DashboardSection title="Répartition du stock">
-          <ValueList rows={legendItems.length ? legendItems.map(([label, value]) => [label, value, "Valorisé"]) : [["Aucun stock", "0 FCFA", "Vide"]]} />
-        </DashboardSection>
-        <DashboardSection title="Stock par catégorie">
-          <ValueList rows={categoryRows.length ? categoryRows : [["Aucune catégorie", "0 FCFA", "Vide"]]} />
-        </DashboardSection>
-        <DashboardSection title="Avaries récentes">
-          <ValueList rows={damageRows.length ? damageRows : [["Aucune avarie", "-", "RAS"]]} />
-        </DashboardSection>
-      </div>
-    </>
-  );
-}
-
-function AccountingContent({ lowStockRows, recentMovements, damageRows, report, summary }) {
-  return (
-    <>
-      <div className="grid gap-4 xl:grid-cols-[1.05fr_1fr]">
-        <DashboardSection title="Résumé comptable stock" description="Valorisation et pertes sur la période récente.">
-          <div className="grid gap-3 md:grid-cols-2">
-            <StatCard label="Valeur d'achat" value={money(summary?.stock_value)} trend="Stock courant" icon="Wallet" tone="success" />
-            <StatCard label="Vente estimée" value={money(report?.estimated_sales_value)} trend="Avec taux de marge" icon="TrendingUp" tone="info" />
-            <StatCard label="Entrées" value={money(report?.entries_value)} trend="Achats période" icon="ShoppingCart" tone="success" />
-            <StatCard label="Avaries" value={money(report?.damage_loss)} trend="Pertes période" icon="AlertTriangle" tone="warning" />
-          </div>
-        </DashboardSection>
-        <DashboardSection title="Mouvements de stock" description="Dernières opérations validées.">
-          <DataTable headers={["Type", "Produit", "Date", "Quantité", "Référence"]} rows={recentMovements} movement empty="Aucun mouvement enregistré." />
-        </DashboardSection>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-3">
-        <DashboardSection title="Produits en alerte">
-          <DataTable headers={["Produit", "Stock actuel", "Stock min.", "Statut"]} rows={lowStockRows} empty="Aucune alerte." />
-        </DashboardSection>
-        <DashboardSection title="Avaries">
-          <ValueList rows={damageRows.length ? damageRows : [["Aucune avarie", "-", "RAS"]]} />
-        </DashboardSection>
-        <DashboardSection title="Valorisation par emplacement">
-          <ValueList rows={[
-            ["Magasin", money(summary?.main_stock_value), "Principal"],
-            ["Cuisine", money(summary?.kitchen_stock_value), "Production"],
-            ["Boisson", money(summary?.drink_stock_value), "Bar"],
-          ]} />
-        </DashboardSection>
-      </div>
-    </>
+    </div>
   );
 }
 
 function DataTable({ headers, rows, movement = false, empty }) {
   if (!rows.length) {
-    return <div className="rounded-lg border border-dashed border-slate-200 p-6 text-sm font-bold text-slate-500">{empty}</div>;
+    return <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm font-semibold text-slate-500">{empty}</div>;
   }
 
   return (
     <div className="overflow-x-auto">
-      <table className="lte-table min-w-[560px]">
+      <table className="lte-table w-full min-w-full">
         <thead>
-          <tr>{headers.map((header) => <th key={header} className="pb-3">{header}</th>)}</tr>
+          <tr>
+            {headers.map((header) => (
+              <th key={header} className="whitespace-nowrap pb-3 text-left">
+                {header}
+              </th>
+            ))}
+          </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {rows.map((row) => (
-            <tr key={row.join("-")}>
+          {rows.map((row, rowIndex) => (
+            <tr key={`${row[0]}-${rowIndex}`}>
               {row.map((cell, index) => (
-                <td key={`${row[0]}-${index}`} className={`py-3 ${index === 0 ? "font-black text-slate-800" : "font-semibold text-slate-600"}`}>
-                  {movement && index === 0 ? <Badge label={cell} /> : index === row.length - 1 ? <Badge label={cell} /> : cell}
+                <td
+                  key={`${rowIndex}-${index}`}
+                  className={`py-3 align-top ${
+                    index === 0
+                      ? "font-black text-slate-800"
+                      : index === row.length - 1 && (movement || headers[headers.length - 1] === "Statut")
+                        ? ""
+                        : "font-semibold tabular-nums text-slate-600"
+                  }`}
+                >
+                  {movement && index === 0 ? <Badge label={cell} /> : index === row.length - 1 && headers[headers.length - 1] === "Statut" ? <Badge label={cell} /> : cell}
                 </td>
               ))}
             </tr>
@@ -325,20 +354,24 @@ function DataTable({ headers, rows, movement = false, empty }) {
 }
 
 function Badge({ label }) {
-  const danger = ["Critique", "Sortie", "Périmé", "Faible", "À comptabiliser"].includes(label);
-  return <span className={`rounded-md px-2 py-1 text-xs font-black ${danger ? "bg-red-50 text-red-500" : "bg-emerald-50 text-emerald-700"}`}>{label}</span>;
+  const danger = ["Critique", "Sortie", "Périmé", "Faible", "À comptabiliser", "À valider"].includes(label);
+  return (
+    <span className={`inline-flex rounded-md px-2.5 py-1 text-xs font-black ${danger ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700"}`}>
+      {label}
+    </span>
+  );
 }
 
 function ValueList({ rows }) {
   return (
     <div className="divide-y divide-slate-100">
-      {rows.map((row) => (
-        <div key={row.join("-")} className="flex items-center justify-between gap-3 py-3 text-sm">
-          <div className="min-w-0">
-            <p className="truncate font-bold text-slate-800">{row[0]}</p>
-            <p className="truncate text-xs font-semibold text-slate-400">{row[2]}</p>
+      {rows.map((row, index) => (
+        <div key={`${row[0]}-${index}`} className="flex items-center justify-between gap-4 py-3 text-sm">
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-slate-800">{row[0]}</p>
+            <p className="text-xs font-semibold text-slate-400">{row[2]}</p>
           </div>
-          <span className="shrink-0 font-black text-slate-900">{row[1]}</span>
+          <span className="shrink-0 text-right font-black tabular-nums text-slate-900">{row[1]}</span>
         </div>
       ))}
     </div>
@@ -347,14 +380,18 @@ function ValueList({ rows }) {
 
 function QuickAction({ icon, label, tone, onClick }) {
   const colors = {
-    green: "bg-emerald-600 text-white",
-    orange: "bg-orange-500 text-white",
-    amber: "bg-amber-50 text-amber-700",
-    greenSoft: "bg-emerald-50 text-emerald-700",
-    red: "bg-red-50 text-red-600",
+    green: "bg-emerald-600 text-white hover:bg-emerald-700",
+    orange: "bg-orange-500 text-white hover:bg-orange-600",
+    amber: "bg-amber-50 text-amber-800 hover:bg-amber-100",
+    greenSoft: "bg-emerald-50 text-emerald-800 hover:bg-emerald-100",
+    red: "bg-red-50 text-red-600 hover:bg-red-100",
   };
   return (
-    <button type="button" onClick={onClick} className={`flex h-16 items-center justify-center gap-3 rounded-lg px-4 text-sm font-black shadow-sm ${colors[tone]}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-14 w-full items-center justify-center gap-3 rounded-xl px-4 text-sm font-black shadow-sm transition ${colors[tone]}`}
+    >
       <DashboardIcon name={icon} size={18} />
       {label}
     </button>

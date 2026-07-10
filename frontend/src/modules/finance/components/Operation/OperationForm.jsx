@@ -11,18 +11,18 @@ export function OperationForm({
   submit,
   helperText,
 }) {
-  const amount = Number(form.amount || 0);
+  const totalAmount = Number(form.total_amount || 0);
   const taxRate = Number(form.tax_rate || 0);
-  const taxAmount = Math.round(amount * taxRate) / 100;
-  const totalAmount = amount + taxAmount;
+  const amount = taxRate > 0 ? totalAmount / (1 + taxRate / 100) : totalAmount;
+  const taxAmount = Math.max(0, totalAmount - amount);
 
   async function save(event) {
     event.preventDefault();
     const created = await submit(endpoint, {
       ...form,
-      amount,
+      amount: Math.round(amount * 100) / 100,
       tax_rate: taxRate,
-      tax_amount: taxAmount,
+      tax_amount: Math.round(taxAmount * 100) / 100,
       total_amount: totalAmount,
       apply_vat: false,
     });
@@ -35,7 +35,7 @@ export function OperationForm({
       );
       setForm({
         [dateField]: today(),
-        amount: "",
+        total_amount: "",
         tax_rate: form.tax_rate || "19.25",
         description: "",
         payment_method: form.payment_method || "cash",
@@ -47,7 +47,7 @@ export function OperationForm({
     <section className="grid gap-4 xl:grid-cols-[380px_1fr]">
       <Panel
         title={`Créer ${title.toLowerCase()}`}
-        description={helperText || "Saisissez le montant HT, le taux de taxe et le mode de paiement. Le total TTC est calculé automatiquement."}
+        description={helperText || "Saisissez le montant TTC : le HT et la taxe sont calculés automatiquement."}
       >
         <form onSubmit={save} className="space-y-3">
           <Input
@@ -58,11 +58,11 @@ export function OperationForm({
             onChange={(value) => setForm({ ...form, [dateField]: value })}
           />
           <Input
-            label="Montant HT"
+            label="Montant TTC"
             type="number"
             required
-            value={form.amount}
-            onChange={(amountValue) => setForm({ ...form, amount: amountValue })}
+            value={form.total_amount}
+            onChange={(total_amount) => setForm({ ...form, total_amount })}
           />
           <Input
             label="Taxe (%)"
@@ -121,7 +121,7 @@ function TaxSummary({ amount, taxRate, taxAmount, totalAmount }) {
   return (
     <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm text-slate-700">
       <div className="flex justify-between gap-3">
-        <span>Sous-total HT</span>
+        <span>Montant HT (calculé)</span>
         <strong>{money(amount)}</strong>
       </div>
       <div className="mt-1 flex justify-between gap-3">
@@ -129,7 +129,7 @@ function TaxSummary({ amount, taxRate, taxAmount, totalAmount }) {
         <strong>{money(taxAmount)}</strong>
       </div>
       <div className="mt-2 flex justify-between gap-3 border-t border-slate-200 pt-2 text-slate-950">
-        <span className="font-black">Total TTC</span>
+        <span className="font-black">Total TTC saisi</span>
         <strong>{money(totalAmount)}</strong>
       </div>
     </div>

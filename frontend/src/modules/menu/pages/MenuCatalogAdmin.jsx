@@ -38,7 +38,7 @@ function buildDishPayload(categoryId, dishForm) {
   };
 }
 
-export default function MenuCatalogAdmin({ restaurantId, role }) {
+export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
   const [categories, setCategories] = useState([]);
   const [dishesByCategory, setDishesByCategory] = useState({});
   const [expandedCategoryId, setExpandedCategoryId] = useState("");
@@ -52,6 +52,7 @@ export default function MenuCatalogAdmin({ restaurantId, role }) {
   const [categoryForm, setCategoryForm] = useState(emptyCategory);
   const [dishForm, setDishForm] = useState(emptyDish);
   const [extraDishForm, setExtraDishForm] = useState(emptyDish);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const readOnly = role === "CUISINE";
 
@@ -119,12 +120,18 @@ export default function MenuCatalogAdmin({ restaurantId, role }) {
   async function uploadImage(event, setter) {
     const file = event.target.files?.[0];
     if (!file) return;
+    setUploadingImage(true);
+    setError("");
     try {
       const imageUrl = await menuApi.uploadImage(file);
       setter((current) => ({ ...current, image_url: imageUrl }));
+      onMessage?.("Image importée avec succès.");
     } catch (err) {
-      setError(err.message || "Import image impossible.");
+      const text = err.message || "Import image impossible.";
+      setError(text);
+      onMessage?.(text);
     } finally {
+      setUploadingImage(false);
       event.target.value = "";
     }
   }
@@ -157,6 +164,7 @@ export default function MenuCatalogAdmin({ restaurantId, role }) {
       setExpandedCategoryId(createdCategory.id);
       resetCreateModal();
       setError("");
+      onMessage?.(`Catégorie « ${createdCategory.name} » et plat créés.`);
     } catch (err) {
       setError(err.message || "Création du catalogue impossible.");
     }
@@ -192,6 +200,7 @@ export default function MenuCatalogAdmin({ restaurantId, role }) {
       setShowDishModal(false);
       setExtraDishForm(emptyDish);
       setExpandedCategoryId(dishModalCategoryId);
+      onMessage?.(`Plat « ${created.name} » ajouté.`);
     } catch (err) {
       setError(err.message || "Ajout du plat impossible.");
     }
@@ -474,7 +483,12 @@ export default function MenuCatalogAdmin({ restaurantId, role }) {
                   accept="image/png,image/jpeg,image/webp"
                   onChange={(event) => uploadImage(event, setCategoryForm)}
                   className="form-control"
+                  disabled={uploadingImage}
                 />
+                {uploadingImage && <span className="lte-help">Import en cours…</span>}
+                {categoryForm.image_url ? (
+                  <img src={categoryForm.image_url} alt="" className="mt-2 h-20 w-20 rounded-lg object-cover ring-1 ring-slate-200" />
+                ) : null}
               </label>
             </div>
           </div>
@@ -535,7 +549,11 @@ export default function MenuCatalogAdmin({ restaurantId, role }) {
                   accept="image/png,image/jpeg,image/webp"
                   onChange={(event) => uploadImage(event, setDishForm)}
                   className="form-control"
+                  disabled={uploadingImage}
                 />
+                {dishForm.image_url ? (
+                  <img src={dishForm.image_url} alt="" className="mt-2 h-20 w-20 rounded-lg object-cover ring-1 ring-slate-200" />
+                ) : null}
               </label>
               <label className="flex items-center gap-2 self-end text-sm font-semibold text-slate-700">
                 <input
@@ -594,6 +612,19 @@ export default function MenuCatalogAdmin({ restaurantId, role }) {
           <label className="lte-form-group md:col-span-2">
             <span className="lte-label">Description</span>
             <textarea name="description" rows={2} value={extraDishForm.description} onChange={updateExtraDishForm} className="form-control" />
+          </label>
+          <label className="lte-form-group md:col-span-2">
+            <span className="lte-label">Image plat</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => uploadImage(event, setExtraDishForm)}
+              className="form-control"
+              disabled={uploadingImage}
+            />
+            {extraDishForm.image_url ? (
+              <img src={extraDishForm.image_url} alt="" className="mt-2 h-20 w-20 rounded-lg object-cover ring-1 ring-slate-200" />
+            ) : null}
           </label>
           <label className="flex items-center gap-2 self-end text-sm font-semibold text-slate-700 md:col-span-2">
             <input type="checkbox" name="is_available" checked={extraDishForm.is_available} onChange={updateExtraDishForm} />

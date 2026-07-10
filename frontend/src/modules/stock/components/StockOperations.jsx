@@ -31,6 +31,7 @@ import { InventoryForm } from "./Inventaire/Form";
 import { LotList } from "./Lot/List";
 import { Reports } from "./Rapport/Reports";
 import { Alerts } from "./Alerte/Alerts";
+import { MovementList } from "./shared/MovementList";
 
 export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   const [activeTab, setActiveTab] = useState(resolveInitialTab(mode));
@@ -105,6 +106,13 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     () =>
       movements.filter((movement) =>
         ["ENTRY", "DIRECT_ENTRY"].includes(movement.movement_type),
+      ),
+    [movements],
+  );
+  const outputMovements = useMemo(
+    () =>
+      movements.filter((movement) =>
+        ["OUTPUT", "LOSS", "TRANSFER"].includes(movement.movement_type),
       ),
     [movements],
   );
@@ -353,13 +361,12 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   }
 
   async function cancelMovement(movement) {
-    const reason = window.prompt("Motif d'annulation (optionnel)") || "";
     try {
-      await api(`/api/v1/stock/movements/${movement.id}/cancel?reason=${encodeURIComponent(reason)}`, {
+      await api(`/api/v1/stock/movements/${movement.id}/cancel`, {
         method: "PATCH",
         fallback: "Annulation du mouvement impossible.",
       });
-      emit("Mouvement annulé.");
+      emit("Mouvement supprimé.");
       await loadAll();
       await loadReport();
     } catch (error) {
@@ -368,15 +375,13 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   }
 
   async function editMovement(movement) {
-    const nextDate = window.prompt("Nouvelle date (AAAA-MM-JJ)", movement.movement_date?.slice?.(0, 10) || today());
-    if (!nextDate) return;
-    const nextReason = window.prompt("Motif", movement.reason || "") ?? movement.reason;
+    const nextReason = window.prompt("Motif de modification (obligatoire)", movement.reason || "");
+    if (nextReason === null || !nextReason.trim()) return;
     try {
       await api(`/api/v1/stock/movements/${movement.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          movement_date: dateToApiDateTime(nextDate),
-          reason: nextReason,
+          reason: nextReason.trim(),
         }),
         fallback: "Modification du mouvement impossible.",
       });
@@ -536,7 +541,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
         await api(`/api/v1/stock/inventories/${inventory.id}/validate`, {
           method: "PATCH",
         });
-        setActiveTab("inventories");
+        setActiveTab("reports");
         emit("Inventaire validé et ajustements générés.");
       },
     );
@@ -703,6 +708,8 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
               productName={productName}
               depotName={depotName}
               onCreate={() => setEntryView("create")}
+              onEdit={editMovement}
+              onCancel={cancelMovement}
             />
           )}
         </>
@@ -719,31 +726,30 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       )}
 
       {activeTab === "outputs" && (
-        <OutputCreate
-          form={outputForm}
-          setForm={setOutputForm}
-          products={products}
-          depots={visibleDepots}
-          isLoss={isLoss}
-          setIsLoss={setIsLoss}
-          onSubmit={submitOutput}
-        />
-      )}
-
-      {activeTab === "inventories" && (
-        <InventoryForm
-          depots={visibleDepots}
-          depotId={inventoryDepotId}
-          setDepotId={setInventoryDepotId}
-          rows={inventoryRows}
-          setRows={setInventoryRows}
-          onSubmit={submitInventory}
-          onExport={auditExport}
-          inventories={inventories}
-        />
+        <section className="space-y-4">
+          <OutputCreate
+            form={outputForm}
+            setForm={setOutputForm}
+            products={products}
+            depots={visibleDepots}
+            isLoss={isLoss}
+            setIsLoss={setIsLoss}
+            onSubmit={submitOutput}
+          />
+          <MovementList
+            title="Liste des sorties"
+            description="Consultez, modifiez ou annulez les sorties et pertes enregistrées."
+            movements={outputMovements}
+            productName={productName}
+            depotName={depotName}
+            onEdit={editMovement}
+            onCancel={cancelMovement}
+          />
+        </section>
       )}
 
       {activeTab === "reports" && (
+        <>
         <Reports
           filters={filters}
           setFilters={setFilters}
@@ -760,6 +766,17 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
           onCancelMovement={cancelMovement}
           onEditMovement={editMovement}
         />
+        <InventoryForm
+          depots={visibleDepots}
+          depotId={inventoryDepotId}
+          setDepotId={setInventoryDepotId}
+          rows={inventoryRows}
+          setRows={setInventoryRows}
+          onSubmit={submitInventory}
+          onExport={auditExport}
+          inventories={inventories}
+        />
+        </>
       )}
 
       {activeTab === "lots" && (
@@ -779,7 +796,7 @@ function resolveInitialTab(mode) {
   if (["movements", "stock-in"].includes(mode)) return "entries";
   if (mode === "transfer") return "transfers";
   if (["stock-out", "damages"].includes(mode)) return "outputs";
-  if (mode === "inventory") return "inventories";
+  if (mode === "inventory") return "reports";
   if (["reports", "stock-report", "rotation"].includes(mode)) return "reports";
   if (mode === "low-stock") return "alerts";
   return "dashboard";

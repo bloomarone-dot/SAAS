@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  FilterBar,
   PageContainer,
   PageHeader,
   SecondaryAction,
@@ -23,7 +22,7 @@ import { Echeancier } from "./Echeancier/Echeancier";
 import { Rapprochement } from "./Rapprochement/Rapprochement";
 import { SimpleRows } from "./shared/ui";
 
-export function AccountingOperations({ apiBaseUrl, onMessage, mode }) {
+export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }) {
   const [tab, setTab] = useState(resolveAccountingTab(mode));
   const [accounts, setAccounts] = useState([]);
   const [journals, setJournals] = useState([]);
@@ -47,14 +46,14 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode }) {
   });
   const [expenseForm, setExpenseForm] = useState({
     expense_date: today(),
-    amount: "",
+    total_amount: "",
     tax_rate: "19.25",
     description: "",
     payment_method: "cash",
   });
   const [revenueForm, setRevenueForm] = useState({
     revenue_date: today(),
-    amount: "",
+    total_amount: "",
     tax_rate: "19.25",
     description: "",
     payment_method: "cash",
@@ -236,21 +235,34 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode }) {
 
   const activeTabLabel = tabs.find(([key]) => key === tab)?.[1] || "Comptabilité";
 
+  function navigateTab(view) {
+    if (onNavigate) onNavigate(view);
+    else setTab(resolveAccountingTab(view));
+  }
+
   return (
     <PageContainer>
       <PageHeader
         eyebrow="Comptabilité"
         title="Comptabilité générale"
-        subtitle="Suivez les écritures, dépenses, recettes, paiements et états financiers du restaurant."
+        subtitle="Suivez les écritures, dépenses, encaissements et états financiers du restaurant."
         primaryAction={
-          <SecondaryAction icon="Download" onClick={exportFec}>
-            Export FEC (Excel)
-          </SecondaryAction>
+          tab !== "dashboard" ? (
+            <SecondaryAction icon="LayoutDashboard" onClick={() => navigateTab("dashboard")}>
+              Tableau de bord
+            </SecondaryAction>
+          ) : (
+            <SecondaryAction icon="Download" onClick={exportFec}>
+              Export FEC (Excel)
+            </SecondaryAction>
+          )
         }
         secondaryActions={
-          <SecondaryAction icon="RotateCcw" onClick={restoreDefaults}>
-            Restaurer les valeurs par défaut
-          </SecondaryAction>
+          tab === "dashboard" ? (
+            <SecondaryAction icon="RotateCcw" onClick={restoreDefaults}>
+              Restaurer les valeurs par défaut
+            </SecondaryAction>
+          ) : null
         }
         meta={[
           <span key="active">Vue active : {activeTabLabel}</span>,
@@ -259,20 +271,9 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode }) {
           <span key="expenses">{expenses.length.toLocaleString("fr-FR")} dépense(s)</span>,
         ]}
       />
-      <FilterBar className="overflow-x-auto">
-        {tabs.map(([key, label, Icon]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-black transition ${tab === key ? "bg-slate-950 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"}`}
-          >
-            <Icon size={16} /> {label}
-          </button>
-        ))}
-      </FilterBar>
 
       {tab === "dashboard" && (
-        <Dashboard summary={summary} entryTotals={entryTotals} />
+        <Dashboard summary={summary} entryTotals={entryTotals} onNavigate={navigateTab} />
       )}
       {tab === "accounts" && (
         <Accounts

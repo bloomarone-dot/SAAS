@@ -1,42 +1,22 @@
-import { DashboardSection, SecondaryAction } from "@/modules/admin/components/AdminUi";
+import { SecondaryAction } from "@/modules/admin/components/AdminUi";
 
-import { formatLocalDate, money, qty } from "../shared/format";
-import { movementLabels } from "../shared/constants";
-import { Table } from "../shared/ui";
+import { MovementList } from "../shared/MovementList";
 
-export function EntryList({ entries, productName, depotName, onCreate }) {
+export function EntryList({ entries, productName, depotName, onCreate, onEdit, onCancel }) {
   return (
-    <DashboardSection
+    <MovementList
       title="Liste des entrées"
       description="Consultez les approvisionnements et entrées directes enregistrés."
+      movements={entries}
+      productName={productName}
+      depotName={depotName}
+      onEdit={onEdit}
+      onCancel={onCancel}
       action={
         <SecondaryAction icon="Plus" onClick={onCreate}>
           Nouvelle entrée
         </SecondaryAction>
       }
-    >
-      <Table
-        columns={[
-          "Date",
-          "Type",
-          "Produit",
-          "Dépôt",
-          "Quantité",
-          "Prix d'achat",
-          "Total",
-          "Observation",
-        ]}
-        rows={entries.map((entry) => [
-          formatLocalDate(entry.movement_date || entry.created_at),
-          movementLabels[entry.movement_type] || entry.movement_type,
-          productName(entry.product_id),
-          depotName(entry.destination_depot_id),
-          qty(entry.quantity),
-          money(entry.unit_price),
-          money(entry.total_amount),
-          entry.reason || entry.reference || "-",
-        ])}
-      />
-    </DashboardSection>
+    />
   );
 }

@@ -6,6 +6,7 @@ import DishesPage from "@/modules/menu/pages/DishesPage";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { tableApi } from "@/modules/menu/services/tableApi";
+import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 
 const PAYMENT_REQUESTABLE_STATUSES = ["Prête", "Livrée", "Livree", "Servie"];
 const PAID_OR_DEAD_STATUSES = ["Payée", "Payee", "Annulée", "Annulee", "PENDING_PAYMENT", "Archivée"];
@@ -96,6 +97,7 @@ export function ServerOpenTables({ restaurantId }) {
   const [partySizes, setPartySizes] = useState({});
   const [customerForms, setCustomerForms] = useState({});
   const [message, setMessage] = useState("");
+  useAutoClearMessage(message, setMessage);
   const [loadingTableId, setLoadingTableId] = useState("");
 
   useEffect(() => {
@@ -209,6 +211,7 @@ export function ServerFreeTables({ restaurantId }) {
   const [tables, setTables] = useState([]);
   const [ordersByTable, setOrdersByTable] = useState({});
   const [message, setMessage] = useState("");
+  useAutoClearMessage(message, setMessage);
   const [loadingTableId, setLoadingTableId] = useState("");
 
   useEffect(() => {
@@ -293,6 +296,7 @@ export function ServerOrderWorkspace({ restaurantId, role, view }) {
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [message, setMessage] = useState("");
+  useAutoClearMessage(message, setMessage);
   const [loadingOrderId, setLoadingOrderId] = useState("");
 
   useEffect(() => {
@@ -482,6 +486,7 @@ function OrderActionCard({ order, actionLabel, disabled, loading, onAction }) {
 function ServerPaymentRequests({ orders, onReload }) {
   const [activeOrder, setActiveOrder] = useState(null);
   const [message, setMessage] = useState("");
+  useAutoClearMessage(message, setMessage);
   const [busyId, setBusyId] = useState("");
   const eligible = orders.filter(isPaymentRequestable);
 

@@ -223,8 +223,6 @@ export const APP_MENUS = {
       children: [
         { key: "stocks", label: "Produits stock", icon: "Box" },
         { key: "movements", label: "Mouvements", icon: "ClipboardList" },
-
-        { key: "inventory", label: "Inventaires", icon: "FileText" },
         { key: "purchases", label: "Achats stock", icon: "ShoppingCart" },
         { key: "accounting", label: "Comptabilité stock", icon: "FileText" },
         { key: "stock-report", label: "Rapports stock", icon: "BarChart3" },
@@ -331,8 +329,7 @@ export const APP_MENUS = {
     { key: "entries", label: "Entrées", icon: "Truck" },
     { key: "transfers", label: "Transferts", icon: "Activity" },
     { key: "outputs", label: "Sorties", icon: "Package" },
-    { key: "inventories", label: "Inventaires", icon: "ClipboardList" },
-    { key: "reports", label: "Rapports", icon: "BarChart3" },
+    { key: "reports", label: "Mouvements", icon: "BarChart3" },
     { key: "alerts", label: "Alertes stock faible", icon: "AlertTriangle" },
     {
       key: "comptabilite",
@@ -354,16 +351,6 @@ export const APP_MENUS = {
   ],
   COMPTABLE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
-    { key: "journals", label: "Journaux", icon: "ReceiptText" },
-    { key: "entries", label: "Écritures", icon: "Calculator" },
-    { key: "expenses", label: "Dépenses", icon: "TrendingDown" },
-    { key: "encaissements", label: "Encaissements", icon: "Wallet" },
-    { key: "revenues", label: "Recettes manuelles", icon: "CreditCard" },
-    { key: "payments", label: "Paiements", icon: "CreditCard" },
-    { key: "cash", label: "Caisses", icon: "Wallet" },
-    { key: "banks", label: "Banques", icon: "Building2" },
-    { key: "statements", label: "États financiers", icon: "BarChart3" },
   ],
   CAISSE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },

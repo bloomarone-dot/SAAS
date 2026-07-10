@@ -7,6 +7,9 @@ import { orderApi } from "@/modules/orders/services/orderApi";
 import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 
+const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
+const KITCHEN_SEND_STATUSES = new Set(["Nouvelle", "Acceptée", "Acceptee", "En préparation", "En preparation"]);
+
 const PAYMENT_OPTIONS = [
   "Dépôt Orange Money",
   "Dépôt MTN Mobile Money",
@@ -61,11 +64,14 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   const [cart, setCart] = useState(new Map());
   const [areaSearch, setAreaSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [kitchenBusyId, setKitchenBusyId] = useState("");
 
   useEffect(() => {
     loadAreas();
     loadDeliveries();
     loadMenu();
+    const timer = window.setInterval(loadDeliveries, 12000);
+    return () => window.clearInterval(timer);
   }, [restaurantId]);
 
   async function loadAreas() {
@@ -80,12 +86,20 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   async function loadDeliveries() {
     try {
       const data = await orderApi.list({ fulfillment_type: "Livraison", limit: 200 });
-      const active = data.filter((order) => !["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"].includes(order.status));
-      setOrders(active.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
-    } catch {
-      // liste silencieuse si réseau coupé
+      const rows = Array.isArray(data) ? data : [];
+      const sorted = rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      setOrders(sorted);
+    } catch (error) {
+      onMessage?.(error.message || "Impossible de charger les livraisons.");
+      setOrders([]);
     }
   }
+
+  const activeOrders = useMemo(
+    () => orders.filter((order) => !CLOSED_STATUSES.has(order.status)),
+    [orders],
+  );
+  const recentOrders = useMemo(() => orders.slice(0, 30), [orders]);
 
   async function loadMenu() {
     if (!restaurantId) return;
@@ -130,14 +144,14 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   const query = search.trim().toLowerCase();
   const filteredOrders = useMemo(
     () =>
-      orders.filter((order) => {
+      activeOrders.filter((order) => {
         if (!query) return true;
         return [order.order_number, order.customer_name, order.customer_phone, order.delivery_area_name, order.payment_method]
           .join(" ")
           .toLowerCase()
           .includes(query);
       }),
-    [orders, query]
+    [activeOrders, query]
   );
 
   function addDish(dish) {
@@ -197,12 +211,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
     setBusy(true);
     try {
       const created = await orderApi.createCashierDelivery(payload);
-      try {
-        await orderApi.sendToKitchen(created.id);
-      } catch {
-        // la commande est créée même si l'envoi cuisine échoue temporairement
-      }
-      onMessage?.(`Livraison ${created.order_number} enregistrée et envoyée en cuisine.`);
+      onMessage?.(`Livraison ${created.order_number} enregistrée. Envoyez-la en cuisine quand vous êtes prêt.`);
       setShowForm(false);
       resetForm();
       await loadDeliveries();
@@ -228,6 +237,59 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function sendOrderToKitchen(order) {
+    setKitchenBusyId(order.id);
+    try {
+      const updated = await orderApi.sendToKitchen(order.id);
+      onMessage?.(`Commande ${order.order_number} envoyée en cuisine.`);
+      setOrders((current) =>
+        current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+      );
+    } catch (error) {
+      onMessage?.(error.message || "Envoi en cuisine impossible.");
+    } finally {
+      setKitchenBusyId("");
+    }
+  }
+
+  function renderOrderCard(order, showKitchenAction = true) {
+    const canSendToKitchen = showKitchenAction && KITCHEN_SEND_STATUSES.has(order.status) && !order.is_closed;
+    const itemsLabel = (order.items || []).length
+      ? order.items.map((item) => `${item.quantity}x ${item.name}`).join(", ")
+      : "Aucun plat listé";
+
+    return (
+      <article key={order.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-black text-slate-900">{order.order_number}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-700">{order.customer_name}</p>
+            <p className="text-xs font-semibold text-slate-500">{order.customer_phone}</p>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-700">
+            {order.status}
+          </span>
+        </div>
+        <div className="mt-3 space-y-1 text-xs font-semibold text-slate-600">
+          <p><DashboardIcon name="MapPin" size={12} className="mr-1 inline" />{order.delivery_area_name || "Quartier non renseigné"}</p>
+          <p><DashboardIcon name="Phone" size={12} className="mr-1 inline" />{order.payment_method}</p>
+          <p className="line-clamp-2">{itemsLabel}</p>
+          <p>{money(order.total_amount)} · {formatDateTime(order.created_at)}</p>
+        </div>
+        {canSendToKitchen && (
+          <button
+            type="button"
+            disabled={kitchenBusyId === order.id}
+            onClick={() => sendOrderToKitchen(order)}
+            className="lte-btn lte-btn-primary lte-btn-sm mt-3 w-full"
+          >
+            {kitchenBusyId === order.id ? "Envoi…" : "Envoyer en cuisine"}
+          </button>
+        )}
+      </article>
+    );
   }
 
   return (
@@ -256,29 +318,27 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
       >
         {filteredOrders.length ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {filteredOrders.map((order) => (
-              <article key={order.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-black text-slate-900">{order.order_number}</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-700">{order.customer_name}</p>
-                    <p className="text-xs font-semibold text-slate-500">{order.customer_phone}</p>
-                  </div>
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-700">
-                    {order.status}
-                  </span>
-                </div>
-                <div className="mt-3 space-y-1 text-xs font-semibold text-slate-600">
-                  <p><DashboardIcon name="MapPin" size={12} className="mr-1 inline" />{order.delivery_area_name || "Quartier non renseigné"}</p>
-                  <p><DashboardIcon name="Phone" size={12} className="mr-1 inline" />{order.payment_method}</p>
-                  <p>{money(order.total_amount)} · {formatDateTime(order.created_at)}</p>
-                </div>
-              </article>
-            ))}
+            {filteredOrders.map((order) => renderOrderCard(order))}
           </div>
         ) : (
           <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-500">
             Aucune livraison active. Créez une nouvelle commande avec le bouton ci-dessus.
+          </p>
+        )}
+      </DashboardSection>
+
+      <DashboardSection
+        title="Livraisons enregistrées"
+        description="Historique récent des livraisons créées (y compris clôturées)."
+        action={<span className="text-xs font-black text-slate-500">{recentOrders.length} livraison(s)</span>}
+      >
+        {recentOrders.length ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {recentOrders.map((order) => renderOrderCard(order, false))}
+          </div>
+        ) : (
+          <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-500">
+            Aucune livraison enregistrée pour le moment.
           </p>
         )}
       </DashboardSection>

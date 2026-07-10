@@ -12,6 +12,7 @@ import { getApiBaseUrl } from "@/config/api";
 import { apiFetch } from "@/config/http";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 
 const paymentMethods = [
   { label: "Espèces", icon: "Wallet" },
@@ -103,6 +104,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const [promoCode, setPromoCode] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  useAutoClearMessage(message, setMessage);
   const [isLoading, setIsLoading] = useState(false);
   const [paymentRequests, setPaymentRequests] = useState([]);
   const [requestActionId, setRequestActionId] = useState("");

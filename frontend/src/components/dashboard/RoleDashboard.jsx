@@ -25,7 +25,15 @@ export function RoleDashboard({ role, overrides = {}, onNavigate }) {
   if (profile === "cashier") return <CaisseDashboard overrides={overrides} />;
   if (profile === "server") return <ServerDashboard overrides={overrides} />;
   if (profile === "kitchen") return <CuisineDashboard overrides={overrides} />;
-  if (profile === "stock") return <StockDashboard overrides={overrides} onNavigate={onNavigate} />;
+  if (profile === "stock") {
+    return (
+      <StockDashboard
+        variant={role === "STOCK" ? "stock" : "accounting"}
+        overrides={overrides}
+        onNavigate={onNavigate}
+      />
+    );
+  }
 
   return <AdminDashboard role={role} overrides={overrides} />;
 }

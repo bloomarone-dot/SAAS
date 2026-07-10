@@ -67,7 +67,7 @@ export function StatCard({ label, value, icon = "BarChart3", trend, tone = "defa
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-2 truncate text-2xl font-black text-slate-950">{value}</p>
+          <p className="mt-2 break-words text-xl font-black tabular-nums leading-tight text-slate-950 sm:text-2xl">{value}</p>
           {trend && <p className="mt-1 truncate text-xs font-semibold text-slate-500">{trend}</p>}
         </div>
         <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${tones[tone] ?? tones.default}`}>

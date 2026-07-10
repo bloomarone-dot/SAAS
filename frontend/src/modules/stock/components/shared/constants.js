@@ -20,9 +20,8 @@ export const tabs = [
   { key: "entries", label: "Entrées", icon: PackagePlus },
   { key: "transfers", label: "Transferts", icon: ArrowLeftRight },
   { key: "outputs", label: "Sorties", icon: PackageX },
-  { key: "inventories", label: "Inventaires", icon: ClipboardCheck },
   { key: "lots", label: "Lots et péremptions", icon: CalendarClock },
-  { key: "reports", label: "Rapports", icon: ClipboardList },
+  { key: "reports", label: "Mouvements", icon: ClipboardList },
   { key: "alerts", label: "Alertes", icon: AlertTriangle },
 ];
 
