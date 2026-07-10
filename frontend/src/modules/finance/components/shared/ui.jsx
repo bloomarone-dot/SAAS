@@ -8,6 +8,8 @@ const columnLabels = {
   code: "Code",
   description: "Libellé",
   due_date: "Échéance",
+  expense_date: "Date dépense",
+  revenue_date: "Date recette",
   entry_date: "Date",
   entry_number: "N° écriture",
   invoice_number: "N° facture",

@@ -61,6 +61,7 @@ from app.modules.stock.schemas import (
     StockMenuItemOut,
     StockMovementIn,
     StockMovementPublic,
+    StockMovementUpdateIn,
     StockOutputIn,
     StockReportOut,
     StockSummaryOut,
@@ -78,6 +79,7 @@ DEFAULT_DEPOTS = [
     ("MAIN", "Magasin principal", DepotType.PRINCIPAL, "Depot principal de reception des achats"),
     ("DRINK", "Stock boisson", DepotType.BOISSON, "Depot dedie aux boissons"),
     ("KITCHEN", "Stock cuisine", DepotType.CUISINE, "Depot dedie a la cuisine"),
+    ("AVARIE", "Stock avarie", DepotType.AUTRE, "Depot dedie aux produits avaries ou perdus"),
 ]
 DEFAULT_UNITS = [
     ("piece", "piece"),
@@ -769,7 +771,7 @@ def notify_if_low_stock(db: Session, product: Product, previous_total) -> None:
     if not (new_total <= threshold < dec(previous_total)):
         return
     message = f"{product.name} est sous le seuil minimum ({new_total:g} restant, seuil {threshold:g})."
-    for target_role in ("STOCK", "ADMIN"):
+    for target_role in ("STOCK", "ADMIN", "MANAGER"):
         notify(db, title="Stock bas", message=message, restaurant_id=product.restaurant_id, role=target_role, category="stock", link="low-stock")
 
 
@@ -1286,7 +1288,21 @@ def create_transfer(payload: StockTransferIn, current_user: User = Depends(requi
 def create_output(payload: StockOutputIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
     previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
-    movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.OUTPUT, unit_price=None, **payload.dict())
+    movement_type = StockMovementType.TRANSFER if payload.destination_depot_id else StockMovementType.OUTPUT
+    movement = add_movement(
+        db,
+        restaurant_id=current_user.restaurant_id,
+        user_id=current_user.id,
+        movement_type=movement_type,
+        product_id=payload.product_id,
+        source_depot_id=payload.source_depot_id,
+        destination_depot_id=payload.destination_depot_id,
+        quantity=payload.quantity,
+        unit_price=None,
+        reason=payload.reason,
+        reference=payload.reference,
+        movement_date=payload.movement_date,
+    )
     log_action(db, current_user, "stock.output_create", "stock_movement", movement.id, "Sortie de stock")
     notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
     db.commit()
@@ -1299,7 +1315,20 @@ def create_output(payload: StockOutputIn, current_user: User = Depends(require_t
 def create_loss(payload: StockOutputIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
     previous = get_current_stock(db, payload.product_id, restaurant_id=current_user.restaurant_id)
-    movement = add_movement(db, restaurant_id=current_user.restaurant_id, user_id=current_user.id, movement_type=StockMovementType.LOSS, **payload.dict())
+    movement_type = StockMovementType.TRANSFER if payload.destination_depot_id else StockMovementType.LOSS
+    movement = add_movement(
+        db,
+        restaurant_id=current_user.restaurant_id,
+        user_id=current_user.id,
+        movement_type=movement_type,
+        product_id=payload.product_id,
+        source_depot_id=payload.source_depot_id,
+        destination_depot_id=payload.destination_depot_id,
+        quantity=payload.quantity,
+        reason=payload.reason,
+        reference=payload.reference,
+        movement_date=payload.movement_date,
+    )
     log_action(db, current_user, "stock.loss_create", "stock_movement", movement.id, "Avarie / perte de stock")
     notify_if_low_stock(db, get_product_or_404(db, payload.product_id, current_user.restaurant_id), previous)
     db.commit()
@@ -1407,6 +1436,37 @@ def cancel_stock_movement(movement_id: str, reason: str | None = None, current_u
     movement.reason = f"{movement.reason or ''}\nAnnulation controlee: {reason or 'sans motif'}".strip()
     movement.validated_by = current_user.id
     movement.validated_at = utcnow()
+    db.commit()
+    db.refresh(movement)
+    return movement
+
+
+@router.patch("/movements/{movement_id}", response_model=StockMovementPublic)
+def update_stock_movement(
+    movement_id: str,
+    payload: StockMovementUpdateIn,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    movement = db.get(StockMovement, movement_id)
+    if not movement or movement.restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=404, detail="Mouvement introuvable")
+    if movement.status != StockMovementStatus.VALIDATED:
+        raise HTTPException(status_code=400, detail="Seul un mouvement valide peut etre modifie")
+    if payload.movement_date is not None:
+        movement.movement_date = payload.movement_date
+    if payload.reason is not None:
+        movement.reason = payload.reason
+    if payload.reference is not None:
+        movement.reference = payload.reference
+    if payload.destination_depot_id is not None:
+        if movement.movement_type not in {StockMovementType.TRANSFER, StockMovementType.OUTPUT, StockMovementType.LOSS}:
+            raise HTTPException(status_code=400, detail="La destination ne s'applique pas a ce type de mouvement")
+        movement.destination_depot_id = payload.destination_depot_id or None
+    movement.validated_by = current_user.id
+    movement.validated_at = utcnow()
+    log_action(db, current_user, "stock.movement_update", "stock_movement", movement.id, "Mise a jour mouvement stock")
     db.commit()
     db.refresh(movement)
     return movement

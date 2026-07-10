@@ -30,6 +30,7 @@ export function DepotCreate({ form, setForm, onSubmit }) {
             ["principal", "Principal"],
             ["cuisine", "Cuisine"],
             ["boisson", "Boisson"],
+            ["avarie", "Avarie"],
             ["autre", "Autre"],
           ]}
         />

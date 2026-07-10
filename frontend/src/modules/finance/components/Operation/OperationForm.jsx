@@ -9,6 +9,7 @@ export function OperationForm({
   dateField,
   endpoint,
   submit,
+  helperText,
 }) {
   const amount = Number(form.amount || 0);
   const taxRate = Number(form.tax_rate || 0);
@@ -46,7 +47,7 @@ export function OperationForm({
     <section className="grid gap-4 xl:grid-cols-[380px_1fr]">
       <Panel
         title={`Créer ${title.toLowerCase()}`}
-        description="Saisissez le montant HT, le taux de taxe et le mode de paiement."
+        description={helperText || "Saisissez le montant HT, le taux de taxe et le mode de paiement. Le total TTC est calculé automatiquement."}
       >
         <form onSubmit={save} className="space-y-3">
           <Input

@@ -211,6 +211,13 @@ class StockMovementPublic(OrmModel):
         return float(self.total_amount or 0)
 
 
+class StockMovementUpdateIn(BaseModel):
+    movement_date: Optional[datetime] = None
+    reason: Optional[str] = Field(default=None, max_length=255)
+    reference: Optional[str] = Field(default=None, max_length=120)
+    destination_depot_id: Optional[str] = None
+
+
 class StockMovementIn(BaseModel):
     movement_date: Optional[datetime] = None
     movement_type: StockMovementType
@@ -270,6 +277,7 @@ class StockOutputIn(BaseModel):
     movement_date: Optional[datetime] = None
     product_id: str
     source_depot_id: str
+    destination_depot_id: Optional[str] = None
     quantity: float = Field(gt=0)
     reason: str = Field(default=StockLossReason.CONSOMMATION.value, max_length=255)
     reference: Optional[str] = None

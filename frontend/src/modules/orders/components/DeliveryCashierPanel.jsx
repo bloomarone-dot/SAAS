@@ -59,6 +59,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
     notes: "",
   });
   const [cart, setCart] = useState(new Map());
+  const [areaSearch, setAreaSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
 
   useEffect(() => {
@@ -70,10 +71,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   async function loadAreas() {
     try {
       const data = await orderApi.listDeliveryAreas();
-      setAreas(data);
-      if (!form.delivery_area_id && data[0]?.id) {
-        setForm((current) => ({ ...current, delivery_area_id: data[0].id }));
-      }
+      setAreas(data.sort((a, b) => a.name.localeCompare(b.name, "fr")));
     } catch {
       setAreas([]);
     }
@@ -117,6 +115,12 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   const subtotal = cartLines.reduce((total, line) => total + line.line_total, 0);
   const deliveryFee = Number(selectedArea?.delivery_fee || 0);
   const total = subtotal + deliveryFee;
+
+  const filteredAreas = useMemo(() => {
+    const query = areaSearch.trim().toLowerCase();
+    if (!query) return areas;
+    return areas.filter((area) => area.name.toLowerCase().includes(query));
+  }, [areaSearch, areas]);
 
   const visibleDishes = useMemo(() => {
     if (categoryFilter === "ALL") return dishes;
@@ -164,6 +168,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
     });
     setCart(new Map());
     setCategoryFilter("ALL");
+    setAreaSearch("");
   }
 
   async function submitDelivery() {
@@ -315,19 +320,27 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
               />
             </label>
             <label className="lte-form-group">
-              <span className="lte-label">Quartier <span className="req">*</span></span>
+              <span className="lte-label">Quartier (Yaoundé) <span className="req">*</span></span>
+              <input
+                value={areaSearch}
+                onChange={(event) => setAreaSearch(event.target.value)}
+                className="form-control mb-2"
+                placeholder="Rechercher un quartier..."
+              />
               <select
                 value={form.delivery_area_id}
                 onChange={(event) => setForm((current) => ({ ...current, delivery_area_id: event.target.value }))}
                 className="form-control"
+                size={Math.min(8, Math.max(4, filteredAreas.length))}
               >
                 <option value="">Choisir un quartier</option>
-                {areas.map((area) => (
+                {filteredAreas.map((area) => (
                   <option key={area.id} value={area.id}>
                     {area.name} ({money(area.delivery_fee)})
                   </option>
                 ))}
               </select>
+              <span className="lte-help">{areas.length} quartier(s) disponibles à Yaoundé</span>
             </label>
             <label className="lte-form-group">
               <span className="lte-label">Paiement</span>
@@ -342,7 +355,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
               </select>
             </label>
             <label className="lte-form-group md:col-span-2">
-              <span className="lte-label">Adresse complémentaire</span>
+              <span className="lte-label">Adresse complémentaire (optionnel)</span>
               <input
                 value={form.customer_address}
                 onChange={(event) => setForm((current) => ({ ...current, customer_address: event.target.value }))}

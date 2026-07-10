@@ -1,6 +1,6 @@
 import { DashboardSection, SecondaryAction } from "@/modules/admin/components/AdminUi";
 
-import { money, qty } from "../shared/format";
+import { formatLocalDate, money, qty } from "../shared/format";
 import { movementLabels } from "../shared/constants";
 import { Table } from "../shared/ui";
 
@@ -27,9 +27,7 @@ export function EntryList({ entries, productName, depotName, onCreate }) {
           "Observation",
         ]}
         rows={entries.map((entry) => [
-          entry.movement_date
-            ? new Date(entry.movement_date).toLocaleDateString("fr-FR")
-            : "-",
+          formatLocalDate(entry.movement_date || entry.created_at),
           movementLabels[entry.movement_type] || entry.movement_type,
           productName(entry.product_id),
           depotName(entry.destination_depot_id),

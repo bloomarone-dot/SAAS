@@ -66,6 +66,7 @@ class StockLossReason(str, enum.Enum):
     PERTE = "perte"
     CASSE = "casse"
     PERIME = "perime"
+    AVARIE = "avarie"
     AUTRE = "autre"
     ECART_INVENTAIRE = "ecart_inventaire"
 

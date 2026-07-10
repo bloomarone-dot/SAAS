@@ -15,6 +15,7 @@ import { Dashboard } from "./Dashboard/Dashboard";
 import { Accounts } from "./Compte/Accounts";
 import { Journals } from "./Journal/Journals";
 import { Entries } from "./Ecriture/Entries";
+import { Encaissements } from "./Encaissements/Encaissements";
 import { OperationForm } from "./Operation/OperationForm";
 import { Statements } from "./Etats/Statements";
 import { FoodCost } from "./FoodCost/FoodCost";
@@ -320,15 +321,17 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode }) {
           submit={submit}
         />
       )}
+      {tab === "encaissements" && <Encaissements onMessage={onMessage} />}
       {tab === "revenues" && (
         <OperationForm
-          title="Recette"
+          title="Recette manuelle"
           rows={revenues}
           form={revenueForm}
           setForm={setRevenueForm}
           dateField="revenue_date"
           endpoint="/api/v1/finance/revenues"
           submit={submit}
+          helperText="Recettes hors caisse (autres revenus). Les ventes encaissées en caisse sont dans l'onglet Encaissements."
         />
       )}
       {tab === "payments" && (

@@ -199,7 +199,7 @@ export const APP_MENUS = {
       icon: "ClipboardList",
       children: [
         { key: "orders", label: "Liste commandes", icon: "ClipboardList" },
-        { key: "online-dispatch", label: "Dispatch commandes en ligne", icon: "SplitSquareHorizontal" },
+        { key: "online-dispatch", label: "Livraisons", icon: "Truck" },
       ],
     },
     {
@@ -243,7 +243,9 @@ export const APP_MENUS = {
         { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
         { key: "journals", label: "Journaux", icon: "ReceiptText" },
         { key: "entries", label: "Écritures", icon: "Calculator" },
-        { key: "revenues", label: "Recettes", icon: "Wallet" },
+        { key: "expenses", label: "Dépenses", icon: "TrendingDown" },
+        { key: "encaissements", label: "Encaissements", icon: "Wallet" },
+        { key: "revenues", label: "Recettes manuelles", icon: "Wallet" },
         { key: "statements", label: "États financiers", icon: "BarChart3" },
       ],
     },
@@ -270,6 +272,7 @@ export const APP_MENUS = {
       icon: "ClipboardList",
       children: [
         { key: "orders", label: "Suivi commandes", icon: "ClipboardList" },
+        { key: "online-dispatch", label: "Livraisons", icon: "Truck" },
         { key: "order-detail", label: "Détail commande", icon: "Eye" },
         { key: "kitchen-followup", label: "Suivi cuisine", icon: "ChefHat" },
         { key: "service-followup", label: "Suivi service", icon: "Utensils" },
@@ -293,7 +296,11 @@ export const APP_MENUS = {
         { key: "alerts", label: "Alertes", icon: "Bell" },
       ],
     },
-    { key: "stocks", label: "Stocks", icon: "Box" },
+    { key: "stocks", label: "Stocks", icon: "Box", children: [
+      { key: "stocks", label: "Vue stock", icon: "Box" },
+      { key: "movements", label: "Mouvements", icon: "ClipboardList" },
+      { key: "low-stock", label: "Alertes stock", icon: "AlertTriangle" },
+    ] },
     {
       key: "reports",
       label: "Rapports",
@@ -351,7 +358,8 @@ export const APP_MENUS = {
     { key: "journals", label: "Journaux", icon: "ReceiptText" },
     { key: "entries", label: "Écritures", icon: "Calculator" },
     { key: "expenses", label: "Dépenses", icon: "TrendingDown" },
-    { key: "revenues", label: "Recettes", icon: "Wallet" },
+    { key: "encaissements", label: "Encaissements", icon: "Wallet" },
+    { key: "revenues", label: "Recettes manuelles", icon: "CreditCard" },
     { key: "payments", label: "Paiements", icon: "CreditCard" },
     { key: "cash", label: "Caisses", icon: "Wallet" },
     { key: "banks", label: "Banques", icon: "Building2" },

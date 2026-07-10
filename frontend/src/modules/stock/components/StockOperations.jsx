@@ -9,7 +9,7 @@ import {
 } from "@/modules/admin/components/AdminUi";
 import { formatApiError } from "@/utils/network";
 
-import { today, uniqueDepots } from "./shared/format";
+import { dateToApiDateTime, formatLocalDate, today, uniqueDepots } from "./shared/format";
 import {
   emptyDepot,
   emptyEntry,
@@ -42,6 +42,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   const [movements, setMovements] = useState([]);
   const [inventories, setInventories] = useState([]);
   const [lots, setLots] = useState([]);
+  const [expiringLots, setExpiringLots] = useState([]);
   const [report, setReport] = useState(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -270,6 +271,15 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
         [],
       ],
       [
+        "expiringLots",
+        () =>
+          api("/api/v1/stock/lots/expiring?days=14", {
+            fallback: "Chargement des lots expirants impossible.",
+          }).catch(() => []),
+        setExpiringLots,
+        [],
+      ],
+      [
         "report",
         () =>
           api("/api/v1/stock/reports", {
@@ -342,8 +352,40 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     return normalized || undefined;
   }
 
-  function dateToApiDateTime(value) {
-    return value ? new Date(`${value}T00:00:00`).toISOString() : undefined;
+  async function cancelMovement(movement) {
+    const reason = window.prompt("Motif d'annulation (optionnel)") || "";
+    try {
+      await api(`/api/v1/stock/movements/${movement.id}/cancel?reason=${encodeURIComponent(reason)}`, {
+        method: "PATCH",
+        fallback: "Annulation du mouvement impossible.",
+      });
+      emit("Mouvement annulé.");
+      await loadAll();
+      await loadReport();
+    } catch (error) {
+      emit(error.message || "Annulation du mouvement impossible.");
+    }
+  }
+
+  async function editMovement(movement) {
+    const nextDate = window.prompt("Nouvelle date (AAAA-MM-JJ)", movement.movement_date?.slice?.(0, 10) || today());
+    if (!nextDate) return;
+    const nextReason = window.prompt("Motif", movement.reason || "") ?? movement.reason;
+    try {
+      await api(`/api/v1/stock/movements/${movement.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          movement_date: dateToApiDateTime(nextDate),
+          reason: nextReason,
+        }),
+        fallback: "Modification du mouvement impossible.",
+      });
+      emit("Mouvement mis à jour.");
+      await loadAll();
+      await loadReport();
+    } catch (error) {
+      emit(error.message || "Modification du mouvement impossible.");
+    }
   }
 
   async function submitProduct(event) {
@@ -387,6 +429,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       : "/api/v1/stock/entries";
     const payload = {
       ...numericPayload(entryForm, ["quantity", "unit_price"]),
+      movement_date: dateToApiDateTime(entryForm.movement_date),
       in_purchase_unit: !!entryForm.in_purchase_unit,
       lot_number: entryForm.lot_number || null,
       expiry_date: entryForm.expiry_date || null,
@@ -459,7 +502,12 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   async function submitOutput(event) {
     event.preventDefault();
     const path = isLoss ? "/api/v1/stock/losses" : "/api/v1/stock/outputs";
-    await submit(path, numericPayload(outputForm, ["quantity"]), () => {
+    const payload = {
+      ...numericPayload(outputForm, ["quantity"]),
+      movement_date: dateToApiDateTime(outputForm.movement_date),
+      destination_depot_id: outputForm.destination_depot_id || null,
+    };
+    await submit(path, payload, () => {
       setOutputForm({
         ...emptyOutput,
         product_id: products[0]?.id || "",
@@ -498,7 +546,12 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     event?.preventDefault();
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
-      if (value) params.set(key, value);
+      if (!value) return;
+      if (key === "start_date" || key === "end_date") {
+        params.set(key, dateToApiDateTime(value)?.slice(0, 10) || value);
+      } else {
+        params.set(key, value);
+      }
     });
     try {
       setIsReportLoading(true);
@@ -703,6 +756,9 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
           onExport={auditExport}
           productName={productName}
           depotName={depotName}
+          formatDate={formatLocalDate}
+          onCancelMovement={cancelMovement}
+          onEditMovement={editMovement}
         />
       )}
 
@@ -710,7 +766,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
         <LotList lots={lots} productName={productName} depotName={depotName} />
       )}
 
-      {activeTab === "alerts" && <Alerts products={lowStock} />}
+      {activeTab === "alerts" && <Alerts products={lowStock} expiringLots={expiringLots} productName={productName} depotName={depotName} />}
     </PageContainer>
   );
 }

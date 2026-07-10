@@ -27,7 +27,8 @@ from app.modules.permissions import router as permissions
 from app.modules.platform import router as platform
 from app.modules.restaurants import router as restaurants
 from app.modules.permissions.models import Role
-from app.modules.branches.models import Branch
+from app.modules.branches.models import Branch, DeliveryArea
+from app.modules.branches.delivery_area_seed import ensure_yaounde_delivery_areas_for_all_restaurants
 from app.modules.catalog.models import MenuCategory, MenuItem
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock import router as stock
@@ -165,6 +166,7 @@ def create_tables() -> None:
     ensure_french_status_values()
     seed_superadmin()
     seed_demo_restaurant()
+    _seed_yaounde_delivery_areas()
 
 
 @app.on_event("startup")
@@ -866,6 +868,15 @@ def read_mysql_column_type(connection, table_name: str, column_name: str) -> str
     """Retourne la definition d'une colonne MySQL pour limiter les ALTER repetes."""
     row = connection.execute(text(f"SHOW COLUMNS FROM {table_name} LIKE '{column_name}'")).mappings().first()
     return str(row["Type"]) if row else ""
+
+
+def _seed_yaounde_delivery_areas() -> None:
+    """Préremplit les quartiers de Yaoundé pour chaque restaurant actif."""
+    db = SessionLocal()
+    try:
+        ensure_yaounde_delivery_areas_for_all_restaurants(db)
+    finally:
+        db.close()
 
 
 def seed_superadmin() -> None:

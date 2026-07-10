@@ -17,12 +17,13 @@ export function Reports({
   onExport,
   productName,
   depotName,
+  formatDate = (value) => new Date(value).toLocaleDateString("fr-FR"),
+  onCancelMovement,
+  onEditMovement,
 }) {
   const rows = report?.movements || movements;
   const exportRows = rows.map((movement) => ({
-    date: new Date(
-      movement.movement_date || movement.created_at,
-    ).toLocaleDateString("fr-FR"),
+    date: formatDate(movement.movement_date || movement.created_at),
     type: movementLabels[movement.movement_type] || movement.movement_type,
     product: productName(movement.product_id),
     source: depotName(movement.source_depot_id),
@@ -30,6 +31,7 @@ export function Reports({
     quantity: qty(movement.quantity),
     amount: money(movement.total_amount),
     production_cost: money(movement.production_cost),
+    status: movement.status,
   }));
   const exportColumns = [
     ["date", "Date"],
@@ -40,7 +42,54 @@ export function Reports({
     ["quantity", "Quantité"],
     ["amount", "Montant"],
     ["production_cost", "Coût production"],
+    ["status", "Statut"],
   ];
+
+  const tableRows = rows.map((movement) => {
+    const base = [
+      formatDate(movement.movement_date || movement.created_at),
+      movementLabels[movement.movement_type] || movement.movement_type,
+      productName(movement.product_id),
+      depotName(movement.source_depot_id),
+      depotName(movement.destination_depot_id),
+      qty(movement.quantity),
+      money(movement.total_amount),
+      money(movement.production_cost),
+      movement.status === "cancelled" ? "Annulé" : "Validé",
+    ];
+    if (!onCancelMovement && !onEditMovement) return base;
+    return [
+      ...base,
+      movement.status === "validated" ? (
+        <div className="flex flex-wrap gap-2">
+          {onEditMovement && (
+            <button type="button" className="lte-btn lte-btn-default lte-btn-sm" onClick={() => onEditMovement(movement)}>
+              Modifier
+            </button>
+          )}
+          {onCancelMovement && (
+            <button type="button" className="lte-btn lte-btn-danger lte-btn-sm" onClick={() => onCancelMovement(movement)}>
+              Supprimer
+            </button>
+          )}
+        </div>
+      ) : "-",
+    ];
+  });
+
+  const columns = [
+    "Date",
+    "Type",
+    "Produit",
+    "Source",
+    "Destination",
+    "Quantité",
+    "Montant",
+    "Coût production",
+    "Statut",
+    ...(onCancelMovement || onEditMovement ? ["Actions"] : []),
+  ];
+
   return (
     <DashboardSection
       title="Rapports de stock"
@@ -108,30 +157,7 @@ export function Reports({
         <MiniStat label="Sorties" value={money(report?.outputs_value)} />
         <MiniStat label="Stock faible" value={report?.low_stock_count || 0} />
       </div>
-      <Table
-        columns={[
-          "Date",
-          "Type",
-          "Produit",
-          "Source",
-          "Destination",
-          "Quantité",
-          "Montant",
-          "Coût production",
-        ]}
-        rows={rows.map((movement) => [
-          new Date(
-            movement.movement_date || movement.created_at,
-          ).toLocaleDateString("fr-FR"),
-          movementLabels[movement.movement_type] || movement.movement_type,
-          productName(movement.product_id),
-          depotName(movement.source_depot_id),
-          depotName(movement.destination_depot_id),
-          qty(movement.quantity),
-          money(movement.total_amount),
-          money(movement.production_cost),
-        ])}
-      />
+      <Table columns={columns} rows={tableRows} />
     </DashboardSection>
   );
 }

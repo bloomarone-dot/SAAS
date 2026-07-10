@@ -926,6 +926,7 @@ function EmptyState({ text }) {
 }
 
 function receiptHtml(order, restaurant, currentUser) {
+  const VAT_RATE = 0.1925;
   const currency = restaurant?.currency || "XAF";
   const receiptMoney = (value) => {
     const amount = Number(value || 0).toLocaleString("fr-FR");
@@ -942,6 +943,11 @@ function receiptHtml(order, restaurant, currentUser) {
     || "Non renseigné";
   const items = order.items ?? [];
   const subtotal = items.reduce((total, item) => total + Number(item.line_total || 0), 0);
+  const totalTtc = Number(order.total_amount || 0);
+  const totalHt = totalTtc / (1 + VAT_RATE);
+  const totalTva = totalTtc - totalHt;
+  const printCount = Number(order.print_count || 1);
+  const receiptNumber = `${order.order_number}-${String(printCount).padStart(3, "0")}`;
   const rows = items.map((item) => `
     <tr>
       <td class="item">${escapeHtml(item.name)}</td>
@@ -958,6 +964,7 @@ function receiptHtml(order, restaurant, currentUser) {
     restaurant?.postal_box ? `B.P. ${restaurant.postal_box}` : "",
     restaurant?.phone ? `Tél. ${restaurant.phone}` : "",
     restaurant?.email,
+    restaurant?.website_url,
   ].filter(Boolean);
   return `<!doctype html>
     <html lang="fr">
@@ -1000,10 +1007,12 @@ function receiptHtml(order, restaurant, currentUser) {
           ${restaurant?.tax_id ? `<p class="center muted">RC/ID fiscal : ${escapeHtml(restaurant.tax_id)}</p>` : ""}
           <div class="separator"></div>
           <p class="center"><strong>REÇU DE PAIEMENT</strong></p>
+          <p class="center muted">N° reçu : ${escapeHtml(receiptNumber)}${printCount > 1 ? ` · Duplicata ${printCount}` : ""}</p>
           <p class="center muted">Créée le ${formatDateTime(order.created_at || order.updated_at || new Date().toISOString())}</p>
           <div class="separator"></div>
           <div class="meta">
             <strong>Commande</strong><span>${escapeHtml(order.order_number)}</span>
+            <strong>Restaurant</strong><span>${escapeHtml(restaurant?.name || restaurantName)}</span>
             <strong>Client</strong><span>${escapeHtml(order.customer_name || orderCustomerLabel(order) || "Client anonyme")}</span>
             <strong>Table</strong><span>${escapeHtml(order.table_id ? `${order.table_room || "Salle"} · Table ${order.table_name || order.table_id}` : "-")}</span>
             <strong>Serveur</strong><span>${escapeHtml(order.server_name || "Non assigné")}</span>
@@ -1019,10 +1028,12 @@ function receiptHtml(order, restaurant, currentUser) {
             <tbody>${rows}</tbody>
           </table>
           <div class="summary">
-            <div class="summary-row"><span>Sous-total</span><span>${receiptMoney(subtotal)}</span></div>
+            <div class="summary-row"><span>Sous-total articles</span><span>${receiptMoney(subtotal)}</span></div>
             ${Number(order.discount_amount || 0) > 0 ? `<div class="summary-row"><span>Remise</span><span>-${receiptMoney(order.discount_amount)}</span></div>` : ""}
             ${Number(order.delivery_fee || 0) > 0 ? `<div class="summary-row"><span>Livraison</span><span>${receiptMoney(order.delivery_fee)}</span></div>` : ""}
-            <div class="summary-row total"><span>TOTAL</span><span>${receiptMoney(order.total_amount)}</span></div>
+            <div class="summary-row"><span>Total HT</span><span>${receiptMoney(totalHt)}</span></div>
+            <div class="summary-row"><span>TVA (19,25 %)</span><span>${receiptMoney(totalTva)}</span></div>
+            <div class="summary-row total"><span>TOTAL TTC</span><span>${receiptMoney(totalTtc)}</span></div>
           </div>
           <div class="footer">
             <p><strong>Merci pour votre visite.</strong></p>

@@ -13,6 +13,7 @@ from app.modules.branches.extended_schemas import (
     DeliveryAreaUpdateIn,
 )
 from app.modules.branches.models import Branch, DeliveryArea
+from app.modules.branches.delivery_area_seed import ensure_yaounde_delivery_areas
 from app.modules.branches.schemas import BranchCreateIn, BranchPublic
 from app.modules.finance.models import CashRegister
 from app.modules.permissions.models import Permission, Role
@@ -101,6 +102,7 @@ def list_delivery_areas(
 ):
     if not has_permission(current_user, Permission.RESTAURANT_SETTINGS_READ):
         assert_permission(current_user, Permission.CASHIER_READ)
+    ensure_yaounde_delivery_areas(db, current_user.restaurant_id)
     query = db.query(DeliveryArea).filter(DeliveryArea.restaurant_id == current_user.restaurant_id)
     if branch_id:
         query = query.filter(DeliveryArea.branch_id == branch_id)

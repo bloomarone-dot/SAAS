@@ -11,10 +11,12 @@ export function OutputCreate({
   setIsLoss,
   onSubmit,
 }) {
+  const destinationOptions = depots.map((depot) => [depot.id, depot.name]);
+
   return (
     <DashboardSection
       title="Sortie de stock"
-      description="Enregistrez une consommation, vente, perte ou casse depuis le dépôt source."
+      description="Enregistrez une consommation, vente, perte ou casse depuis le dépôt source vers une destination."
     >
       <form
         onSubmit={onSubmit}
@@ -41,6 +43,12 @@ export function OutputCreate({
           onChange={(source_depot_id) => setForm({ ...form, source_depot_id })}
           options={depots.map((d) => [d.id, d.name])}
         />
+        <Select
+          label="Destination"
+          value={form.destination_depot_id}
+          onChange={(destination_depot_id) => setForm({ ...form, destination_depot_id })}
+          options={[["", "Sortie externe / consommation"], ...destinationOptions]}
+        />
         <Input
           label="Quantité"
           type="number"
@@ -59,6 +67,7 @@ export function OutputCreate({
             ["perte", "Perte"],
             ["casse", "Casse"],
             ["perime", "Périmé"],
+            ["avarie", "Avarie"],
             ["autre", "Autre"],
           ]}
         />
@@ -68,7 +77,7 @@ export function OutputCreate({
             checked={isLoss}
             onChange={(event) => setIsLoss(event.target.checked)}
           />{" "}
-          Comptabiliser comme perte
+          Comptabiliser comme perte / avarie
         </label>
         <Submit label="Enregistrer la sortie" />
       </form>

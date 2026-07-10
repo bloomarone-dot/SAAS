@@ -41,6 +41,7 @@ export const depotTypeLabels = {
   principal: "Principal",
   cuisine: "Cuisine",
   boisson: "Boisson",
+  avarie: "Avarie",
   autre: "Autre",
 };
 
@@ -85,6 +86,7 @@ export const emptyOutput = {
   movement_date: today(),
   product_id: "",
   source_depot_id: "",
+  destination_depot_id: "",
   quantity: "",
   reason: "consommation",
   reference: "",

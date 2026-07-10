@@ -18,7 +18,7 @@ import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
 import { AuditLogsAdmin } from "@/modules/admin/components/AuditLogsAdmin";
 import { AdminReports } from "@/modules/admin/components/AdminReports";
 import { CatalogAdmin } from "@/modules/admin/components/CatalogAdmin";
-import { OnlineOrderDispatchAdmin } from "@/modules/admin/components/OnlineOrderDispatchAdmin";
+import { DeliveryDispatchAdmin } from "@/modules/admin/components/DeliveryDispatchAdmin";
 import { PerformanceAdmin } from "@/modules/admin/components/PerformanceAdmin";
 import { DailyReportPage } from "@/modules/admin/components/DailyReportModal";
 import { PromotionsAdmin } from "@/modules/admin/components/PromotionsAdmin";
@@ -568,7 +568,7 @@ export default function App() {
       }
 
       // Accès comptabilité (vues dédiées sans collision avec le stock).
-      const accountingViews = ["comptabilite", "accounts", "journals", "entries", "expenses", "revenues", "cash", "banks", "statements"];
+      const accountingViews = ["comptabilite", "accounts", "journals", "entries", "expenses", "encaissements", "revenues", "cash", "banks", "statements"];
       if (accountingViews.includes(activeView) && session.role === "ADMIN") {
         return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
       }
@@ -584,7 +584,7 @@ export default function App() {
         return <RoleWorkspacePage role={session.role} view={activeView} overrides={overrides} />;
       }
 
-      const stockViews = ["stocks", "stock", "products", "depots", "entries", "transfers", "outputs", "inventories", "alerts", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "stock-report"];
+      const stockViews = ["stocks", "stock", "products", "depots", "entries", "transfers", "outputs", "inventories", "alerts", "low-stock", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "stock-report"];
 
       if (["staff", "user-detail"].includes(activeView) && session.role === "ADMIN") {
         return (
@@ -662,8 +662,8 @@ export default function App() {
         );
       }
 
-      if (activeView === "online-dispatch" && ["ADMIN", "MANAGER"].includes(session.role)) {
-        return <OnlineOrderDispatchAdmin onMessage={setMessage} />;
+      if (["online-dispatch", "deliveries", "delivery-create", "delivery-orders"].includes(activeView) && ["ADMIN", "MANAGER"].includes(session.role)) {
+        return <DeliveryDispatchAdmin currentUser={session} onMessage={setMessage} />;
       }
 
       if (activeView === "products" && session.role === "ADMIN") {
@@ -729,7 +729,7 @@ export default function App() {
           "stock-out": "movements",
           "create-stock-product": "stock",
           transfer: "movements",
-          damages: "inventory",
+          damages: "outputs",
           purchases: "entries",
           accounting: "reports",
           "stock-report": "reports",

@@ -72,6 +72,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.CASHIER_READ,
         Permission.CASHIER_UPDATE,
         Permission.STOCK_READ,
+        Permission.STOCK_UPDATE,
     },
     Role.SERVEUR: {Permission.SERVICE_READ, Permission.SERVICE_UPDATE},
     Role.CUISINE: {Permission.KITCHEN_READ, Permission.KITCHEN_UPDATE, Permission.STOCK_READ, Permission.STOCK_UPDATE},
