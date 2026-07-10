@@ -202,3 +202,18 @@ def sync_order_status_from_tickets(db: Session, order_id: str) -> None:
             category="order",
             link="dashboard",
         )
+
+
+def mark_order_kitchen_tickets_served(db: Session, order_id: str) -> int:
+    """Marque tous les tickets cuisine d'une commande comme servis (sync serveur -> cuisine)."""
+    tickets = (
+        db.query(KitchenTicketModel)
+        .filter(
+            KitchenTicketModel.order_id == order_id,
+            KitchenTicketModel.status != KitchenStatus.SERVIE,
+        )
+        .all()
+    )
+    for ticket in tickets:
+        ticket.status = KitchenStatus.SERVIE
+    return len(tickets)

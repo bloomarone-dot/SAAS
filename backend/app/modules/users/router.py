@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.dependencies import (
@@ -68,12 +68,30 @@ def validate_branch(db: Session, branch_id: str | None, restaurant_id: str | Non
         raise HTTPException(status_code=400, detail="Branche invalide pour ce restaurant")
 
 
+def validate_responsible(
+    db: Session,
+    responsible_id: str | None,
+    restaurant_id: str | None,
+    user_id: str | None = None,
+) -> None:
+    """Valide qu'un responsable appartient au restaurant et n'est pas l'utilisateur lui-même."""
+    if not responsible_id:
+        return
+    if user_id and responsible_id == user_id:
+        raise HTTPException(status_code=400, detail="Un utilisateur ne peut pas être son propre responsable")
+
+    responsible = db.get(User, responsible_id)
+    if not responsible or responsible.restaurant_id != restaurant_id:
+        raise HTTPException(status_code=400, detail="Responsable invalide pour ce restaurant")
+
+
 @router.get("", response_model=list[UserPublic])
 def list_users(current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     """Liste le personnel du restaurant courant."""
     assert_permission(current_user, Permission.USER_READ)
     return (
         db.query(User)
+        .options(joinedload(User.responsible))
         .filter(User.restaurant_id == current_user.restaurant_id)
         .order_by(User.created_at.desc())
         .all()
@@ -106,6 +124,7 @@ def create_user(
         raise HTTPException(status_code=409, detail="Email ou nom utilisateur deja utilise")
 
     validate_branch(db, payload.branch_id, current_user.restaurant_id)
+    validate_responsible(db, payload.responsible_id, current_user.restaurant_id)
 
     user = User(
         email=email,
@@ -117,6 +136,8 @@ def create_user(
         role=payload.role,
         restaurant_id=current_user.restaurant_id,
         branch_id=payload.branch_id,
+        quartier=(payload.quartier or "").strip() or None,
+        responsible_id=payload.responsible_id,
         created_by_id=current_user.id,
     )
     db.add(user)
@@ -132,7 +153,12 @@ def create_user(
         {"role": user.role.value, "email": user.email},
     )
     db.commit()
-    db.refresh(user)
+    user = (
+        db.query(User)
+        .options(joinedload(User.responsible))
+        .filter(User.id == user.id)
+        .one()
+    )
     return user
 
 
@@ -179,6 +205,7 @@ def update_user(
         user.role = payload.role
 
     validate_branch(db, payload.branch_id, current_user.restaurant_id)
+    validate_responsible(db, payload.responsible_id, current_user.restaurant_id, user.id)
 
     if payload.email is not None:
         email = payload.email.lower().strip() or None
@@ -198,9 +225,11 @@ def update_user(
     fields_set = getattr(payload, "model_fields_set", None)
     if fields_set is None:
         fields_set = payload.__fields_set__
-    for field in ("first_name", "last_name", "phone", "branch_id"):
+    for field in ("first_name", "last_name", "phone", "branch_id", "quartier", "responsible_id"):
         value = getattr(payload, field)
         if field in fields_set:
+            if field == "quartier":
+                value = (value or "").strip() or None
             setattr(user, field, value)
 
     if payload.permissions is not None:
@@ -216,7 +245,12 @@ def update_user(
         {"role": user.role.value, "is_active": user.is_active},
     )
     db.commit()
-    db.refresh(user)
+    user = (
+        db.query(User)
+        .options(joinedload(User.responsible))
+        .filter(User.id == user.id)
+        .one()
+    )
     return user
 
 
@@ -249,7 +283,12 @@ def update_user_status(
         {"is_active": user.is_active},
     )
     db.commit()
-    db.refresh(user)
+    user = (
+        db.query(User)
+        .options(joinedload(User.responsible))
+        .filter(User.id == user.id)
+        .one()
+    )
     return user
 
 
@@ -279,7 +318,12 @@ def update_user_permissions(
         {"permissions": [permission.value for permission in payload.permissions]},
     )
     db.commit()
-    db.refresh(user)
+    user = (
+        db.query(User)
+        .options(joinedload(User.responsible))
+        .filter(User.id == user.id)
+        .one()
+    )
     return user
 
 
@@ -314,7 +358,12 @@ def reset_user_password(
         {"role": user.role.value},
     )
     db.commit()
-    db.refresh(user)
+    user = (
+        db.query(User)
+        .options(joinedload(User.responsible))
+        .filter(User.id == user.id)
+        .one()
+    )
     return user
 
 

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import calendar
 from app.modules.shared.models import utcnow
 
 from sqlalchemy import MetaData, Table, func, inspect, select
@@ -19,6 +20,7 @@ from app.modules.dashboard.schemas import (
 )
 from app.modules.orders.models import CustomerOrder
 from app.modules.permissions.models import Permission, Role
+from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockItem, StockRecipeIngredient
 from app.modules.users.models import User
 
@@ -353,6 +355,76 @@ def dashboard_analytics(
         "realtime_orders": compute_realtime_orders(db, restaurant_id),
         "stock_alerts": compute_stock_alerts(db, restaurant_id),
         "branches": [point.model_dump() for point in build_branch_points(db, restaurant_id, revenue or 1, metrics)],
+    }
+
+
+@router.get("/daily-report")
+def daily_report(
+    branch_id: str | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Rapport synthétique de la journée en cours pour le gérant."""
+    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    restaurant_id = current_user.restaurant_id
+    now = utcnow()
+    start = datetime.combine(now.date(), datetime.min.time())
+    end = now
+
+    metrics = build_sales_metrics(db, restaurant_id, start, end)
+    channels = _channel_set(None)
+    revenue, profit, orders_count, meal_revenue, drink_revenue = _scoped_channel_totals(metrics, branch_id, channels)
+
+    orders = _paid_orders(db, restaurant_id, start, end, branch_id)
+    menu_ctx = read_menu_item_context(db, restaurant_id)
+    names = user_name_map(db, restaurant_id)
+
+    total_discounts = round(sum(float(order.discount_amount or 0) for order in orders), 2)
+    discount_lines = []
+    for order in orders:
+        discount_value = float(order.discount_amount or 0)
+        if discount_value <= 0:
+            continue
+        discount_lines.append({
+            "order_number": order.order_number,
+            "discount_amount": round(discount_value, 2),
+            "total_amount": round(float(order.total_amount or 0), 2),
+            "server_name": names.get(order.server_id) if order.server_id else None,
+            "cashier_name": names.get(order.cashier_id) if order.cashier_id else None,
+        })
+    discount_lines.sort(key=lambda line: line["discount_amount"], reverse=True)
+
+    yesterday_cutoff = now - timedelta(days=1)
+    yesterday_start = datetime.combine(yesterday_cutoff.date(), datetime.min.time())
+    yesterday_revenue = _revenue_until(db, restaurant_id, yesterday_start, yesterday_cutoff, branch_id)
+
+    restaurant = db.query(Restaurant).filter(Restaurant.id == restaurant_id).first()
+
+    return {
+        "date": now.date().isoformat(),
+        "generated_at": now.isoformat(),
+        "restaurant_name": restaurant.name if restaurant else "Restaurant",
+        "kpis": {
+            "revenue": round(revenue, 2),
+            "profit": round(profit, 2),
+            "orders_count": orders_count,
+            "average_ticket": round(revenue / orders_count, 0) if orders_count else 0,
+            "margin_rate": round(profit / revenue * 100, 1) if revenue else 0,
+            "total_discounts": total_discounts,
+            "discounted_orders_count": len(discount_lines),
+            "meal_revenue": round(meal_revenue, 2),
+            "drink_revenue": round(drink_revenue, 2),
+        },
+        "comparison": {
+            "yesterday_same_time_revenue": yesterday_revenue,
+            "variation_pct": _variation(revenue, yesterday_revenue),
+        },
+        "payment_methods": compute_payment_methods(orders),
+        "top_products": compute_top_products(orders, menu_ctx, None, limit=8),
+        "employee_performance": compute_employee_performance(db, restaurant_id, orders, limit=8),
+        "discount_lines": discount_lines,
+        "stock_alerts": compute_stock_alerts(db, restaurant_id, limit=5),
+        "realtime_orders": compute_realtime_orders(db, restaurant_id),
     }
 
 
@@ -880,6 +952,167 @@ def stock_low_stock_columns_available(db: Session) -> bool:
         return False
     existing = {column["name"] for column in inspector.get_columns("products")}
     return {"minimum_stock", "updated_at"}.issubset(existing) and "stock_movements" in inspector.get_table_names()
+
+
+@router.get("/home-insights")
+def home_insights(
+    branch_id: str | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Insights comparatifs pour le carrousel d'accueil admin (même heure)."""
+    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    restaurant_id = current_user.restaurant_id
+    now = utcnow()
+    today_start = datetime.combine(now.date(), datetime.min.time())
+    cutoff = now
+
+    today_revenue = _revenue_until(db, restaurant_id, today_start, cutoff, branch_id)
+
+    yesterday_cutoff = cutoff - timedelta(days=1)
+    yesterday_start = datetime.combine(yesterday_cutoff.date(), datetime.min.time())
+    yesterday_revenue = _revenue_until(db, restaurant_id, yesterday_start, yesterday_cutoff, branch_id)
+
+    last_week_cutoff = cutoff - timedelta(days=7)
+    last_week_start = datetime.combine(last_week_cutoff.date(), datetime.min.time())
+    last_week_revenue = _revenue_until(db, restaurant_id, last_week_start, last_week_cutoff, branch_id)
+
+    prev_month_cutoff = _same_week_prev_month(cutoff)
+    prev_month_start = datetime.combine(prev_month_cutoff.date(), datetime.min.time())
+    prev_month_revenue = _revenue_until(db, restaurant_id, prev_month_start, prev_month_cutoff, branch_id)
+
+    target_samples = []
+    for offset in range(1, 8):
+        day = now.date() - timedelta(days=offset)
+        day_start = datetime.combine(day, datetime.min.time())
+        day_end = datetime.combine(day, datetime.max.time())
+        target_samples.append(_revenue_until(db, restaurant_id, day_start, day_end, branch_id))
+    daily_target = round(sum(target_samples) / len(target_samples), 2) if target_samples else 0
+    progress_pct = round(today_revenue / daily_target * 100, 1) if daily_target else 0
+    remaining = round(max(0, daily_target - today_revenue), 2)
+
+    trend_message, trend_tone, trend_series = _compute_recent_trend(db, restaurant_id, cutoff, branch_id)
+
+    time_label = now.strftime("%H:%M")
+    cards = [
+        _insight_card(
+            "today_vs_yesterday",
+            "Aujourd'hui vs hier",
+            f"Comparaison à {time_label} (même heure)",
+            today_revenue,
+            yesterday_revenue,
+        ),
+        _insight_card(
+            "today_vs_last_week",
+            "Aujourd'hui vs semaine dernière",
+            f"Même jour de la semaine à {time_label}",
+            today_revenue,
+            last_week_revenue,
+        ),
+        _insight_card(
+            "today_vs_prev_month_week",
+            "Aujourd'hui vs mois précédent",
+            f"Même semaine du mois précédent à {time_label}",
+            today_revenue,
+            prev_month_revenue,
+        ),
+        {
+            "key": "daily_goal",
+            "title": "Objectif du jour",
+            "subtitle": "Basé sur la moyenne des 7 derniers jours",
+            "current_value": today_revenue,
+            "comparison_value": daily_target,
+            "variation_pct": progress_pct,
+            "tone": "positive" if progress_pct >= 100 else ("neutral" if progress_pct >= 70 else "negative"),
+            "goal_amount": daily_target,
+            "remaining_amount": remaining,
+            "progress_pct": progress_pct,
+        },
+        {
+            "key": "recent_trend",
+            "title": "Tendance récente",
+            "subtitle": "Évolution du CA à la même heure sur 5 jours",
+            "message": trend_message,
+            "tone": trend_tone,
+            "series": trend_series,
+        },
+    ]
+    return {"as_of": now.isoformat(), "time_label": time_label, "cards": cards}
+
+
+def _revenue_until(
+    db: Session,
+    restaurant_id: str,
+    start: datetime,
+    end: datetime,
+    branch_id: str | None = None,
+) -> float:
+    orders = _paid_orders(db, restaurant_id, start, end, branch_id)
+    return round(sum(float(order.total_amount or 0) for order in orders), 2)
+
+
+def _insight_card(key: str, title: str, subtitle: str, current: float, comparison: float) -> dict:
+    variation = _variation(current, comparison)
+    tone = "neutral"
+    if variation is not None:
+        tone = "positive" if variation >= 0 else "negative"
+    return {
+        "key": key,
+        "title": title,
+        "subtitle": subtitle,
+        "current_value": current,
+        "comparison_value": comparison,
+        "variation_pct": variation,
+        "tone": tone,
+    }
+
+
+def _same_week_prev_month(reference: datetime) -> datetime:
+    week_in_month = (reference.day - 1) // 7
+    if reference.month == 1:
+        year, month = reference.year - 1, 12
+    else:
+        year, month = reference.year, reference.month - 1
+    first_day = datetime(year, month, 1)
+    days_until_weekday = (reference.weekday() - first_day.weekday()) % 7
+    candidate_day = 1 + days_until_weekday + week_in_month * 7
+    max_day = calendar.monthrange(year, month)[1]
+    day = min(candidate_day, max_day)
+    return reference.replace(year=year, month=month, day=day)
+
+
+def _compute_recent_trend(
+    db: Session,
+    restaurant_id: str,
+    cutoff: datetime,
+    branch_id: str | None = None,
+    days: int = 5,
+) -> tuple[str, str, list[float]]:
+    series = []
+    for offset in range(days - 1, -1, -1):
+        end = cutoff - timedelta(days=offset)
+        start = datetime.combine(end.date(), datetime.min.time())
+        series.append(_revenue_until(db, restaurant_id, start, end, branch_id))
+
+    consecutive_up = 0
+    consecutive_down = 0
+    for index in range(1, len(series)):
+        if series[index] > series[index - 1]:
+            if consecutive_down:
+                break
+            consecutive_up += 1
+        elif series[index] < series[index - 1]:
+            if consecutive_up:
+                break
+            consecutive_down += 1
+        else:
+            break
+
+    if consecutive_up >= 2:
+        return f"Chiffre d'affaires en hausse depuis {consecutive_up} jours consécutifs.", "positive", series
+    if consecutive_down >= 2:
+        return f"Baisse de l'activité depuis {consecutive_down} jours.", "negative", series
+    return "Activité stable sur les derniers jours.", "neutral", series
 
 
 def format_activity_time(value: datetime) -> str:

@@ -3,7 +3,7 @@ const PATTERNS = {
   personName: "[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ '\\-]{1,79}",
   username: "[a-zA-Z0-9\\._\\-]{3,50}",
   slug: "[a-z0-9]+(?:-[a-z0-9]+)*",
-  subdomain: "[a-z0-9](?:[a-z0-9-]{0,118}[a-z0-9])?",
+  subdomain: "[a-z0-9]+(?:-[a-z0-9]+)*",
   phone: "\\+?[0-9 \\(\\)\\-]{5,30}",
   currency: "[A-Za-z]{3}",
   timezone: "[A-Za-z_]+/[A-Za-z0-9_\\+\\-\\/]+",

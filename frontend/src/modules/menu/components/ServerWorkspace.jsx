@@ -8,6 +8,9 @@ import { orderApi } from "@/modules/orders/services/orderApi";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import TableGrid from "./TableGrid";
 import TableSessionModal from "./TableSessionModal";
+import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnapshot, saveServerSession } from "../utils/serverSessionStorage";
+import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
+import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 const PAID_STATUSES = ["Payée", "Payee", "Annulée", "Annulee"];
@@ -77,20 +80,28 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [readyAlert, setReadyAlert] = useState(false);
   const [dailyStats, setDailyStats] = useState(null);
+  const [resuming, setResuming] = useState(true);
 
   const loadOrder = useCallback(async (orderId) => {
     if (!orderId) return;
     try {
       const data = await orderApi.get(orderId);
       setOrder(data);
+      if (currentUser?.id) saveOrderSnapshot(currentUser.id, data);
       const status = normalizeStatus(data.status);
       if (isReadyStatus(status) || (isServedStatus(status) && !isPaid(status) && !data.is_closed)) {
         setReadyAlert(true);
       }
     } catch (err) {
-      setError(err.message || "Impossible de charger la commande.");
+      const snapshot = currentUser?.id ? loadOrderSnapshot(currentUser.id, orderId) : null;
+      if (snapshot) {
+        setOrder(snapshot);
+        setMessage("Connexion instable : affichage de la dernière commande enregistrée localement.");
+      } else if (!isNetworkError(err)) {
+        setError(err.message || "Impossible de charger la commande.");
+      }
     }
-  }, []);
+  }, [currentUser?.id]);
 
   const loadMenu = useCallback(async () => {
     if (!restaurantId) return;
@@ -103,8 +114,16 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       );
       setCategories(fetchedCategories.filter((item) => item.is_active !== false));
       setDishes(groups.flat().filter((dish) => dish.is_available !== false));
+      cacheMenuCatalog(restaurantId, fetchedCategories, groups.flat());
     } catch {
-      setError("Impossible de charger le menu.");
+      const cached = getCachedMenuCatalog(restaurantId);
+      if (cached) {
+        setCategories((cached.categories || []).filter((item) => item.is_active !== false));
+        setDishes((cached.dishes || []).filter((dish) => dish.is_available !== false));
+        setMessage("Menu chargé depuis la mémoire locale (connexion instable).");
+      } else {
+        setError("Impossible de charger le menu.");
+      }
     }
   }, [restaurantId]);
 
@@ -122,7 +141,104 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   }, session?.orderId ? 5000 : 0, [session?.orderId, loadOrder]);
 
   useEffect(() => {
-    if (session || !currentUser?.id) return;
+    if (session || !currentUser?.id) {
+      setResuming(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function tryResumeSession() {
+      const saved = loadServerSession(currentUser.id);
+      if (saved?.orderId) {
+        try {
+          const data = await orderApi.get(saved.orderId);
+          if (cancelled) return;
+          if (isPaid(data.status) || ["Annulée", "Annulee"].includes(normalizeStatus(data.status))) {
+            clearServerSession();
+          } else if (data.server_id && data.server_id !== currentUser.id) {
+            clearServerSession();
+          } else {
+            setSession({
+              orderId: saved.orderId,
+              tableId: saved.tableId || data.table_id,
+              tableName: saved.tableName || data.table_name || "—",
+              tableRoom: saved.tableRoom || data.table_room || "Rez-de-chaussée",
+            });
+            setMenuMode(saved.menuMode !== false);
+            setOrder(data);
+            setMessage("Reprise de votre commande en cours.");
+            setResuming(false);
+            return;
+          }
+        } catch {
+          const snapshot = loadOrderSnapshot(currentUser.id, saved.orderId);
+          if (snapshot) {
+            if (cancelled) return;
+            setSession({
+              orderId: saved.orderId,
+              tableId: saved.tableId || snapshot.table_id,
+              tableName: saved.tableName || snapshot.table_name || "—",
+              tableRoom: saved.tableRoom || snapshot.table_room || "Rez-de-chaussée",
+            });
+            setMenuMode(saved.menuMode !== false);
+            setOrder(snapshot);
+            setMessage("Reprise hors ligne de votre commande en cours.");
+            setResuming(false);
+            return;
+          }
+          if (!navigator.onLine) {
+            setResuming(false);
+            return;
+          }
+          clearServerSession();
+        }
+      }
+
+      try {
+        const orders = await orderApi.list({ server_id: currentUser.id, limit: 100 });
+        if (cancelled) return;
+        const active = orders.filter(
+          (item) =>
+            item.server_id === currentUser.id &&
+            !isPaid(item.status) &&
+            !["Annulée", "Annulee"].includes(normalizeStatus(item.status))
+        );
+        const latest = active.sort(
+          (a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at)
+        )[0];
+        if (latest) {
+          setSession({
+            orderId: latest.id,
+            tableId: latest.table_id,
+            tableName: latest.table_name || "—",
+            tableRoom: latest.table_room || "Rez-de-chaussée",
+          });
+          setOrder(latest);
+          saveServerSession(currentUser.id, {
+            orderId: latest.id,
+            tableId: latest.table_id,
+            tableName: latest.table_name || "—",
+            tableRoom: latest.table_room || "Rez-de-chaussée",
+            menuMode: true,
+          });
+          setMessage("Votre dernière commande active a été reprise automatiquement.");
+        }
+      } catch {
+        // pas de reprise possible
+      } finally {
+        if (!cancelled) setResuming(false);
+      }
+    }
+
+    tryResumeSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, currentUser?.id]);
+
+  useEffect(() => {
+    if (session || !currentUser?.id || resuming) return;
     orderApi
       .list({ server_id: currentUser.id, limit: 200 })
       .then((orders) => {
@@ -148,7 +264,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
         });
       })
       .catch(() => setDailyStats(null));
-  }, [session, currentUser?.id]);
+  }, [session, currentUser?.id, resuming]);
 
   const visibleDishes = useMemo(() => {
     if (categoryFilter === "ALL") return dishes;
@@ -174,16 +290,26 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const canRequestPayment = canPayOrder(order);
   const waitingKitchen = ["En préparation", "Acceptée"].includes(orderStatus) && !isReady && !isServed;
 
-  function openOrder(orderId, tableName, tableRoom) {
-    setSession({ orderId, tableName, tableRoom: tableRoom || "Rez-de-chaussée" });
+  function openOrder(orderId, tableName, tableRoom, tableId = null) {
+    const nextSession = {
+      orderId,
+      tableId,
+      tableName,
+      tableRoom: tableRoom || "Rez-de-chaussée",
+    };
+    setSession(nextSession);
     setSelectedTable(null);
     setMenuMode(true);
     setMessage("");
     setError("");
     setReadyAlert(false);
+    if (currentUser?.id) {
+      saveServerSession(currentUser.id, { ...nextSession, menuMode: true });
+    }
   }
 
   function backToTables() {
+    clearServerSession();
     setSession(null);
     setOrder(null);
     setSelectedTable(null);
@@ -193,6 +319,32 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     setReadyAlert(false);
   }
 
+  function applyLocalOrderItems(items) {
+    const dishById = new Map(dishes.map((dish) => [dish.id, dish]));
+    const nextItems = items.map((item) => {
+      const dish = dishById.get(item.menu_item_id);
+      const unitPrice = Number(dish?.price || 0);
+      const quantity = Number(item.quantity || 0);
+      return {
+        menu_item_id: item.menu_item_id,
+        name: dish?.name || "Plat",
+        sale_channel: dish?.sale_channel || "REPAS",
+        quantity,
+        unit_price: unitPrice,
+        line_total: unitPrice * quantity,
+      };
+    });
+    const subtotal = nextItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
+    const nextOrder = {
+      ...(order || {}),
+      items: nextItems,
+      total_amount: Math.max(0, subtotal + Number(order?.delivery_fee || 0) - Number(order?.discount_amount || 0)),
+    };
+    setOrder(nextOrder);
+    if (currentUser?.id && nextOrder.id) saveOrderSnapshot(currentUser.id, nextOrder);
+    return nextOrder;
+  }
+
   async function updateOrderItems(items) {
     if (!session?.orderId || !canEditOrder) return;
     setBusy("items");
@@ -200,8 +352,23 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     try {
       const updated = await orderApi.update(session.orderId, { items });
       setOrder(updated);
+      if (currentUser?.id) saveOrderSnapshot(currentUser.id, updated);
     } catch (err) {
-      setError(err.message || "Mise à jour impossible.");
+      if (isNetworkError(err)) {
+        applyLocalOrderItems(items);
+        enqueueOfflineAction({
+          label: `Commande ${session.orderId}`,
+          requests: [{
+            path: `/api/v1/orders/${session.orderId}`,
+            method: "PATCH",
+            requiresAuth: true,
+            body: { items },
+          }],
+        });
+        setMessage("Connexion instable. Les plats sont enregistrés localement et seront synchronisés.");
+      } else {
+        setError(err.message || "Mise à jour impossible.");
+      }
     } finally {
       setBusy("");
     }
@@ -236,6 +403,24 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     updateOrderItems(nextItems);
   }
 
+  useEffect(() => {
+    if (!session?.orderId || !currentUser?.id) return;
+    saveServerSession(currentUser.id, {
+      orderId: session.orderId,
+      tableId: session.tableId,
+      tableName: session.tableName,
+      tableRoom: session.tableRoom,
+      menuMode,
+    });
+  }, [session, menuMode, currentUser?.id]);
+
+  useEffect(() => {
+    if (!order || !currentUser?.id) return;
+    if (isPaid(order.status)) {
+      clearServerSession();
+    }
+  }, [order?.status, order?.id, currentUser?.id]);
+
   async function sendToKitchen() {
     if (!session?.orderId) return;
     setBusy("kitchen");
@@ -246,7 +431,20 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       setMenuMode(false);
       setMessage("Commande envoyée en cuisine. Attendez la notification « prête ».");
     } catch (err) {
-      setError(err.message || "Envoi en cuisine impossible.");
+      if (isNetworkError(err)) {
+        enqueueOfflineAction({
+          label: `Envoi cuisine ${session.orderId}`,
+          requests: [{
+            path: `/api/v1/orders/${session.orderId}/send-to-kitchen`,
+            method: "POST",
+            requiresAuth: true,
+          }],
+        });
+        setMenuMode(false);
+        setMessage("Connexion instable. L'envoi cuisine sera synchronisé automatiquement.");
+      } else {
+        setError(err.message || "Envoi en cuisine impossible.");
+      }
     } finally {
       setBusy("");
     }
@@ -262,7 +460,22 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       setReadyAlert(false);
       setMessage("Commande servie au client.");
     } catch (err) {
-      setError(err.message || "Impossible de marquer comme servie.");
+      if (isNetworkError(err)) {
+        enqueueOfflineAction({
+          label: `Servie ${session.orderId}`,
+          requests: [{
+            path: `/api/v1/orders/${session.orderId}/status`,
+            method: "PATCH",
+            requiresAuth: true,
+            body: { status: "Livrée" },
+          }],
+        });
+        setOrder((current) => (current ? { ...current, status: "Livrée" } : current));
+        setReadyAlert(false);
+        setMessage("Connexion instable. La commande est marquée servie localement et sera synchronisée.");
+      } else {
+        setError(err.message || "Impossible de marquer comme servie.");
+      }
     } finally {
       setBusy("");
     }
@@ -282,6 +495,10 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     } finally {
       setBusy("");
     }
+  }
+
+  if (resuming) {
+    return <div className="p-6 text-sm font-semibold text-slate-500">Reprise de votre session...</div>;
   }
 
   return (
@@ -359,7 +576,6 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
           {dailyStats && <ServerDailyStats stats={dailyStats} name={currentUser?.first_name} />}
           <TableGrid
             restaurantId={restaurantId}
-            readOnly
             onSelectTable={setSelectedTable}
           />
           {selectedTable && (
@@ -367,7 +583,9 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
               table={selectedTable}
               currentUser={currentUser}
               onClose={() => setSelectedTable(null)}
-              onOpenMenuForOrder={openOrder}
+              onOpenMenuForOrder={(orderId, tableName, tableRoom) =>
+                openOrder(orderId, tableName, tableRoom, selectedTable?.id)
+              }
               primaryActionLabel="Commande"
             />
           )}

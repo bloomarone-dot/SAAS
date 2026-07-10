@@ -2,17 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DashboardIcon } from "../icons";
 import { apiFetch } from "@/config/http";
-import { DashboardSection, FilterBar, PageContainer, PageHeader, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
+import { DashboardSection, FilterBar, PageContainer, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
+import { DailyReportModal } from "@/modules/admin/components/DailyReportModal";
+import { InsightsCarousel } from "@/modules/admin/components/InsightsCarousel";
+import { getTimeGreeting } from "@/utils/greeting";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 }
 
 function formatVariation(value) {
-  if (value == null) return "Variation indisponible";
+  if (value == null) return "—";
   const number = Number(value || 0);
   const sign = number >= 0 ? "+" : "";
-  return `${sign}${number.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} % vs période précédente`;
+  return `${sign}${number.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
 }
 
 function downloadCsv(filename, rows) {
@@ -28,10 +31,8 @@ function downloadCsv(filename, rows) {
 const PERIODS = [
   ["today", "Aujourd'hui"],
   ["yesterday", "Hier"],
-  ["week", "Cette semaine"],
-  ["month", "Ce mois"],
-  ["year", "Cette année"],
-  ["custom", "Personnalisée"],
+  ["week", "Semaine"],
+  ["month", "Mois"],
 ];
 
 const CATEGORIES = [
@@ -46,36 +47,40 @@ function periodBounds(period, custom) {
   const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
   if (period === "today") return [startOfDay(now), endOfDay(now)];
   if (period === "yesterday") {
-    const y = new Date(now); y.setDate(now.getDate() - 1);
+    const y = new Date(now);
+    y.setDate(now.getDate() - 1);
     return [startOfDay(y), endOfDay(y)];
   }
   if (period === "week") {
-    const s = new Date(now); s.setDate(now.getDate() - 6);
+    const s = new Date(now);
+    s.setDate(now.getDate() - 6);
     return [startOfDay(s), endOfDay(now)];
   }
   if (period === "month") return [new Date(now.getFullYear(), now.getMonth(), 1), endOfDay(now)];
-  if (period === "year") return [new Date(now.getFullYear(), 0, 1), endOfDay(now)];
-  if (period === "custom" && custom.start && custom.end) {
-    return [new Date(`${custom.start}T00:00:00`), new Date(`${custom.end}T23:59:59`)];
-  }
   return [startOfDay(now), endOfDay(now)];
 }
 
 export function AdminDashboard({ overrides = {} }) {
   const apiBaseUrl = overrides.__apiBaseUrl;
+  const currentUser = overrides.__currentUser;
+  const greetingTitle = `${getTimeGreeting()}${currentUser?.first_name ? `, ${currentUser.first_name}` : ""}`;
+  const dateLabel = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
+
   const [period, setPeriod] = useState("today");
-  const [custom, setCustom] = useState({ start: "", end: "" });
   const [category, setCategory] = useState("all");
   const [branchId, setBranchId] = useState("");
   const [data, setData] = useState(null);
+  const [insights, setInsights] = useState(null);
+  const [insightsLoading, setInsightsLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [ordersModal, setOrdersModal] = useState(null);
+  const [showDailyReport, setShowDailyReport] = useState(false);
 
   const load = useCallback(async () => {
     if (!apiBaseUrl) return;
     setIsLoading(true);
     try {
-      const [start, end] = periodBounds(period, custom);
+      const [start, end] = periodBounds(period, {});
       const query = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString() });
       if (category !== "all") query.set("category", category);
       if (branchId) query.set("branch_id", branchId);
@@ -87,15 +92,30 @@ export function AdminDashboard({ overrides = {} }) {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrl, period, category, custom, branchId]);
+  }, [apiBaseUrl, period, category, branchId]);
 
-  function openOrders(title, statuses) {
-    setOrdersModal({ title, statuses });
-  }
+  const loadInsights = useCallback(async () => {
+    if (!apiBaseUrl) return;
+    setInsightsLoading(true);
+    try {
+      const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : "";
+      setInsights(await apiFetch(`/api/v1/dashboard/home-insights${query}`, {
+        fallback: "Impossible de charger les insights.",
+      }));
+    } catch {
+      setInsights(null);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [apiBaseUrl, branchId]);
 
   useEffect(() => {
-    if (period !== "custom" || (custom.start && custom.end)) load();
-  }, [load, period, custom]);
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    loadInsights();
+  }, [loadInsights]);
 
   const kpi = data?.kpis ?? {};
   const realtime = data?.realtime_orders ?? {};
@@ -108,34 +128,46 @@ export function AdminDashboard({ overrides = {} }) {
     const rows = [
       ["Graphique", "Libellé", "Valeur"],
       ...(data?.hourly_sales ?? []).map((row) => ["Chiffre d'affaires", row.hour, row.revenue]),
-      ...(data?.sales_chart ?? []).map((row) => ["Ventes par période", row.label, row.revenue]),
       ...(data?.payment_methods ?? []).map((row) => ["Paiements", row.method, row.amount]),
       ...(data?.top_products ?? []).map((row) => ["Produits", row.name, row.revenue]),
       ...(data?.employee_performance ?? []).map((row) => ["Performance serveur", row.name, row.revenue]),
-      ...(data?.stock_alerts ?? []).map((row) => ["Stock", row.name, row.current_stock]),
     ];
-    downloadCsv("dashboard-graphiques.csv", rows);
+    downloadCsv("dashboard-export.csv", rows);
   }
 
   return (
-    <PageContainer>
-      <PageHeader
-        eyebrow="Pilotage restaurant"
-        title="Tableau de bord"
-        subtitle="Suivez l’activité essentielle du restaurant : ventes, commandes, paiements, alertes et performance de service."
-        primaryAction={<SecondaryAction icon="Download" onClick={exportDashboardData}>Exporter CSV</SecondaryAction>}
+    <PageContainer className="space-y-5">
+      <InsightsCarousel
+        cards={insights?.cards ?? []}
+        loading={insightsLoading}
+        greeting={greetingTitle}
+        dateLabel={dateLabel}
+        action={
+          <>
+            <SecondaryAction icon="FileText" onClick={() => setShowDailyReport(true)}>
+              Rapport du jour
+            </SecondaryAction>
+            <SecondaryAction icon="Download" onClick={exportDashboardData}>
+              Exporter
+            </SecondaryAction>
+          </>
+        }
       />
 
       <FilterBar
         right={
           <>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className="form-control h-10 w-36">
-              {CATEGORIES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="form-control h-9 w-32 text-xs">
+              {CATEGORIES.map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
             </select>
             {branchOptions.length > 0 && (
-              <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="form-control h-10 w-48">
-                <option value="">Toutes les branches</option>
-                {branchOptions.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="form-control h-9 w-40 text-xs">
+                <option value="">Toutes branches</option>
+                {branchOptions.map((branch) => (
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                ))}
               </select>
             )}
           </>
@@ -146,69 +178,66 @@ export function AdminDashboard({ overrides = {} }) {
             key={key}
             type="button"
             onClick={() => setPeriod(key)}
-            className={`h-9 rounded-md px-3 text-xs font-bold transition ${
-              period === key ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+            className={`h-8 rounded-md px-3 text-xs font-bold transition ${
+              period === key ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
             {label}
           </button>
         ))}
-        {period === "custom" && (
-          <>
-            <input type="date" value={custom.start} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="form-control h-10 w-40" />
-            <input type="date" value={custom.end} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="form-control h-10 w-40" />
-          </>
-        )}
       </FilterBar>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Chiffre d'affaires" value={money(kpi.revenue)} trend={formatVariation(kpi.revenue_variation)} icon="ShoppingCart" tone="success" />
-        <StatCard label="Commandes" value={Number(kpi.orders_count || 0).toLocaleString("fr-FR")} trend={formatVariation(kpi.orders_variation)} icon="ClipboardList" tone="info" />
-        <StatCard label="Ticket moyen" value={money(kpi.average_ticket)} trend={formatVariation(kpi.average_ticket_variation)} icon="ReceiptText" tone="warning" />
-        <StatCard label="Bénéfice estimé" value={money(kpi.profit)} trend={`${Number(kpi.margin_rate || 0).toFixed(1)} % de marge`} icon="Wallet" tone="success" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard label="Chiffre d'affaires" value={money(kpi.revenue)} trend={`${formatVariation(kpi.revenue_variation)} vs période préc.`} icon="ShoppingCart" tone="success" />
+        <StatCard label="Commandes" value={Number(kpi.orders_count || 0).toLocaleString("fr-FR")} trend={`${formatVariation(kpi.orders_variation)} vs période préc.`} icon="ClipboardList" tone="info" />
+        <StatCard label="Ticket moyen" value={money(kpi.average_ticket)} trend={`Marge ${Number(kpi.margin_rate || 0).toFixed(1)} %`} icon="ReceiptText" tone="warning" />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.45fr_0.75fr]">
-        <DashboardSection title="Ventes par heure" description="Courbe opérationnelle du service sur la période sélectionnée.">
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_0.6fr]">
+        <DashboardSection title="Ventes par heure" description="Activité sur la période sélectionnée.">
           <HourlyChart rows={data?.hourly_sales ?? []} />
         </DashboardSection>
-        <DashboardSection title="Commandes en direct" description="Cliquez sur un statut pour consulter le détail.">
+
+        <DashboardSection title="Service en direct" description="Cliquez pour voir le détail.">
           <div className="grid grid-cols-2 gap-2">
-            <RealtimeStat label="En cours" value={realtime.in_progress} tone="blue" onClick={() => openOrders("Commandes en cours", ["Nouvelle", "Acceptée", "En préparation", "Prête"])} />
-            <RealtimeStat label="Préparation" value={realtime.preparing} tone="orange" onClick={() => openOrders("En préparation", ["En préparation"])} />
-            <RealtimeStat label="Prêtes" value={realtime.ready} tone="green" onClick={() => openOrders("Commandes prêtes", ["Prête"])} />
-            <RealtimeStat label="Annulées" value={realtime.cancelled} tone="red" onClick={() => openOrders("Commandes annulées", ["Annulée"])} />
+            <RealtimeStat label="En cours" value={realtime.in_progress} tone="blue" onClick={() => setOrdersModal({ title: "Commandes en cours", statuses: ["Nouvelle", "Acceptée", "En préparation", "Prête"] })} />
+            <RealtimeStat label="Cuisine" value={realtime.preparing} tone="orange" onClick={() => setOrdersModal({ title: "En préparation", statuses: ["En préparation"] })} />
+            <RealtimeStat label="Prêtes" value={realtime.ready} tone="green" onClick={() => setOrdersModal({ title: "Commandes prêtes", statuses: ["Prête"] })} />
+            <RealtimeStat label="Annulées" value={realtime.cancelled} tone="red" onClick={() => setOrdersModal({ title: "Commandes annulées", statuses: ["Annulée"] })} />
           </div>
         </DashboardSection>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <DashboardSection title="Produits les plus vendus">
-          <TopProducts rows={(data?.top_products ?? []).slice(0, 6)} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <DashboardSection title="Meilleures ventes">
+          <TopProducts rows={(data?.top_products ?? []).slice(0, 5)} />
         </DashboardSection>
-        <DashboardSection title="Paiements">
+
+        <DashboardSection title="Encaissements">
           <PaymentMethods rows={data?.payment_methods ?? []} />
-          <DonutSplit mealShare={mealShare} meal={meal} drink={drink} />
-        </DashboardSection>
-        <DashboardSection title="Alertes importantes">
-          <StockAlerts rows={(data?.stock_alerts ?? []).slice(0, 5)} />
+          {(meal > 0 || drink > 0) && <DonutSplit mealShare={mealShare} />}
         </DashboardSection>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <DashboardSection title="Performance équipe">
-          <EmployeeTable rows={(data?.employee_performance ?? []).slice(0, 6)} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <DashboardSection title="Équipe">
+          <EmployeeTable rows={(data?.employee_performance ?? []).slice(0, 5)} />
         </DashboardSection>
-        <DashboardSection title="Performance branches">
-          <BranchTable rows={(data?.branches ?? []).filter((branch) => !branchId || branch.id === branchId).slice(0, 6)} />
+
+        <DashboardSection title="Alertes">
+          <StockAlerts rows={(data?.stock_alerts ?? []).slice(0, 4)} />
         </DashboardSection>
       </div>
 
-      {isLoading && !data && <p className="text-center text-sm font-semibold text-slate-400">Chargement...</p>}
+      {isLoading && !data && (
+        <p className="text-center text-sm font-semibold text-slate-400">Chargement des données...</p>
+      )}
 
       {ordersModal && (
         <OrdersModal title={ordersModal.title} statuses={ordersModal.statuses} onClose={() => setOrdersModal(null)} />
       )}
+
+      <DailyReportModal open={showDailyReport} onClose={() => setShowDailyReport(false)} branchId={branchId} />
     </PageContainer>
   );
 }
@@ -240,15 +269,23 @@ function OrdersModal({ title, statuses, onClose }) {
         if (active) setLoading(false);
       }
     })();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [statuses]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
       <div className="lte-card mb-0 flex max-h-[85vh] w-full max-w-2xl flex-col" onClick={(event) => event.stopPropagation()}>
         <div className="lte-card-header">
-          <h2 className="lte-card-title"><DashboardIcon name="ClipboardList" size={17} /> {title} ({orders.length})</h2>
-          <div className="lte-card-tools"><button type="button" onClick={onClose} className="lte-tool-btn"><DashboardIcon name="X" size={14} /></button></div>
+          <h2 className="lte-card-title">
+            <DashboardIcon name="ClipboardList" size={17} /> {title} ({orders.length})
+          </h2>
+          <div className="lte-card-tools">
+            <button type="button" onClick={onClose} className="lte-tool-btn">
+              <DashboardIcon name="X" size={14} />
+            </button>
+          </div>
         </div>
         <div className="overflow-y-auto p-3">
           {loading ? (
@@ -259,13 +296,23 @@ function OrdersModal({ title, statuses, onClose }) {
             <div className="divide-y divide-slate-100">
               {orders.map((order) => {
                 const expanded = openId === order.id;
-                const label = order.table_id ? `${order.table_room ? `${order.table_room} · ` : ""}Table ${order.table_name || order.table_id}` : (order.customer_name || "Client");
+                const label = order.table_id
+                  ? `${order.table_room ? `${order.table_room} · ` : ""}Table ${order.table_name || order.table_id}`
+                  : order.customer_name || "Client";
                 return (
                   <div key={order.id}>
-                    <button type="button" onClick={() => setOpenId(expanded ? null : order.id)} className="flex w-full items-center justify-between gap-3 py-2.5 text-left hover:bg-slate-50">
+                    <button
+                      type="button"
+                      onClick={() => setOpenId(expanded ? null : order.id)}
+                      className="flex w-full items-center justify-between gap-3 py-2.5 text-left hover:bg-slate-50"
+                    >
                       <div className="min-w-0">
-                        <p className="text-sm font-black text-slate-900">{order.order_number} · {label}</p>
-                        <p className="text-xs font-semibold text-slate-500">{order.server_name || "—"} · {new Date(order.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
+                        <p className="text-sm font-black text-slate-900">
+                          {order.order_number} · {label}
+                        </p>
+                        <p className="text-xs font-semibold text-slate-500">
+                          {order.server_name || "—"} · {new Date(order.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                        </p>
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-black text-slate-900">{money(order.total_amount)}</p>
@@ -274,21 +321,15 @@ function OrdersModal({ title, statuses, onClose }) {
                     </button>
                     {expanded && (
                       <div className="mb-2 rounded-lg bg-slate-50 p-3 text-sm">
-                        <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-slate-500">
-                          <span>Paiement : {order.payment_method || "—"}</span>
-                          <span>Statut : {order.status}</span>
-                          <span>Articles : {order.items?.length || 0}</span>
-                        </div>
                         <div className="divide-y divide-slate-100">
                           {(order.items || []).map((item) => (
                             <div key={item.id || item.name} className="flex justify-between py-1">
-                              <span className="text-slate-700">{item.quantity} × {item.name}</span>
+                              <span className="text-slate-700">
+                                {item.quantity} × {item.name}
+                              </span>
                               <span className="font-semibold text-slate-800">{money(item.line_total)}</span>
                             </div>
                           ))}
-                        </div>
-                        <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 font-black text-slate-900">
-                          <span>Total</span><span>{money(order.total_amount)}</span>
                         </div>
                       </div>
                     )}
@@ -303,40 +344,19 @@ function OrdersModal({ title, statuses, onClose }) {
   );
 }
 
-function KpiCard({ label, value, variation, icon, tone }) {
-  const colors = { pink: "bg-[var(--dashboard-primary)]", green: "bg-emerald-600", blue: "bg-cyan-500", orange: "bg-amber-500" };
-  return (
-    <div className="rounded-lg bg-white p-3 shadow-sm">
-      <div className="flex items-center justify-between">
-        <span className={`flex h-8 w-8 items-center justify-center rounded text-white ${colors[tone] ?? colors.pink}`}>
-          <DashboardIcon name={icon} size={16} />
-        </span>
-        {variation != null && <VariationBadge value={variation} />}
-      </div>
-      <p className="mt-2 truncate text-lg font-black text-slate-900">{value}</p>
-      <p className="truncate text-xs font-semibold text-slate-500">{label}</p>
-    </div>
-  );
-}
-
-function VariationBadge({ value }) {
-  const positive = value >= 0;
-  return (
-    <span className={`rounded px-1.5 py-0.5 text-[11px] font-black ${positive ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>
-      {positive ? "↗" : "↘"} {Math.abs(value)}%
-    </span>
-  );
-}
-
 function HourlyChart({ rows }) {
   if (!rows.length) return <Empty text="Aucune vente sur cette période." />;
   const max = Math.max(...rows.map((r) => Number(r.revenue || 0)), 1);
   return (
-    <div className="flex h-[200px] items-end gap-1 overflow-x-auto">
+    <div className="flex h-[180px] items-end gap-1 overflow-x-auto">
       {rows.map((row) => (
-        <div key={row.hour} className="flex min-w-[26px] flex-1 flex-col items-center gap-1">
-          <div className="flex h-[170px] w-full items-end">
-            <span className="w-full rounded-t bg-[var(--dashboard-primary)]" style={{ height: `${Math.max(4, (Number(row.revenue || 0) / max) * 160)}px` }} title={`${row.hour}: ${money(row.revenue)}`} />
+        <div key={row.hour} className="flex min-w-[24px] flex-1 flex-col items-center gap-1">
+          <div className="flex h-[150px] w-full items-end">
+            <span
+              className="w-full rounded-t bg-[var(--dashboard-primary)]"
+              style={{ height: `${Math.max(4, (Number(row.revenue || 0) / max) * 140)}px` }}
+              title={`${row.hour}: ${money(row.revenue)}`}
+            />
           </div>
           <span className="text-[10px] font-bold text-slate-400">{row.hour}</span>
         </div>
@@ -349,11 +369,17 @@ function TopProducts({ rows }) {
   if (!rows.length) return <Empty text="Aucun produit vendu." />;
   return (
     <table className="lte-table">
-      <thead><tr><th>Produit</th><th>Qté</th><th className="text-right">CA</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Produit</th>
+          <th>Qté</th>
+          <th className="text-right">CA</th>
+        </tr>
+      </thead>
       <tbody>
         {rows.map((row) => (
           <tr key={row.name}>
-            <td className="font-semibold text-slate-800">{row.name}<span className="ml-1 text-[10px] font-bold text-slate-400">{row.category === "BOISSON" ? "🥤" : "🍽"}</span></td>
+            <td className="font-semibold text-slate-800">{row.name}</td>
             <td>{row.quantity}</td>
             <td className="text-right font-semibold text-slate-800">{money(row.revenue)}</td>
           </tr>
@@ -371,10 +397,12 @@ function PaymentMethods({ rows }) {
         <div key={row.method}>
           <div className="flex justify-between text-xs font-semibold text-slate-600">
             <span>{row.method}</span>
-            <span>{money(row.amount)} · {row.share}%</span>
+            <span>
+              {money(row.amount)} · {row.share}%
+            </span>
           </div>
-          <div className="mt-1 h-2 rounded-full bg-slate-100">
-            <span className="block h-2 rounded-full bg-[var(--dashboard-primary)]" style={{ width: `${row.share}%` }} />
+          <div className="mt-1 h-1.5 rounded-full bg-slate-100">
+            <span className="block h-1.5 rounded-full bg-[var(--dashboard-primary)]" style={{ width: `${row.share}%` }} />
           </div>
         </div>
       ))}
@@ -382,31 +410,31 @@ function PaymentMethods({ rows }) {
   );
 }
 
-function DonutSplit({ mealShare, meal, drink }) {
-  if (!meal && !drink) return null;
+function DonutSplit({ mealShare }) {
   return (
     <div className="mt-4 border-t border-slate-100 pt-3">
-      <p className="mb-2 text-xs font-black uppercase text-slate-400">Repas / Boissons</p>
-      <div className="flex h-3 overflow-hidden rounded-full">
+      <div className="flex h-2 overflow-hidden rounded-full">
         <span className="bg-[var(--dashboard-primary)]" style={{ width: `${mealShare}%` }} />
         <span className="bg-amber-400" style={{ width: `${100 - mealShare}%` }} />
       </div>
-      <div className="mt-2 flex justify-between text-xs font-semibold text-slate-600">
-        <span>🍽 Repas {mealShare}%</span>
-        <span>🥤 Boissons {100 - mealShare}%</span>
+      <div className="mt-2 flex justify-between text-xs font-semibold text-slate-500">
+        <span>Repas {mealShare}%</span>
+        <span>Boissons {100 - mealShare}%</span>
       </div>
     </div>
   );
 }
 
 function StockAlerts({ rows }) {
-  if (!rows.length) return <Empty text="Aucun stock faible. ✅" />;
+  if (!rows.length) return <Empty text="Aucune alerte stock." />;
   return (
     <div className="space-y-2">
       {rows.map((row) => (
         <div key={row.id} className="flex items-center justify-between rounded-lg border border-red-100 bg-red-50 px-3 py-2">
           <span className="text-sm font-semibold text-red-800">{row.name}</span>
-          <span className="text-xs font-black text-red-600">{row.current_stock} (min {row.minimum_stock})</span>
+          <span className="text-xs font-black text-red-600">
+            {row.current_stock} / min {row.minimum_stock}
+          </span>
         </div>
       ))}
     </div>
@@ -414,36 +442,22 @@ function StockAlerts({ rows }) {
 }
 
 function EmployeeTable({ rows }) {
-  if (!rows.length) return <Empty text="Aucune vente par employé." />;
+  if (!rows.length) return <Empty text="Aucune vente enregistrée." />;
   return (
     <table className="lte-table">
-      <thead><tr><th>Employé</th><th>CA</th><th>Cmd</th><th className="text-right">Ticket moyen</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Employé</th>
+          <th>CA</th>
+          <th className="text-right">Commandes</th>
+        </tr>
+      </thead>
       <tbody>
         {rows.map((row) => (
           <tr key={row.name}>
             <td className="font-semibold text-slate-800">{row.name}</td>
             <td className="font-semibold text-slate-800">{money(row.revenue)}</td>
-            <td>{row.orders}</td>
-            <td className="text-right">{money(row.average_ticket)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function BranchTable({ rows }) {
-  if (!rows.length) return <Empty text="Aucune branche." />;
-  return (
-    <table className="lte-table">
-      <thead><tr><th>Branche</th><th>CA</th><th>Cmd</th><th className="text-right">Part</th></tr></thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.id ?? row.name}>
-            <td className="font-semibold text-slate-800">{row.city ? `${row.name} · ${row.city}` : row.name}</td>
-            <td className="font-semibold text-slate-800">{money(row.revenue)}</td>
-            <td>{row.orders_count}</td>
-            <td className="text-right">{Number(row.share || 0).toFixed(1)}%</td>
+            <td className="text-right">{row.orders}</td>
           </tr>
         ))}
       </tbody>
@@ -452,5 +466,5 @@ function BranchTable({ rows }) {
 }
 
 function Empty({ text }) {
-  return <p className="py-6 text-center text-sm font-semibold text-slate-400">{text}</p>;
+  return <p className="py-5 text-center text-sm font-semibold text-slate-400">{text}</p>;
 }

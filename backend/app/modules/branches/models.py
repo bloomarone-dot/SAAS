@@ -18,6 +18,7 @@ class Branch(Base):
     city: Mapped[str] = mapped_column(String(100), nullable=False)
     address: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    manager_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -25,7 +26,8 @@ class Branch(Base):
     )
 
     restaurant = relationship("Restaurant", back_populates="branches")
-    users = relationship("User", back_populates="branch")
+    manager = relationship("User", foreign_keys=[manager_id])
+    users = relationship("User", back_populates="branch", foreign_keys="User.branch_id")
 
 
 class DeliveryArea(Base):

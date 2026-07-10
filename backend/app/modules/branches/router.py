@@ -3,7 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import assert_permission, require_tenant_user
+from app.dependencies import assert_permission, has_permission, require_tenant_user
 from app.modules.audit.service import log_action
 from app.modules.branches.extended_schemas import (
     BranchDetailPublic,
@@ -35,7 +35,7 @@ def list_branches(current_user: User = Depends(require_tenant_user), db: Session
     return enrich_branches(db, branches, current_user.restaurant_id)
 
 
-@router.post("", response_model=BranchPublic, status_code=201)
+@router.post("", response_model=BranchDetailPublic, status_code=201)
 def create_branch(
     payload: BranchCreateIn,
     current_user: User = Depends(require_tenant_user),
@@ -43,18 +43,25 @@ def create_branch(
 ):
     """Cree une branche dans le restaurant de l'utilisateur courant."""
     assert_permission(current_user, Permission.BRANCH_CREATE)
+    validate_manager(db, payload.manager_id, current_user.restaurant_id)
     branch = Branch(
         restaurant_id=current_user.restaurant_id,
         name=payload.name,
         city=payload.city,
         address=payload.address,
         phone=payload.phone,
+        manager_id=payload.manager_id,
     )
     db.add(branch)
+    db.flush()
+    if payload.manager_id:
+        manager = db.get(User, payload.manager_id)
+        if manager and not manager.branch_id:
+            manager.branch_id = branch.id
     log_action(db, current_user, "branch.create", "branch", branch.id, f"Création branche {branch.name}", {"city": branch.city})
     db.commit()
     db.refresh(branch)
-    return branch
+    return enrich_branches(db, [branch], current_user.restaurant_id)[0]
 
 
 @router.get("/detail/{branch_id}", response_model=BranchDetailPublic)
@@ -74,7 +81,9 @@ def update_branch(
     assert_permission(current_user, Permission.BRANCH_CREATE)
     branch = get_branch_or_404(db, current_user.restaurant_id, branch_id)
     fields_set = getattr(payload, "model_fields_set", None) or payload.__fields_set__
-    for field in ("name", "city", "address", "phone", "is_active"):
+    if "manager_id" in fields_set:
+        validate_manager(db, payload.manager_id, current_user.restaurant_id)
+    for field in ("name", "city", "address", "phone", "manager_id", "is_active"):
         if field in fields_set:
             setattr(branch, field, getattr(payload, field))
     log_action(db, current_user, "branch.update", "branch", branch.id, f"Modification branche {branch.name}", {"fields": sorted(fields_set)})
@@ -90,7 +99,8 @@ def list_delivery_areas(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    if not has_permission(current_user, Permission.RESTAURANT_SETTINGS_READ):
+        assert_permission(current_user, Permission.CASHIER_READ)
     query = db.query(DeliveryArea).filter(DeliveryArea.restaurant_id == current_user.restaurant_id)
     if branch_id:
         query = query.filter(DeliveryArea.branch_id == branch_id)
@@ -167,8 +177,19 @@ def validate_branch_scope(db: Session, restaurant_id: str, branch_id: str | None
     get_branch_or_404(db, restaurant_id, branch_id)
 
 
+def validate_manager(db: Session, manager_id: str | None, restaurant_id: str) -> None:
+    if not manager_id:
+        return
+    manager = db.get(User, manager_id)
+    if not manager or manager.restaurant_id != restaurant_id:
+        raise HTTPException(status_code=400, detail="Responsable de branche invalide")
+    if manager.role not in {Role.ADMIN, Role.MANAGER}:
+        raise HTTPException(status_code=400, detail="Le responsable doit être un manager ou administrateur")
+
+
 def enrich_branches(db: Session, branches: list[Branch], restaurant_id: str) -> list[Branch]:
     branch_ids = [branch.id for branch in branches]
+    manager_ids = [branch.manager_id for branch in branches if branch.manager_id]
     users_count = dict(
         db.query(User.branch_id, func.count(User.id))
         .filter(User.restaurant_id == restaurant_id, User.branch_id.in_(branch_ids))
@@ -189,10 +210,14 @@ def enrich_branches(db: Session, branches: list[Branch], restaurant_id: str) -> 
         .order_by(User.created_at.asc())
         .all()
     } if branch_ids else {}
+    named_managers = {
+        user.id: f"{user.first_name} {user.last_name}".strip() or user.username
+        for user in db.query(User).filter(User.id.in_(manager_ids)).all()
+    } if manager_ids else {}
     for branch in branches:
         branch.users_count = int(users_count.get(branch.id, 0))
         branch.cash_registers_count = int(registers_count.get(branch.id, 0))
-        branch.manager_name = managers.get(branch.id)
+        branch.manager_name = named_managers.get(branch.manager_id) or managers.get(branch.id)
     return branches
 
 

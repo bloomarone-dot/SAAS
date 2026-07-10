@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { PERIOD_OPTIONS } from "@/utils/greeting";
 import { validationFor } from "@/utils/validation";
 
 export function AdminPage({ eyebrow, title, subtitle, action, children }) {
@@ -29,7 +30,7 @@ export function PageHeader({ eyebrow, title, subtitle, primaryAction, secondaryA
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           {eyebrow && <p className="text-xs font-black uppercase tracking-wide text-[var(--dashboard-primary)]">{eyebrow}</p>}
-          <h1 className="mt-1 text-2xl font-bold tracking-normal text-slate-900 sm:text-3xl">{title}</h1>
+          <h2 className="mt-1 text-2xl font-bold tracking-normal text-slate-900 sm:text-3xl">{title}</h2>
           {subtitle && <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-500">{subtitle}</p>}
           {meta && <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-500">{meta}</div>}
         </div>
@@ -353,6 +354,124 @@ export function EmptyState({ icon = "ClipboardList", title, text }) {
       </div>
       <p className="mt-4 text-lg font-black text-[var(--dashboard-secondary)]">{title}</p>
       {text && <p className="mt-1 text-sm font-medium text-slate-500">{text}</p>}
+    </div>
+  );
+}
+
+export function AdminFormModal({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+  footer,
+  size = "md",
+}) {
+  if (!open) return null;
+
+  const maxWidth = {
+    sm: "max-w-md",
+    md: "max-w-xl",
+    lg: "max-w-2xl",
+    xl: "max-w-3xl",
+  }[size] ?? "max-w-xl";
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className={`lte-card mb-0 flex max-h-[90vh] w-full flex-col ${maxWidth}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="lte-card-header shrink-0">
+          <div>
+            <h2 className="lte-card-title">{title}</h2>
+            {description && <p className="mt-1 text-sm font-medium text-slate-500">{description}</p>}
+          </div>
+          <div className="lte-card-tools">
+            <button type="button" onClick={onClose} className="lte-tool-btn">
+              <DashboardIcon name="X" size={14} />
+            </button>
+          </div>
+        </div>
+        <div className="lte-card-body min-h-0 overflow-y-auto">{children}</div>
+        {footer && <div className="lte-card-footer shrink-0">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+export function ModuleFilterBar({
+  search,
+  onSearchChange,
+  searchPlaceholder = "Rechercher...",
+  period,
+  onPeriodChange,
+  customPeriod,
+  onCustomPeriodChange,
+  showPeriod = true,
+  branchId,
+  onBranchChange,
+  branches = [],
+  showBranch = true,
+  children,
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        {onSearchChange != null && (
+          <div className="min-w-[200px] flex-1">
+            <SearchBox value={search ?? ""} onChange={onSearchChange} placeholder={searchPlaceholder} />
+          </div>
+        )}
+        {showBranch && branches.length > 0 && onBranchChange && (
+          <select
+            value={branchId ?? ""}
+            onChange={(event) => onBranchChange(event.target.value)}
+            className="form-control h-10 w-48"
+          >
+            <option value="">Toutes les branches</option>
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {showPeriod && period != null && onPeriodChange && (
+          <select
+            value={period}
+            onChange={(event) => onPeriodChange(event.target.value)}
+            className="form-control h-10 w-44"
+          >
+            {PERIOD_OPTIONS.map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+            <option value="custom">Personnalisée</option>
+          </select>
+        )}
+        {period === "custom" && customPeriod && onCustomPeriodChange && (
+          <>
+            <input
+              type="date"
+              value={customPeriod.start}
+              onChange={(event) => onCustomPeriodChange({ ...customPeriod, start: event.target.value })}
+              className="form-control h-10 w-40"
+            />
+            <input
+              type="date"
+              value={customPeriod.end}
+              onChange={(event) => onCustomPeriodChange({ ...customPeriod, end: event.target.value })}
+              className="form-control h-10 w-40"
+            />
+          </>
+        )}
+        {children}
+      </div>
     </div>
   );
 }

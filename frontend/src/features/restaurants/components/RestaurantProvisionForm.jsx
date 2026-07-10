@@ -23,7 +23,7 @@ const ownerFields = [
   ["owner_phone", "Téléphone principal", "tel", "+237 6XX XXX XXX"],
   ["owner_alt_phone", "Téléphone secondaire", "tel", "+237 6XX XXX XXX"],
   ["owner_email", "Email", "email", "owner@restaurant.cm"],
-  ["owner_username", "Identifiant", "text", "owner"],
+  ["owner_username", "Identifiant", "text", "proprietaire-restaurant"],
   ["owner_password", "Mot de passe", "password", "8 caractères avec majuscule, chiffre et symbole"],
 ];
 

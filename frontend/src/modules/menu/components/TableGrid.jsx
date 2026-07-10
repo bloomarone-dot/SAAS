@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardIcon } from '@/components/dashboard/icons';
-import { DashboardSection, FilterBar } from '@/modules/admin/components/AdminUi';
+import { AdminFormModal, DashboardSection, FilterBar } from '@/modules/admin/components/AdminUi';
 import { useAutoRefresh } from '@/utils/useAutoRefresh';
+import { cacheTables, getCachedTables } from '@/utils/offlineCache';
 import { validationFor } from '@/utils/validation';
 import { tableApi } from '../services/tableApi';
 
@@ -60,8 +61,12 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
     try {
       const data = await tableApi.getTables(restaurantId);
       setTables(data);
+      cacheTables(restaurantId, data);
     } catch (error) {
-      if (!silent) setError(error.message || 'Impossible de charger le plan de salle.');
+      const cached = getCachedTables(restaurantId);
+      if (cached) {
+        setTables(cached);
+      } else if (!silent) setError(error.message || 'Impossible de charger le plan de salle.');
     } finally {
       if (!silent) setLoading(false);
     }
@@ -115,8 +120,35 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
         </div>
       </FilterBar>
 
-      {showForm && !readOnly && (
-        <form onSubmit={createTable} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_180px_140px_auto]">
+      {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>}
+
+      <AdminFormModal
+        open={showForm && !readOnly}
+        onClose={() => {
+          setShowForm(false);
+          setForm(emptyTable);
+        }}
+        title="Nouvelle table"
+        description="Configurez le nom, la salle et le nombre de places."
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                setForm(emptyTable);
+              }}
+              className="lte-btn lte-btn-default"
+            >
+              Annuler
+            </button>
+            <button type="submit" form="create-table-form" className="lte-btn lte-btn-primary">
+              Créer
+            </button>
+          </>
+        }
+      >
+        <form id="create-table-form" onSubmit={createTable} className="grid gap-4">
           <label className="space-y-1">
             <span className="text-xs font-black text-slate-500">
               Nom de la table <span className="text-red-500">*</span>
@@ -158,13 +190,8 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
               className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-[#f04438]"
             />
           </label>
-          <button type="submit" className="self-end lte-btn lte-btn-primary">
-            Créer
-          </button>
         </form>
-      )}
-
-      {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>}
+      </AdminFormModal>
 
       <div className="overflow-x-auto">
         <div className="relative min-h-[450px] min-w-[920px] overflow-hidden rounded-lg border border-slate-300 bg-white">
@@ -191,7 +218,11 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
           {positionedTables.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
               <p className="text-sm font-semibold text-slate-500">Aucune table configurée.</p>
-              <button type="button" onClick={() => setShowForm(true)} className="mt-3 lte-btn lte-btn-primary lte-btn-sm">Ajouter la première table</button>
+              {!readOnly && (
+                <button type="button" onClick={() => setShowForm(true)} className="mt-3 lte-btn lte-btn-primary lte-btn-sm">
+                  Ajouter la première table
+                </button>
+              )}
             </div>
           )}
         </div>

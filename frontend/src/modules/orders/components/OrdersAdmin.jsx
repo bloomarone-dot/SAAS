@@ -25,6 +25,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
   const [status, setStatus] = useState("Toutes");
   const [search, setSearch] = useState("");
   const [selectedOrderId, setSelectedOrderId] = useState("");
+  const [panelMode, setPanelMode] = useState(null);
   const [editingOrderId, setEditingOrderId] = useState("");
   const [editForm, setEditForm] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,7 +76,6 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
     try {
       const data = await api("/api/v1/orders?limit=200");
       setOrders(data);
-      setSelectedOrderId((current) => current || data[0]?.id || "");
     } catch (error) {
       if (!silent) onMessage(error.message);
     } finally {
@@ -97,9 +97,23 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
     }
   }
 
+  function openOrderPanel(order, mode) {
+    setSelectedOrderId(order.id);
+    setPanelMode(mode);
+    if (mode === "edit") startEdit(order);
+  }
+
+  function closeOrderPanel() {
+    setSelectedOrderId("");
+    setPanelMode(null);
+    setEditingOrderId("");
+    setEditForm(null);
+  }
+
   function startEdit(order) {
     setEditingOrderId(order.id);
     setSelectedOrderId(order.id);
+    setPanelMode("edit");
     setEditForm({
       customer_name: order.customer_name ?? "",
       customer_phone: order.customer_phone ?? "",
@@ -133,6 +147,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
       });
       setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setSelectedOrderId(updated.id);
+      setPanelMode("detail");
       setEditingOrderId("");
       setEditForm(null);
       onMessage(`Commande ${updated.order_number} modifiée.`);
@@ -149,7 +164,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
     try {
       await api(`/api/v1/orders/${order.id}`, { method: "DELETE" });
       setOrders((current) => current.filter((item) => item.id !== order.id));
-      setSelectedOrderId("");
+      closeOrderPanel();
       onMessage(`Commande ${order.order_number} archivée.`);
     } catch (error) {
       onMessage(error.message);
@@ -176,7 +191,8 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
       return matchesStatus && matchesSearch;
     });
   }, [orders, search, status]);
-  const selectedOrder = orders.find((order) => order.id === selectedOrderId) || visibleOrders[0] || null;
+  const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? null;
+  const panelOpen = Boolean(selectedOrder && panelMode);
   const todayOrders = orders.filter((order) => new Date(order.created_at).toDateString() === new Date().toDateString());
 
   return (
@@ -193,28 +209,7 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
         <StatCard label="Prêtes" value={orders.filter((order) => order.status === "Prête").length.toLocaleString("fr-FR")} icon="Utensils" trend="À servir / encaisser" tone="success" />
       </div>
 
-      {!reviewOnly && editForm && (
-        <AdminCard title="Modifier la commande" action={<SecondaryAction onClick={() => { setEditingOrderId(""); setEditForm(null); }}>Annuler</SecondaryAction>}>
-          <form onSubmit={saveOrder} className="grid gap-4 md:grid-cols-3">
-            <Field name="customer_name" label="Client" required value={editForm.customer_name} onChange={updateEditField} />
-            <Field name="customer_phone" label="Téléphone" required value={editForm.customer_phone} onChange={updateEditField} />
-            <Field name="customer_address" label="Adresse" value={editForm.customer_address} onChange={updateEditField} />
-            <Field label="Statut">
-              <select name="status" value={editForm.status} onChange={updateEditField} className="form-control">
-                {nextStatuses.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </Field>
-            <Field name="fulfillment_type" label="Canal" value={editForm.fulfillment_type} onChange={updateEditField} />
-            <Field name="payment_method" label="Paiement" value={editForm.payment_method} onChange={updateEditField} />
-            <Field name="discount_amount" label="Remise" type="number" min="0" value={editForm.discount_amount} onChange={updateEditField} />
-            <Field name="delivery_fee" label="Livraison" type="number" min="0" value={editForm.delivery_fee} onChange={updateEditField} />
-            <Field name="notes" label="Notes" value={editForm.notes} onChange={updateEditField} />
-            <div className="md:col-span-3"><PrimaryAction icon="Pencil" type="submit" disabled={isLoading}>Enregistrer</PrimaryAction></div>
-          </form>
-        </AdminCard>
-      )}
-
-      <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
+      <div className={`grid gap-5 ${panelOpen ? "xl:grid-cols-[minmax(0,1fr)_minmax(380px,440px)]" : ""}`}>
         <DashboardSection
           title="Liste des commandes"
           description={`${visibleOrders.length.toLocaleString("fr-FR")} commande(s) selon les filtres actifs`}
@@ -228,50 +223,76 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
           </div>
           <FilterBar className="mb-5">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une commande, client, table..." />
-            <div className="w-full sm:w-48">
-              <select value={status} onChange={(event) => setStatus(event.target.value)} className="form-control">
-                {statuses.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </div>
           </FilterBar>
           <OrdersTable
             orders={visibleOrders}
             selectedOrderId={selectedOrder?.id}
             reviewOnly={reviewOnly}
-            onSelect={setSelectedOrderId}
-                  onEdit={startEdit}
-                  onDelete={deleteOrder}
+            onDetail={(order) => openOrderPanel(order, "detail")}
+            onEdit={(order) => openOrderPanel(order, "edit")}
+            onDelete={deleteOrder}
+            onStatus={updateStatus}
+            onReopen={setReopenTarget}
+            onOrangePay={reviewOnly ? undefined : setOrangePayOrderId}
+            onMtnPay={reviewOnly ? undefined : setMtnPayOrderId}
+          />
+        </DashboardSection>
+
+        {panelOpen && selectedOrder && (
+          <div className="border border-slate-200 bg-white shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-xs font-black uppercase text-[var(--dashboard-primary)]">
+                  {panelMode === "edit" ? "Modification" : "Détail commande"}
+                </p>
+                <h2 className="mt-1 text-xl font-black text-slate-900">{selectedOrder.order_number}</h2>
+              </div>
+              <button type="button" onClick={closeOrderPanel} className="lte-tool-btn" title="Fermer">
+                <DashboardIcon name="X" size={16} />
+              </button>
+            </div>
+
+            {panelMode === "edit" && !reviewOnly && editForm ? (
+              <form onSubmit={saveOrder} className="space-y-4 p-5">
+                <Field name="customer_name" label="Client" required value={editForm.customer_name} onChange={updateEditField} />
+                <Field name="customer_phone" label="Téléphone" required value={editForm.customer_phone} onChange={updateEditField} />
+                <Field name="customer_address" label="Adresse" value={editForm.customer_address} onChange={updateEditField} />
+                <Field label="Statut">
+                  <select name="status" value={editForm.status} onChange={updateEditField} className="form-control">
+                    {nextStatuses.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </Field>
+                <Field name="fulfillment_type" label="Canal" value={editForm.fulfillment_type} onChange={updateEditField} />
+                <Field name="payment_method" label="Paiement" value={editForm.payment_method} onChange={updateEditField} />
+                <Field name="discount_amount" label="Remise" type="number" min="0" value={editForm.discount_amount} onChange={updateEditField} />
+                <Field name="delivery_fee" label="Livraison" type="number" min="0" value={editForm.delivery_fee} onChange={updateEditField} />
+                <Field name="notes" label="Notes" value={editForm.notes} onChange={updateEditField} />
+                <PrimaryAction icon="Pencil" type="submit" disabled={isLoading}>Enregistrer</PrimaryAction>
+              </form>
+            ) : (
+              <div className="p-5">
+                <OrderDetail
+                  order={selectedOrder}
+                  reviewOnly={reviewOnly}
                   onStatus={updateStatus}
-                  onReopen={setReopenTarget}
+                  onDelete={deleteOrder}
                   onOrangePay={reviewOnly ? undefined : setOrangePayOrderId}
                   onMtnPay={reviewOnly ? undefined : setMtnPayOrderId}
                 />
-        </DashboardSection>
-
-        <div className="space-y-5">
-          <DashboardSection title="Détail de la commande" action={selectedOrder ? <StatusBadge status={selectedOrder.status} /> : null}>
-            {selectedOrder ? (
-              <OrderDetail
-                order={selectedOrder}
-                reviewOnly={reviewOnly}
-                onStatus={updateStatus}
-                onDelete={deleteOrder}
-                onOrangePay={reviewOnly ? undefined : setOrangePayOrderId}
-              />
-            ) : <EmptyState title="Aucune commande" />}
-          </DashboardSection>
-          <DashboardSection title="Activité récente">
-            <div className="space-y-4">
-              {orders.slice(0, 5).map((order) => (
-                <div key={order.id} className="border-l-2 border-[var(--dashboard-primary)] pl-3">
-                  <p className="text-sm font-black text-slate-950">{order.order_number}</p>
-                  <p className="text-xs font-semibold text-slate-500">Statut changé en <span className="text-[var(--dashboard-primary)]">{order.status}</span></p>
-                  <p className="mt-1 text-xs text-slate-400">{new Date(order.updated_at).toLocaleString("fr-FR")}</p>
-                </div>
-              ))}
-            </div>
-          </DashboardSection>
-        </div>
+                {!reviewOnly && (
+                  <button
+                    type="button"
+                    onClick={() => startEdit(selectedOrder)}
+                    className="mt-4 lte-btn lte-btn-primary w-full"
+                  >
+                    <DashboardIcon name="Pencil" size={15} />
+                    Modifier
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {/* Modal paiement Orange Money */}
       {!reviewOnly && orangePayOrderId && (() => {
@@ -351,66 +372,68 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
   );
 }
 
-function OrdersTable({ orders, selectedOrderId, reviewOnly, onSelect, onEdit, onDelete, onStatus, onReopen }) {
+function OrdersTable({ orders, selectedOrderId, reviewOnly, onDetail, onEdit, onDelete, onStatus, onReopen }) {
   if (!orders.length) return <EmptyState icon="ClipboardList" title="Aucune commande" text="Les commandes clients apparaîtront ici." />;
   return (
     <>
     <div className="overflow-x-auto">
-      <table className="lte-table min-w-[1120px]">
+      <table className="lte-table min-w-[820px]">
         <thead>
           <tr>
             <th className="py-3">Référence</th>
             <th className="py-3">Client / Table</th>
-            <th className="py-3">Source</th>
-            <th className="py-3">Serveuse</th>
             <th className="py-3">Total</th>
-            <th className="py-3">Statut commande</th>
-            <th className="py-3">Paiement</th>
+            <th className="py-3">Statut</th>
             <th className="py-3">Date</th>
             <th className="py-3 text-right">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {orders.map((order) => (
-            <tr key={order.id} onClick={() => onSelect(order.id)} className={`cursor-pointer ${selectedOrderId === order.id ? "bg-emerald-50" : "hover:bg-slate-50"}`}>
+            <tr key={order.id} className={`${selectedOrderId === order.id ? "bg-emerald-50" : "hover:bg-slate-50"}`}>
               <td className="py-3 font-black text-slate-950">{order.order_number}</td>
               <td className="py-3">
                 <p className="font-black text-slate-900">{order.table_id ? `Table ${order.table_name || order.table_id}` : order.customer_name}</p>
-                <p className="text-xs font-semibold text-slate-500">{order.table_id ? order.table_room || "Salle non précisée" : order.customer_phone}</p>
+                <p className="text-xs font-semibold text-slate-500">{order.server_name || order.customer_phone || "-"}</p>
               </td>
-              <td className="py-3">
-                <StatusPill tone={order.order_source === "En ligne" ? "purple" : "green"}>{order.order_source || order.fulfillment_type}</StatusPill>
-                <p className="mt-1 text-xs font-semibold text-slate-500">{order.fulfillment_type}</p>
-              </td>
-              <td className="py-3 font-semibold text-slate-600">{order.server_name || "-"}</td>
               <td className="py-3 font-black text-slate-900">{money(order.total_amount)}</td>
               <td className="py-3"><StatusBadge status={order.status} /></td>
-              <td className="py-3"><StatusPill tone={paymentTone(order)}>{["Payée", "Payee"].includes(order.status) ? "Payé" : "En attente"}</StatusPill></td>
               <td className="py-3 font-semibold text-slate-500">{new Date(order.created_at).toLocaleDateString("fr-FR")}</td>
-              <td className="py-3 text-right" onClick={(event) => event.stopPropagation()}>
-                <IconButton icon="Eye" title="Voir" onClick={() => onSelect(order.id)} />
-                {order.is_closed && !["Payée", "Payee"].includes(order.status) && (
-                  <button type="button" onClick={() => onReopen(order)} className="ml-2 lte-btn lte-btn-default lte-btn-sm">
-                    Rouvrir
+              <td className="py-3 text-right">
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onDetail(order)}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
+                  >
+                    <DashboardIcon name="Eye" size={15} />
+                    Détail
                   </button>
-                )}
-                {reviewOnly ? (
-                  <>
-                    {order.status !== "Annulée" && order.status !== "Archivée" && (
-                      <button type="button" onClick={() => onStatus(order, "Annulée")} className="ml-2 rounded-lg border border-orange-200 px-3 py-2 text-xs font-black text-orange-700 hover:bg-orange-50">
-                        Valider annulation
+                  {!reviewOnly && (
+                    <button
+                      type="button"
+                      onClick={() => onEdit(order)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
+                    >
+                      <DashboardIcon name="Pencil" size={15} />
+                      Modifier
+                    </button>
+                  )}
+                  {order.is_closed && !["Payée", "Payee"].includes(order.status) && (
+                    <button type="button" onClick={() => onReopen(order)} className="lte-btn lte-btn-default lte-btn-sm">
+                      Rouvrir
+                    </button>
+                  )}
+                  {reviewOnly ? (
+                    order.status !== "Annulée" && order.status !== "Archivée" && (
+                      <button type="button" onClick={() => onStatus(order, "Annulée")} className="lte-btn lte-btn-default lte-btn-sm">
+                        Annuler
                       </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <IconButton icon="Pencil" title="Modifier" onClick={() => onEdit(order)} />
-                    <select value={order.status} onChange={(event) => onStatus(order, event.target.value)} className="ml-2 h-9 rounded-lg border border-slate-200 px-2 text-xs font-black outline-none">
-                      {nextStatuses.map((item) => <option key={item}>{item}</option>)}
-                    </select>
-                    <IconButton icon="Trash2" title="Supprimer" tone="red" onClick={() => onDelete(order)} />
-                  </>
-                )}
+                    )
+                  ) : (
+                    <IconButton icon="Trash2" title="Archiver" tone="red" onClick={() => onDelete(order)} />
+                  )}
+                </div>
               </td>
             </tr>
           ))}

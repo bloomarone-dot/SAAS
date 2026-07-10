@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 
@@ -13,7 +14,57 @@ const devAllowedHosts = (process.env.VITE_DEV_ALLOWED_HOSTS || 'all')
   .filter(Boolean)
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['pwa-icon.svg', 'logo.jpeg', 'logoB.png'],
+      manifest: {
+        name: 'Restaurant SaaS',
+        short_name: 'Restaurant',
+        description: 'Commandes, caisse, cuisine et livraisons',
+        theme_color: '#078D50',
+        background_color: '#ffffff',
+        display: 'standalone',
+        orientation: 'any',
+        start_url: '/',
+        scope: '/',
+        icons: [
+          {
+            src: 'pwa-icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable',
+          },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,woff2,webmanifest}'],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        navigateFallback: '/index.html',
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/v1/menu/'),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'menu-api-cache',
+              networkTimeoutSeconds: 8,
+              expiration: { maxEntries: 80, maxAgeSeconds: 60 * 60 * 24 },
+            },
+          },
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/tables/'),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'tables-api-cache',
+              networkTimeoutSeconds: 8,
+              expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 12 },
+            },
+          },
+        ],
+      },
+    }),
+  ],
   server: {
     host: "0.0.0.0",
     port: 5173,

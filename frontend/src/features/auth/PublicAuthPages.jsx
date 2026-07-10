@@ -101,14 +101,32 @@ export function SuperAdminLoginPage({ apiBaseUrl, onAuthenticated }) {
   );
 }
 
-export function AccessPortalPage({ message, onForgotPassword }) {
+export function AccessPortalPage({ apiBaseUrl, message, onForgotPassword }) {
   const [slug, setSlug] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  function openRestaurant(event) {
+  async function openRestaurant(event) {
     event.preventDefault();
     const normalized = slug.trim().toLowerCase().replace(/\s+/g, "-");
     if (!normalized) return;
-    navigate(`/r/${normalized}/login`);
+    setError("");
+    setBusy(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/restaurants/public/${encodeURIComponent(normalized)}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          data?.detail
+            || "Restaurant introuvable. Utilisez le slug exact (ex. leboncoin, le-bon-coin ou main), pas le nom d'utilisateur.",
+        );
+      }
+      navigate(`/r/${normalized}/login`);
+    } catch (err) {
+      setError(err.message || "Restaurant introuvable.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -139,27 +157,32 @@ export function AccessPortalPage({ message, onForgotPassword }) {
             </div>
             <h2 className="text-2xl font-black text-slate-950">Accès restaurant</h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Chaque restaurant possède son propre espace de connexion isolé.
+              Saisissez le <strong>slug</strong> du restaurant (visible dans superadmin après création),
+              pas le nom du restaurant ni l&apos;identifiant de connexion.
             </p>
             <form onSubmit={openRestaurant} className="mt-6 space-y-3">
               <label className="block">
                 <span className="mb-1.5 block text-xs font-black uppercase text-slate-600">
-                  Identifiant restaurant
+                  Slug restaurant
                 </span>
                 <input
                   value={slug}
                   onChange={(event) => setSlug(event.target.value)}
                   className={inputClass}
-                  placeholder="ex: le-bon-coin"
+                  placeholder="ex: leboncoin ou le-bon-coin"
                   autoCapitalize="none"
                   autoCorrect="off"
                 />
               </label>
+              {error && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">{error}</p>
+              )}
               <button
                 type="submit"
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-black text-white transition hover:bg-emerald-700"
+                disabled={busy}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-black text-white transition hover:bg-emerald-700 disabled:opacity-60"
               >
-                <LogIn size={16} /> Ouvrir l’espace restaurant
+                <LogIn size={16} /> {busy ? "Vérification…" : "Ouvrir l’espace restaurant"}
               </button>
             </form>
           </div>
@@ -187,10 +210,29 @@ export function AccessPortalPage({ message, onForgotPassword }) {
 }
 
 export function RestaurantLoginPage({ apiBaseUrl, slug, onAuthenticated }) {
-  const [restaurant, setRestaurant] = useState(null);
+  const [restaurant, setRestaurant] = useState(undefined);
   useEffect(() => {
-    fetch(`${apiBaseUrl}/api/v1/restaurants/public/${slug}`).then((r) => (r.ok ? r.json() : null)).then(setRestaurant).catch(() => {});
+    setRestaurant(undefined);
+    fetch(`${apiBaseUrl}/api/v1/restaurants/public/${encodeURIComponent(slug)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setRestaurant(data))
+      .catch(() => setRestaurant(null));
   }, [apiBaseUrl, slug]);
+
+  if (restaurant === undefined) {
+    return <PublicState title="Chargement" text="Vérification du restaurant…" />;
+  }
+
+  if (!restaurant) {
+    return (
+      <PublicState
+        title="Restaurant introuvable"
+        text={`Le slug « ${slug} » n'existe pas. Retournez au portail et utilisez le slug exact (ex. leboncoin, le-bon-coin, main).`}
+        actionLabel="Retour au portail"
+        onAction={() => navigate("/login")}
+      />
+    );
+  }
 
   const backPath = window.location.pathname.startsWith("/r/") ? `/r/${slug}` : "/";
   return (
@@ -952,7 +994,7 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
   );
 }
 
-function PublicState({ title, text }) {
+function PublicState({ title, text, actionLabel, onAction }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-center">
       <section className="max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
@@ -961,6 +1003,15 @@ function PublicState({ title, text }) {
         </div>
         <h1 className="text-2xl font-black text-slate-950">{title}</h1>
         <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{text}</p>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="mt-5 inline-flex h-11 items-center justify-center rounded-lg bg-emerald-600 px-5 text-sm font-black text-white"
+          >
+            {actionLabel}
+          </button>
+        )}
       </section>
     </main>
   );

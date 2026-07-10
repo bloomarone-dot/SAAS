@@ -22,6 +22,16 @@ class PublicOrderCreateIn(BaseModel):
     items: list[PublicOrderItemIn] = Field(min_length=1)
 
 
+class CashierDeliveryCreateIn(BaseModel):
+    customer_name: str = Field(min_length=2, max_length=160)
+    customer_phone: str = Field(min_length=5, max_length=40)
+    customer_address: Optional[str] = Field(default=None, max_length=255)
+    delivery_area_id: str = Field(min_length=1)
+    payment_method: str = Field(default="Dépôt Orange Money", max_length=40)
+    notes: Optional[str] = None
+    items: list[PublicOrderItemIn] = Field(min_length=1)
+
+
 class OrderItemUpdateIn(BaseModel):
     menu_item_id: str
     quantity: int = Field(ge=1, le=50)
@@ -127,6 +137,16 @@ class OrderPublic(OrmModel):
     items: list[OrderItemPublic] = Field(default_factory=list)
 
 
+class CashierDiscountLine(BaseModel):
+    order_id: str
+    order_number: str
+    discount_amount: float
+    total_amount: float
+    server_name: Optional[str] = None
+    cashier_name: Optional[str] = None
+    paid_at: Optional[datetime] = None
+
+
 class CashierReportOut(BaseModel):
     start_date: datetime
     end_date: datetime
@@ -134,7 +154,97 @@ class CashierReportOut(BaseModel):
     paid_orders_count: int
     receipts_count: int
     total_collected: float
+    total_discounts: float = 0
+    discounted_orders_count: int = 0
+    discount_lines: list[CashierDiscountLine] = Field(default_factory=list)
     average_ticket: float
     by_payment_method: dict[str, float]
     pending_orders: list[OrderPublic] = Field(default_factory=list)
     receipts: list[OrderPublic] = Field(default_factory=list)
+    analytics: Optional["CashierReportAnalytics"] = None
+
+
+class CashierPaymentBreakdown(BaseModel):
+    method: str
+    amount: float
+    percentage: float = 0
+
+
+class CashierBranchPerformance(BaseModel):
+    branch_id: Optional[str] = None
+    branch_name: str
+    revenue: float
+    transactions: int
+    average_ticket: float
+    comparison_yesterday: Optional[float] = None
+    comparison_last_week: Optional[float] = None
+    comparison_last_month: Optional[float] = None
+    rank: int = 0
+
+
+class CashierRestaurantPerformance(BaseModel):
+    restaurant_id: str
+    restaurant_name: str
+    revenue: float
+    transactions: int
+    average_ticket: float
+    comparison_yesterday: Optional[float] = None
+    comparison_last_week: Optional[float] = None
+    comparison_last_month: Optional[float] = None
+    rank: int = 0
+
+
+class CashierCashierPerformance(BaseModel):
+    cashier_id: Optional[str] = None
+    cashier_name: str
+    branch_name: Optional[str] = None
+    transactions: int
+    amount_collected: float
+    cancellations: int = 0
+    variance: float = 0
+
+
+class CashierHourlyPoint(BaseModel):
+    hour: int
+    transactions: int
+    revenue: float
+
+
+class CashierVarianceLine(BaseModel):
+    label: str
+    amount: float
+    reason: str
+    created_at: datetime
+
+
+class CashierReportAlert(BaseModel):
+    level: str
+    title: str
+    message: str
+
+
+class CashierReportAnalytics(BaseModel):
+    restaurants_count: int = 1
+    theoretical_amount: float = 0
+    declared_amount: float = 0
+    variance_amount: float = 0
+    global_variance: float = 0
+    payment_breakdown: list[CashierPaymentBreakdown] = Field(default_factory=list)
+    branch_performance: list[CashierBranchPerformance] = Field(default_factory=list)
+    restaurant_performance: list[CashierRestaurantPerformance] = Field(default_factory=list)
+    cashier_performance: list[CashierCashierPerformance] = Field(default_factory=list)
+    hourly_sales: list[CashierHourlyPoint] = Field(default_factory=list)
+    cancelled_transactions: int = 0
+    refunded_transactions: int = 0
+    variance_history: list[CashierVarianceLine] = Field(default_factory=list)
+    comparisons: dict[str, Optional[float]] = Field(default_factory=dict)
+    alerts: list[CashierReportAlert] = Field(default_factory=list)
+
+
+class CashierNetworkReportOut(BaseModel):
+    start_date: datetime
+    end_date: datetime
+    total_collected: float
+    paid_orders_count: int
+    average_ticket: float
+    analytics: CashierReportAnalytics

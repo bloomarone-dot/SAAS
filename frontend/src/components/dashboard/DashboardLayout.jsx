@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { APP_MENUS } from "@/config/menu";
+import { InstallAppButton } from "@/components/InstallAppButton";
+import { useFullscreen } from "@/hooks/useFullscreen";
 import { DashboardIcon } from "./icons";
 
 export function DashboardLayout({
@@ -36,9 +38,24 @@ export function DashboardLayout({
   const sidebarLogo = isSuperadmin ? "/logoB.png" : "/logo.jpeg";
   const sidebarLogoAlt =
     isSuperadmin ? "Logo plateforme" : "Logo restaurant";
-  const activeMenu = findActiveMenu(menus, activeView);
-  const pageTitle = activeMenu?.label ?? "Tableau de bord";
   const unreadCount = notifications.filter((item) => !item.is_read).length;
+  const { isFullscreen, toggleFullscreen } = useFullscreen();
+  const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsOnline(true);
+    }
+    function handleOffline() {
+      setIsOnline(false);
+    }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     loadNotifications();
@@ -253,9 +270,9 @@ export function DashboardLayout({
         {!isCollapsed && (
           <div className="border-b px-3 py-3" style={{ borderColor: sidebarBorder }}>
             <p className="text-sm font-semibold" style={{ color: sidebarText }}>{roleMeta.userRole}</p>
-            <p className="mt-1 flex items-center gap-2 text-xs text-emerald-500">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              En ligne
+            <p className="mt-1 flex items-center gap-2 text-xs" style={{ color: isOnline ? "#10b981" : "#f59e0b" }}>
+              <span className={`h-2 w-2 rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"}`} />
+              {isOnline ? "En ligne" : "Mode hors ligne"}
             </p>
           </div>
         )}
@@ -478,7 +495,16 @@ export function DashboardLayout({
             {roleMeta.heading}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3">
+            <InstallAppButton />
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="flex h-10 w-10 items-center justify-center rounded-md text-white/90 hover:bg-black/10"
+              title={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
+            >
+              <DashboardIcon name={isFullscreen ? "Minimize2" : "Maximize2"} size={18} />
+            </button>
             <button
               className="hidden h-9 items-center gap-2 rounded border border-white/20 bg-black/10 px-3 text-xs font-bold text-white md:flex"
               style={{
@@ -574,19 +600,6 @@ export function DashboardLayout({
         </header>
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {!hideSidebar && (
-          <div className="px-4 pb-2 pt-4 sm:px-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{roleMeta.userRole}</p>
-                <h1 className="mt-0.5 truncate text-2xl font-bold text-slate-900">{pageTitle}</h1>
-              </div>
-              <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
-                {new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())}
-              </span>
-            </div>
-          </div>
-          )}
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5 lg:px-6">
             {children}
           </div>

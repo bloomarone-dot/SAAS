@@ -23,6 +23,8 @@ class User(Base):
     role: Mapped[Role] = mapped_column(Enum(Role), nullable=False)
     restaurant_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True)
     branch_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("branches.id"), index=True)
+    quartier: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    responsible_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Incremente a chaque deconnexion globale / reset de mot de passe: invalide
@@ -35,8 +37,9 @@ class User(Base):
     )
 
     restaurant = relationship("Restaurant", back_populates="users", foreign_keys=[restaurant_id])
-    branch = relationship("Branch", back_populates="users")
+    branch = relationship("Branch", back_populates="users", foreign_keys=[branch_id])
     created_by = relationship("User", remote_side=[id], foreign_keys=[created_by_id])
+    responsible = relationship("User", remote_side=[id], foreign_keys=[responsible_id])
     permission_grants = relationship(
         "UserPermission",
         back_populates="user",
@@ -66,6 +69,13 @@ class User(Base):
     def restaurant_slug(self) -> str | None:
         """Slug du restaurant rattaché (utilisé pour les URLs /r/:slug/*)."""
         return self.restaurant.slug if self.restaurant else None
+
+    @property
+    def responsible_name(self) -> str | None:
+        """Nom affichable du responsable hiérarchique."""
+        if not self.responsible:
+            return None
+        return f"{self.responsible.first_name} {self.responsible.last_name}".strip()
 
 
 class UserPermission(Base):

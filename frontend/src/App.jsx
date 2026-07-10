@@ -20,11 +20,11 @@ import { AdminReports } from "@/modules/admin/components/AdminReports";
 import { CatalogAdmin } from "@/modules/admin/components/CatalogAdmin";
 import { OnlineOrderDispatchAdmin } from "@/modules/admin/components/OnlineOrderDispatchAdmin";
 import { PerformanceAdmin } from "@/modules/admin/components/PerformanceAdmin";
+import { DailyReportPage } from "@/modules/admin/components/DailyReportModal";
 import { PromotionsAdmin } from "@/modules/admin/components/PromotionsAdmin";
 import { RestaurantSettingsAdmin } from "@/modules/admin/components/RestaurantSettingsAdmin";
 import { StaffPermissionsAdmin } from "@/modules/admin/components/StaffPermissionsAdmin";
-import CategoriesPage from "@/modules/menu/pages/CategoriesPage";
-import DishesPage from "@/modules/menu/pages/DishesPage";
+import MenuCatalogAdmin from "@/modules/menu/pages/MenuCatalogAdmin";
 import { ServerClients, ServerFreeTables, ServerHistory, ServerInvoices, ServerOpenTables, ServerOrderWorkspace } from "@/modules/menu/components/ServerClientSections";
 import { OrdersAdmin } from "@/modules/orders/components/OrdersAdmin";
 import { StockDashboard } from "@/components/dashboard/roles/StockDashboard";
@@ -99,14 +99,16 @@ const routeAliases = {
   users: "staff",
   personnel: "staff",
   restaurants: "restaurants",
-  categories: "menu-categories",
-  dishes: "menu-dishes",
+  categories: "menu-catalog",
+  dishes: "menu-catalog",
+  "menu-categories": "menu-catalog",
+  "menu-dishes": "menu-catalog",
+  availability: "menu-catalog",
 };
 
 const viewPathSegments = {
   staff: "users",
-  "menu-categories": "categories",
-  "menu-dishes": "dishes",
+  "menu-catalog": "catalog",
 };
 
 // Préfixe d'URL du tenant : /superadmin pour la plateforme, /admin sur sous-domaine restaurant,
@@ -360,7 +362,7 @@ export default function App() {
       setShowRestaurantForm(false);
       await fetchRestaurants();
       setMessage(
-        `Restaurant "${data.restaurant.name}" créé. Propriétaire: ${data.owner.username}`
+        `Restaurant "${data.restaurant.name}" créé (slug: ${data.restaurant.slug}). Propriétaire: ${data.owner.username}`
       );
     } catch (error) {
       setMessage(error.message || "Création du restaurant impossible.");
@@ -444,8 +446,8 @@ export default function App() {
       const initialSection = restaurantPath === "/commande" ? "commande" : restaurantPath === "/contact" ? "infos" : restaurantPath === "/menu" ? "menu" : null;
       return <RestaurantLandingPage apiBaseUrl={apiBaseUrl} slug={slug} initialSection={initialSection} />;
     }
-    if (publicHostKind === "saas" && publicPath === "/login") {
-      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
+    if (publicHostKind === "saas" && (publicPath === "/login" || publicPath === "/admin")) {
+      return <AccessPortalPage apiBaseUrl={apiBaseUrl} message={message} onForgotPassword={() => setRecoveryMode(true)} />;
     }
     if (publicHostKind === "saas") {
       return <LandingPage apiBaseUrl={apiBaseUrl} />;
@@ -467,7 +469,7 @@ export default function App() {
   }
 
   if (!session) {
-    return <AccessPortalPage message={message} onForgotPassword={() => setRecoveryMode(true)} />;
+    return <AccessPortalPage apiBaseUrl={apiBaseUrl} message={message} onForgotPassword={() => setRecoveryMode(true)} />;
   }
 
   const overrides =
@@ -584,24 +586,19 @@ export default function App() {
 
       const stockViews = ["stocks", "stock", "products", "depots", "entries", "transfers", "outputs", "inventories", "alerts", "create-stock-product", "movements", "stock-in", "stock-out", "transfer", "suppliers", "inventory", "damages", "purchases", "accounting", "stock-report"];
 
-      if (["staff", "create-user", "user-detail"].includes(activeView) && session.role === "ADMIN") {
+      if (["staff", "user-detail"].includes(activeView) && session.role === "ADMIN") {
         return (
           <StaffPermissionsAdmin
             apiBaseUrl={apiBaseUrl}
             currentUser={session}
             onMessage={setMessage}
             onThemeChange={setRestaurantTheme}
-            showCreateOnMount={activeView === "create-user"}
-            onNavigate={(view) => {
-              setActiveView(view);
-              pushAppRoute(session, view);
-            }}
           />
         );
       }
 
-      if (["branches", "create-branch"].includes(activeView) && session.role === "ADMIN") {
-        return <BranchesAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} focusCreate={activeView === "create-branch"} />;
+      if (activeView === "branches" && session.role === "ADMIN") {
+        return <BranchesAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} showCreateOnMount={false} />;
       }
 
       if (activeView === "open-table" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
@@ -649,12 +646,20 @@ export default function App() {
         return <OrdersAdmin apiBaseUrl={apiBaseUrl} currentUser={session} onMessage={setMessage} />;
       }
 
-      if (activeView === "server-performance" && ["ADMIN", "MANAGER"].includes(session.role)) {
-        return <PerformanceAdmin type="server" onMessage={setMessage} />;
+      if (["performance", "server-performance", "cashier-performance"].includes(activeView) && ["ADMIN", "MANAGER"].includes(session.role)) {
+        const tab = activeView === "cashier-performance" ? "cashier" : "server";
+        return <PerformanceAdmin initialTab={tab} onMessage={setMessage} />;
       }
 
-      if (activeView === "cashier-performance" && ["ADMIN", "MANAGER"].includes(session.role)) {
-        return <PerformanceAdmin type="cashier" onMessage={setMessage} />;
+      if (activeView === "daily-report" && ["ADMIN", "MANAGER"].includes(session.role)) {
+        return (
+          <DailyReportPage
+            onClose={() => {
+              setActiveView("dashboard");
+              pushAppRoute(session, "dashboard");
+            }}
+          />
+        );
       }
 
       if (activeView === "online-dispatch" && ["ADMIN", "MANAGER"].includes(session.role)) {
@@ -665,7 +670,7 @@ export default function App() {
         return <CatalogAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
-      if (["cashier", "payments", "completed-payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation", "receipts", "print-receipt", "cancel-payment", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView) && ["ADMIN", "CAISSE"].includes(session.role)) {
+      if (["cashier", "deliveries", "delivery-create", "delivery-orders", "payments", "completed-payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation", "receipts", "print-receipt", "cancel-payment", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView) && ["ADMIN", "CAISSE"].includes(session.role)) {
         return <RoleDashboard role="CAISSE" overrides={{ ...overrides, __activeView: activeView, __currentUser: session, __adminReviewOnly: session.role === "ADMIN" }} />;
       }
 
@@ -700,13 +705,11 @@ export default function App() {
         );
       }
 
-      if (["menu-categories", "create-category"].includes(activeView) && ["ADMIN", "CUISINE", "STOCK"].includes(session.role)) {
-        return <CategoriesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={session.role !== "STOCK" && activeView === "create-category"} />;
-      }
-
-      if (["menu-dishes", "create-dish", "availability", "dish-unavailable"].includes(activeView) && ["ADMIN", "CUISINE", "STOCK"].includes(session.role)) {
-        const initialAvailabilityFilter = activeView === "dish-unavailable" ? "UNAVAILABLE" : "ALL";
-        return <DishesPage restaurantId={session.restaurant_id} role={session.role} showCreateOnMount={session.role !== "STOCK" && activeView === "create-dish"} initialAvailabilityFilter={initialAvailabilityFilter} />;
+      if (
+        ["menu-catalog", "menu-categories", "menu-dishes", "availability", "create-category", "create-dish", "dish-unavailable"].includes(activeView) &&
+        ["ADMIN", "CUISINE", "STOCK"].includes(session.role)
+      ) {
+        return <MenuCatalogAdmin restaurantId={session.restaurant_id} role={session.role} />;
       }
 
       if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {

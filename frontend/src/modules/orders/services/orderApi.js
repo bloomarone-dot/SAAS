@@ -73,4 +73,25 @@ export const orderApi = {
     const suffix = query.toString() ? `?${query}` : "";
     return request(`/api/v1/orders/cashier-report${suffix}`);
   },
+
+  createCashierDelivery: (payload) =>
+    request("/api/v1/orders/cashier-delivery", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  cashierNetworkReport: (params = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const suffix = query.toString() ? `?${query}` : "";
+    return request(`/api/v1/orders/cashier-network-report${suffix}`);
+  },
+
+  listDeliveryAreas: (params = {}) => {
+    const query = new URLSearchParams({ active_only: "true", ...params });
+    const suffix = query.toString() ? `?${query}` : "";
+    return request(`/api/v1/branches/delivery-areas${suffix}`);
+  },
 };

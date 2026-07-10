@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "../icons";
-import { DashboardSection, FilterBar, PageContainer, PageHeader, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
+import { AdminFormModal, DashboardSection, FilterBar, PageContainer, PageHeader, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
 import { orderApi } from "@/modules/orders/services/orderApi";
+import { DeliveryCashierPanel } from "@/modules/orders/components/DeliveryCashierPanel";
+import { CashierReportAnalytics } from "@/modules/orders/components/CashierReportAnalytics";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
 import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
@@ -23,6 +25,9 @@ function money(value) {
 
 function orderCustomerLabel(order) {
   if (order?.table_id) return `${order.table_room ? `${order.table_room} · ` : ""}Table ${order.table_name || order.table_id}`;
+  if (order?.fulfillment_type === "Livraison") {
+    return [order.customer_name, order.customer_phone, order.delivery_area_name].filter(Boolean).join(" · ");
+  }
   return order?.customer_name || "Client";
 }
 
@@ -49,11 +54,38 @@ function emptyReport() {
     paid_orders_count: 0,
     receipts_count: 0,
     total_collected: 0,
+    total_discounts: 0,
+    discounted_orders_count: 0,
+    discount_lines: [],
     average_ticket: 0,
     by_payment_method: {},
     pending_orders: [],
     receipts: [],
   };
+}
+
+const CASHIER_TABS = [
+  { key: "overview", label: "Tableau de bord", icon: "LayoutDashboard" },
+  { key: "deliveries", label: "Livraisons", icon: "Truck" },
+  { key: "pending", label: "À encaisser", icon: "ClipboardList" },
+  { key: "receipts", label: "Encaissés", icon: "ReceiptText" },
+  { key: "closing", label: "Clôture", icon: "Clock3" },
+];
+
+function resolveCashierTab(activeView) {
+  if (["deliveries", "delivery-create", "delivery-orders"].includes(activeView)) {
+    return "deliveries";
+  }
+  if (["payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation"].includes(activeView)) {
+    return "pending";
+  }
+  if (["receipts", "print-receipt", "cancel-payment", "completed-payments", "payment-history"].includes(activeView)) {
+    return "receipts";
+  }
+  if (["closing", "cash-closing", "cash-report", "payment-totals"].includes(activeView)) {
+    return "closing";
+  }
+  return "overview";
 }
 
 export function CaisseDashboard({ overrides = {} }) {
@@ -74,6 +106,13 @@ export function CaisseDashboard({ overrides = {} }) {
   const [isLoading, setIsLoading] = useState(false);
   const [paymentRequests, setPaymentRequests] = useState([]);
   const [requestActionId, setRequestActionId] = useState("");
+  const [activeTab, setActiveTab] = useState(resolveCashierTab(activeView));
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  useEffect(() => {
+    setActiveTab(resolveCashierTab(activeView));
+  }, [activeView]);
 
   useEffect(() => {
     loadCashierReport();
@@ -170,7 +209,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const pendingOrders = useMemo(
     () => (report.pending_orders ?? []).filter((order) => {
       if (!query) return true;
-      return [order.order_number, order.customer_name, orderCustomerLabel(order), order.status]
+      return [order.order_number, order.customer_name, orderCustomerLabel(order), order.server_name, order.status]
         .join(" ")
         .toLowerCase()
         .includes(query);
@@ -183,13 +222,16 @@ export function CaisseDashboard({ overrides = {} }) {
   const mobileMoneyTotal = Object.entries(report.by_payment_method ?? {})
     .filter(([method]) => /mobile|orange|mtn/i.test(method))
     .reduce((total, [, amount]) => total + Number(amount || 0), 0);
-  const viewCopy = getCashierViewCopy(activeView);
-  const showSearch = ["dashboard", "cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation"].includes(activeView);
-  const showKpis = ["dashboard", "cashier", "payments", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView);
-  const showPaymentArea = ["dashboard", "cashier", "payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation"].includes(activeView);
-  const showReceiptArea = ["dashboard", "cashier", "receipts", "print-receipt", "cancel-payment", "payment-history", "completed-payments"].includes(activeView);
-  const showClosingArea = ["dashboard", "cashier", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView);
-  const paymentGridClass = activeView === "unpaid-orders" ? "grid gap-4" : "grid gap-4 xl:grid-cols-[0.95fr_1fr]";
+
+  const ordersByServer = useMemo(() => {
+    const groups = new Map();
+    for (const order of pendingOrders) {
+      const key = order.server_name || "Sans serveur assigné";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(order);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "fr"));
+  }, [pendingOrders]);
 
   const kpis = [
     { label: "Commandes non payées", value: report.pending_orders_count ?? pendingOrders.length, trend: "À encaisser", icon: "ClipboardList", tone: "warning" },
@@ -197,6 +239,12 @@ export function CaisseDashboard({ overrides = {} }) {
     { label: "Mobile Money", value: money(mobileMoneyTotal), trend: "Service du jour", icon: "Phone", tone: "info" },
     { label: "Reçus imprimables", value: report.receipts_count ?? receipts.length, trend: "Commandes payées", icon: "ReceiptText", tone: "default" },
   ];
+
+  function openPaymentModal(order) {
+    setSelectedOrderId(order.id);
+    setDiscount(order.discount_amount ? String(order.discount_amount) : "");
+    setShowPaymentModal(true);
+  }
 
   async function validatePayment() {
     if (!selectedOrder) return;
@@ -221,6 +269,7 @@ export function CaisseDashboard({ overrides = {} }) {
       setSelectedReceiptId(paid.id);
       setMessage(`Paiement validé pour ${paid.order_number}.`);
       await loadCashierReport();
+      setShowPaymentModal(false);
       printReceipt(paid);
     } catch (error) {
       if (!isMobileMoney && isNetworkError(error)) {
@@ -295,37 +344,58 @@ export function CaisseDashboard({ overrides = {} }) {
     <PageContainer>
       <PageHeader
         eyebrow={adminReviewOnly ? "Administration" : "Caisse"}
-        title={adminReviewOnly ? "Suivi caisse" : viewCopy.title}
-        subtitle={adminReviewOnly ? "Consultez les paiements et validez uniquement les annulations de facture." : viewCopy.subtitle || `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""}. Gérez les encaissements et les reçus du service.`}
-        primaryAction={!adminReviewOnly && <SecondaryAction icon="ReceiptText" onClick={printCashReport}>Rapport caisse</SecondaryAction>}
+        title={adminReviewOnly ? "Suivi caisse" : "Espace caissière"}
+        subtitle={
+          adminReviewOnly
+            ? "Consultez les paiements et validez uniquement les annulations de facture."
+            : `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""}. Encaissements organisés par serveur, un onglet par étape.`
+        }
+        primaryAction={
+          !adminReviewOnly && (
+            <SecondaryAction icon="BarChart3" onClick={() => setShowReportModal(true)}>
+              Rapport caisse
+            </SecondaryAction>
+          )
+        }
         meta={[
           <span key="orders">{pendingOrders.length.toLocaleString("fr-FR")} commande(s) à encaisser</span>,
           <span key="receipts">{receipts.length.toLocaleString("fr-FR")} reçu(s)</span>,
         ]}
       />
 
-      {showSearch && (
-        <FilterBar
-          right={isLoading ? <span className="text-xs font-black uppercase text-slate-400">Synchronisation...</span> : null}
-        >
-          <label className="flex h-10 min-w-[240px] flex-1 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 text-sm focus-within:border-emerald-600">
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+        {CASHIER_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-black transition ${
+              activeTab === tab.key
+                ? "bg-emerald-700 text-white"
+                : "border border-slate-200 text-slate-600 hover:border-emerald-600 hover:text-emerald-700"
+            }`}
+          >
+            <DashboardIcon name={tab.icon} size={16} />
+            {tab.label}
+            {tab.key === "pending" && pendingOrders.length > 0 && (
+              <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{pendingOrders.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {(activeTab === "overview" || activeTab === "pending") && (
+        <FilterBar right={isLoading ? <span className="text-xs font-black uppercase text-slate-400">Synchronisation...</span> : null}>
+          <label className="flex h-10 min-w-[260px] flex-1 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 text-sm focus-within:border-emerald-600">
             <DashboardIcon name="Search" size={17} className="text-slate-400" />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Rechercher une commande, un client..."
+              placeholder="Rechercher commande, table, serveur..."
               className="min-w-0 flex-1 bg-transparent font-semibold outline-none placeholder:text-slate-400"
             />
           </label>
         </FilterBar>
-      )}
-
-      {showKpis && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {kpis.map((item) => (
-            <StatCard key={item.label} {...item} />
-          ))}
-        </div>
       )}
 
       {message && (
@@ -334,166 +404,233 @@ export function CaisseDashboard({ overrides = {} }) {
         </div>
       )}
 
-      {!adminReviewOnly && paymentRequests.length > 0 && (
-        <DashboardSection title="Demandes de paiement serveur" action={<SmallMeta>{paymentRequests.length} en attente</SmallMeta>}>
-          <PaymentRequestsList
-            requests={paymentRequests}
-            actionId={requestActionId}
-            onValidate={validatePaymentRequest}
-            onReject={rejectPaymentRequest}
+      {activeTab === "overview" && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {kpis.map((item) => (
+              <StatCard key={item.label} {...item} />
+            ))}
+          </div>
+
+          {!adminReviewOnly && paymentRequests.length > 0 && (
+            <DashboardSection title="Demandes de paiement serveur" action={<SmallMeta>{paymentRequests.length} en attente</SmallMeta>}>
+              <PaymentRequestsList
+                requests={paymentRequests}
+                actionId={requestActionId}
+                onValidate={validatePaymentRequest}
+                onReject={rejectPaymentRequest}
+              />
+            </DashboardSection>
+          )}
+
+          <DashboardSection
+            title="Commandes en attente"
+            action={
+              <button type="button" onClick={() => setActiveTab("pending")} className="text-xs font-black text-emerald-700 hover:underline">
+                Voir tout →
+              </button>
+            }
+          >
+            <PendingOrdersByServer
+              groups={ordersByServer.slice(0, 4)}
+              onSelect={openPaymentModal}
+              compact
+            />
+          </DashboardSection>
+        </div>
+      )}
+
+      {activeTab === "deliveries" && !adminReviewOnly && (
+        <DeliveryCashierPanel
+          restaurantId={currentUser?.restaurant_id}
+          currentUser={currentUser}
+          onMessage={setMessage}
+        />
+      )}
+
+      {activeTab === "pending" && (
+        <DashboardSection title="Commandes à encaisser par serveur" action={<SmallMeta>{pendingOrders.length} en attente</SmallMeta>}>
+          <PendingOrdersByServer groups={ordersByServer} onSelect={openPaymentModal} />
+        </DashboardSection>
+      )}
+
+      {activeTab === "receipts" && (
+        <DashboardSection title="Paiements encaissés" action={<SmallMeta>{receipts.length} reçu(s)</SmallMeta>}>
+          <ReceiptsTable
+            receipts={receipts}
+            selectedReceiptId={selectedReceipt?.id}
+            onSelect={(order) => setSelectedReceiptId(order.id)}
+            onPrint={printReceipt}
+            onCancel={cancelPayment}
+            isLoading={isLoading}
+            adminReviewOnly={adminReviewOnly}
           />
         </DashboardSection>
       )}
 
-      {showPaymentArea && <div className={paymentGridClass}>
-        <DashboardSection title="Commandes à encaisser" action={<SmallMeta>{pendingOrders.length} en attente</SmallMeta>}>
-          <OrdersTable
-            orders={pendingOrders}
-            selectedOrderId={selectedOrder?.id}
-            onSelect={(order) => {
-              setSelectedOrderId(order.id);
-              setDiscount(order.discount_amount ? String(order.discount_amount) : "");
-            }}
-          />
-        </DashboardSection>
+      {activeTab === "closing" && (
+        <div className="grid gap-5 md:grid-cols-2">
+          <DashboardSection title="Récapitulatif du service">
+            <div className="rounded-lg bg-emerald-50 p-6">
+              <p className="text-sm font-semibold text-slate-600">Total encaissé aujourd'hui</p>
+              <p className="mt-2 text-4xl font-black text-slate-950">{money(report.total_collected)}</p>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Metric label="Transactions" value={Number(report.paid_orders_count || 0).toLocaleString("fr-FR")} />
+              <Metric label="Panier moyen" value={money(report.average_ticket)} />
+            </div>
+            <button type="button" onClick={() => setShowReportModal(true)} className="mt-5 h-11 w-full rounded-lg bg-emerald-700 font-black text-white">
+              Ouvrir le rapport de caisse
+            </button>
+          </DashboardSection>
 
-        {activeView !== "unpaid-orders" && <DashboardSection title="Détail de la commande" action={<SmallMeta>{selectedOrder?.order_number ?? "Aucune"}</SmallMeta>}>
-          {selectedOrder ? (
-            <div>
-              <OrderDetail order={selectedOrder} discountPreview={discount} />
-              {!adminReviewOnly && <div className="mt-5">
-                <p className="text-sm font-black text-slate-950">Choisir le mode de paiement</p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                  {paymentMethods.map((method) => (
-                    <button
-                      key={method.label}
-                      type="button"
-                      onClick={() => setPaymentMethod(method.label)}
-                      className={`flex h-12 items-center justify-center gap-2 rounded-lg border text-sm font-black ${
-                        paymentMethod === method.label
-                          ? "border-emerald-600 bg-emerald-50 text-emerald-800"
-                          : "border-slate-200 text-slate-700"
-                      }`}
-                    >
-                      <DashboardIcon name={method.icon} size={18} />
-                      {method.label}
-                    </button>
-                  ))}
+          <DashboardSection title="Répartition par mode de paiement">
+            <PaymentTotals rows={report.by_payment_method ?? {}} />
+          </DashboardSection>
+
+          {(report.discounted_orders_count || 0) > 0 && (
+            <DashboardSection title="Réductions du service" action={<SmallMeta>{report.discounted_orders_count} remise(s)</SmallMeta>}>
+              <div className="mb-4 rounded-lg bg-red-50 p-4">
+                <p className="text-sm font-semibold text-slate-600">Total des réductions accordées</p>
+                <p className="mt-1 text-2xl font-black text-red-600">- {money(report.total_discounts)}</p>
+              </div>
+              <DiscountLinesTable lines={report.discount_lines ?? []} />
+            </DashboardSection>
+          )}
+        </div>
+      )}
+
+      <AdminFormModal
+        open={showPaymentModal && Boolean(selectedOrder)}
+        onClose={() => setShowPaymentModal(false)}
+        title={selectedOrder ? `Encaisser · ${selectedOrder.order_number}` : ""}
+        description={selectedOrder ? `${orderCustomerLabel(selectedOrder)}${selectedOrder.server_name ? ` · Serveur ${selectedOrder.server_name}` : ""}` : ""}
+        size="xl"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowPaymentModal(false)} className="lte-btn lte-btn-default">
+              Fermer
+            </button>
+            {!adminReviewOnly && (
+              <button
+                type="button"
+                disabled={isLoading || selectedOrder?.payment_locked}
+                onClick={validatePayment}
+                className="lte-btn lte-btn-primary"
+              >
+                {selectedOrder?.payment_locked ? "Paiement en attente" : paymentMethod === "Mobile Money" ? "Envoyer le Push USSD" : "Valider paiement"}
+              </button>
+            )}
+          </>
+        }
+      >
+        {selectedOrder && (
+          <div className="space-y-5">
+            <OrderDetail order={selectedOrder} discountPreview={discount} />
+            {!adminReviewOnly && (
+              <>
+                <div>
+                  <p className="text-sm font-black text-slate-950">Mode de paiement</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    {paymentMethods.map((method) => (
+                      <button
+                        key={method.label}
+                        type="button"
+                        onClick={() => setPaymentMethod(method.label)}
+                        className={`flex h-12 items-center justify-center gap-2 rounded-lg border text-sm font-black ${
+                          paymentMethod === method.label
+                            ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                            : "border-slate-200 text-slate-700"
+                        }`}
+                      >
+                        <DashboardIcon name={method.icon} size={18} />
+                        {method.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>}
-              {!adminReviewOnly && paymentMethod === "Mobile Money" && (
-                <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
-                  <p className="text-sm font-black text-slate-950">Paiement en ligne Mobile Money</p>
-                  <div className="mt-3">
+                {paymentMethod === "Mobile Money" && (
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+                    <p className="text-sm font-black text-slate-950">Opérateur Mobile Money</p>
                     <select
                       value={mobileOperator}
                       onChange={(event) => setMobileOperator(event.target.value)}
-                      className="h-11 rounded-lg border border-emerald-200 bg-white px-3 text-sm font-black text-slate-700 outline-none"
+                      className="mt-2 h-11 w-full rounded-lg border border-emerald-200 bg-white px-3 text-sm font-black text-slate-700 outline-none"
                     >
                       <option value="MTN">MTN Mobile Money</option>
                       <option value="ORANGE">Orange Money</option>
                     </select>
-                    <p className="mt-2 text-xs font-semibold text-emerald-800">
-                      Le numéro client sera saisi à l'étape suivante. Seul le webhook signé peut valider le paiement.
-                    </p>
+                  </div>
+                )}
+                <label className="block">
+                  <span className="text-xs font-black uppercase text-slate-500">Réduction autorisée</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={discount}
+                    onChange={(event) => setDiscount(event.target.value)}
+                    placeholder="0"
+                    className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 outline-none focus:border-emerald-600"
+                  />
+                </label>
+                <div>
+                  <span className="text-xs font-black uppercase text-slate-500">Code promo</span>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <input
+                      value={promoCode}
+                      onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+                      placeholder="Ex. BIENVENUE"
+                      className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 outline-none focus:border-emerald-600"
+                    />
+                    <button type="button" disabled={isLoading || !promoCode.trim()} onClick={applyPromo} className="h-11 rounded-lg border border-emerald-200 px-4 text-sm font-black text-emerald-700 disabled:opacity-60">
+                      Appliquer
+                    </button>
                   </div>
                 </div>
-              )}
-              {!adminReviewOnly && <label className="mt-4 block">
-                <span className="text-xs font-black uppercase text-slate-500">Réduction autorisée</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={discount}
-                  onChange={(event) => setDiscount(event.target.value)}
-                  placeholder="0"
-                  className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 outline-none focus:border-emerald-600"
-                />
-              </label>}
-              {!adminReviewOnly && <div className="mt-4">
-                <span className="text-xs font-black uppercase text-slate-500">Code promo</span>
-                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
-                  <input
-                    value={promoCode}
-                    onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
-                    placeholder="Ex. BIENVENUE"
-                    className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 outline-none focus:border-emerald-600"
-                  />
-                  <button type="button" disabled={isLoading || !promoCode.trim()} onClick={applyPromo} className="h-11 rounded-lg border border-emerald-200 px-4 text-sm font-black text-emerald-700 disabled:opacity-60">
-                    Appliquer
-                  </button>
-                </div>
-              </div>}
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {!adminReviewOnly && <button disabled={isLoading || selectedOrder.payment_locked} onClick={validatePayment} className="h-12 rounded-lg bg-emerald-700 font-black text-white disabled:opacity-60">
-                  {selectedOrder.payment_locked ? "Paiement Mobile Money en attente" : paymentMethod === "Mobile Money" ? "Envoyer le Push USSD" : "Valider paiement"}
-                </button>}
-                <button type="button" onClick={() => printReceipt(selectedOrder)} className="h-12 rounded-lg border border-emerald-200 font-black text-emerald-700">
-                  Consulter / imprimer
+                <button type="button" onClick={() => printReceipt(selectedOrder)} className="h-11 w-full rounded-lg border border-emerald-200 font-black text-emerald-700">
+                  Consulter / imprimer l'aperçu
                 </button>
-              </div>
-            </div>
-          ) : (
-            <EmptyState text="Aucune commande prête ou servie à encaisser." />
-          )}
-        </DashboardSection>}
-      </div>}
-
-      {showClosingArea && <div className="grid gap-4 xl:grid-cols-[0.72fr_1.28fr]">
-        <DashboardSection title="Clôture de caisse">
-          <div className="rounded-lg bg-emerald-50 p-5">
-            <p className="text-sm font-semibold text-slate-600">Total du service aujourd'hui</p>
-            <p className="mt-2 text-3xl font-black text-slate-950">{money(report.total_collected)}</p>
+              </>
+            )}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <Metric label="Transactions" value={Number(report.paid_orders_count || 0).toLocaleString("fr-FR")} />
-            <Metric label="Panier moyen" value={money(report.average_ticket)} />
-          </div>
-          <div className="mt-4 space-y-2">
-            {Object.entries(report.by_payment_method ?? {}).map(([method, amount]) => (
-              <div key={method} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm">
-                <span className="font-bold text-slate-600">{method}</span>
-                <span className="font-black text-slate-950">{money(amount)}</span>
-              </div>
-            ))}
-          </div>
-          <button type="button" onClick={printCashReport} className="mt-5 h-11 w-full rounded-lg bg-emerald-700 font-black text-white">
-            Générer rapport de caisse
-          </button>
-        </DashboardSection>
-
-        {showReceiptArea ? (
-        <DashboardSection title="Derniers reçus" action={<SmallMeta>{selectedReceipt?.order_number ?? ""}</SmallMeta>}>
-          <ReceiptsTable
-            receipts={receipts}
-            selectedReceiptId={selectedReceipt?.id}
-            onSelect={(order) => setSelectedReceiptId(order.id)}
-            onPrint={printReceipt}
-            onCancel={cancelPayment}
-            isLoading={isLoading}
-            adminReviewOnly={adminReviewOnly}
-          />
-        </DashboardSection>
-        ) : (
-          <DashboardSection title="Totaux par mode de paiement">
-            <PaymentTotals rows={report.by_payment_method ?? {}} />
-          </DashboardSection>
         )}
-      </div>}
+      </AdminFormModal>
 
-      {showReceiptArea && !showClosingArea && (
-        <DashboardSection title={activeView === "cancel-payment" ? "Annuler un paiement" : "Derniers reçus"} action={<SmallMeta>{selectedReceipt?.order_number ?? ""}</SmallMeta>}>
-          <ReceiptsTable
-            receipts={receipts}
-            selectedReceiptId={selectedReceipt?.id}
-            onSelect={(order) => setSelectedReceiptId(order.id)}
-            onPrint={printReceipt}
-            onCancel={cancelPayment}
-            isLoading={isLoading}
-            adminReviewOnly={adminReviewOnly}
-          />
-        </DashboardSection>
-      )}
+      <AdminFormModal
+        open={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        title="Rapport de caisse"
+        description="Vision complète des encaissements, écarts, performances et alertes."
+        size="xl"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowReportModal(false)} className="lte-btn lte-btn-default">
+              Fermer
+            </button>
+            <button type="button" onClick={printCashReport} className="lte-btn lte-btn-primary">
+              <DashboardIcon name="ReceiptText" size={16} />
+              Imprimer le rapport
+            </button>
+          </>
+        }
+      >
+        <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
+          <CashierReportAnalytics report={report} />
+          <div>
+            <p className="mb-3 text-sm font-black text-slate-900">Derniers reçus</p>
+            <ReceiptsTable
+              receipts={receipts.slice(0, 5)}
+              selectedReceiptId=""
+              onSelect={() => {}}
+              onPrint={printReceipt}
+              onCancel={cancelPayment}
+              isLoading={isLoading}
+              adminReviewOnly={adminReviewOnly}
+              hideActions={adminReviewOnly}
+            />
+          </div>
+        </div>
+      </AdminFormModal>
 
       {mobilePaymentOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
@@ -526,31 +663,89 @@ export function CaisseDashboard({ overrides = {} }) {
   );
 }
 
-function getCashierViewCopy(view) {
-  const copy = {
-    dashboard: ["Tableau de bord Caissier", ""],
-    cashier: ["Tableau de bord Caissier", ""],
-    payments: ["Tous les paiements", "Encaissez les commandes prêtes et consultez les paiements reçus, annulés ou en attente."],
-    "completed-payments": ["Paiements effectués", "Consultez uniquement les paiements validés et réellement encaissés."],
-    "unpaid-orders": ["Commandes non payées", "Liste des commandes prêtes ou servies en attente d'encaissement."],
-    "cash-order-detail": ["Commande à encaisser", "Sélectionnez une commande et contrôlez son détail avant validation."],
-    discounts: ["Remise autorisée", "Appliquez une remise validée ou un code promotionnel avant paiement."],
-    "payment-method": ["Mode paiement", "Choisissez le canal d'encaissement adapté à la commande."],
-    cash: ["Paiement espèces", "Encaissez rapidement une commande en espèces."],
-    mobile: ["Paiement Mobile Money", "Choisissez l'opérateur puis déclenchez le Push USSD sécurisé."],
-    card: ["Paiement carte", "Encaissez une commande par carte bancaire ou terminal."],
-    "payment-validation": ["Validation paiement", "Validez le paiement et générez le reçu client."],
-    receipts: ["Derniers reçus", "Retrouvez les tickets générés pendant le service."],
-    "print-receipt": ["Impression reçu", "Réimprimez le ticket d'une commande déjà payée."],
-    "cancel-payment": ["Annuler paiement", "Annulez un paiement pour remettre la commande à encaisser."],
-    closing: ["Clôture", "Contrôlez les encaissements avant la clôture du service."],
-    "cash-closing": ["Clôture caisse", "Préparez le récapitulatif de clôture de caisse."],
-    "cash-report": ["Rapport caisse", "Générez un rapport imprimable des encaissements."],
-    "payment-totals": ["Totaux paiement", "Comparez les montants encaissés par mode de paiement."],
-    "payment-history": ["Historique paiements", "Consultez les paiements et reçus du service."],
-  };
-  const [title, subtitle] = copy[view] || copy.dashboard;
-  return { title, subtitle };
+function PendingOrdersByServer({ groups, onSelect, compact = false }) {
+  if (!groups.length) return <EmptyState text="Aucune commande prête ou servie à encaisser." />;
+
+  return (
+    <div className="space-y-6">
+      {groups.map(([serverName, orders]) => (
+        <div key={serverName} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <DashboardIcon name="User" size={16} className="text-emerald-700" />
+              <p className="text-sm font-black text-slate-900">{serverName}</p>
+            </div>
+            <SmallMeta>{orders.length} commande(s)</SmallMeta>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="lte-table min-w-[760px]">
+              <thead>
+                <tr>
+                  <th className="py-3">N° Commande</th>
+                  <th className="py-3">Table / Client</th>
+                  <th className="py-3">Montant</th>
+                  <th className="py-3">Statut</th>
+                  <th className="py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(compact ? orders.slice(0, 3) : orders).map((order) => (
+                  <tr key={order.id} className="hover:bg-slate-50">
+                    <td className="py-3 font-black text-slate-950">{order.order_number}</td>
+                    <td className="py-3 font-semibold text-slate-600">{orderCustomerLabel(order)}</td>
+                    <td className="py-3 font-black text-slate-900">{money(order.total_amount)}</td>
+                    <td className="py-3"><StatusBadge status={order.status} /></td>
+                    <td className="py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => onSelect(order)}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 px-3 text-xs font-black text-emerald-700 hover:bg-emerald-50"
+                      >
+                        <DashboardIcon name="Wallet" size={14} />
+                        Encaisser
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DiscountLinesTable({ lines }) {
+  if (!lines.length) {
+    return <EmptyState text="Aucune réduction appliquée sur cette période." />;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="lte-table min-w-[680px]">
+        <thead>
+          <tr>
+            <th>Commande</th>
+            <th>Serveur</th>
+            <th>Caissier</th>
+            <th>Réduction</th>
+            <th>Total payé</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {lines.map((line) => (
+            <tr key={line.order_id}>
+              <td className="py-3 font-black text-slate-950">{line.order_number}</td>
+              <td className="py-3 font-semibold text-slate-600">{line.server_name || "—"}</td>
+              <td className="py-3 font-semibold text-slate-600">{line.cashier_name || "—"}</td>
+              <td className="py-3 font-black text-red-600">- {money(line.discount_amount)}</td>
+              <td className="py-3 font-black text-slate-900">{money(line.total_amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function PaymentTotals({ rows }) {
@@ -627,46 +822,7 @@ function PaymentRequestsList({ requests, actionId, onValidate, onReject }) {
   );
 }
 
-function OrdersTable({ orders, selectedOrderId, onSelect }) {
-  if (!orders.length) return <EmptyState text="Aucune commande à encaisser." />;
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="lte-table min-w-[760px]">
-        <thead>
-          <tr>
-            <th className="py-3">N° Commande</th>
-            <th className="py-3">Client / Table</th>
-            <th className="py-3">Origine</th>
-            <th className="py-3">Montant</th>
-            <th className="py-3">Statut</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {orders.map((order) => (
-            <tr
-              key={order.id}
-              onClick={() => onSelect(order)}
-              className={`cursor-pointer ${selectedOrderId === order.id ? "bg-emerald-50" : "hover:bg-slate-50"}`}
-            >
-              <td className="py-3 font-black text-slate-950">{order.order_number}</td>
-              <td className="py-3 font-semibold text-slate-600">{orderCustomerLabel(order)}</td>
-              <td className="py-3">
-                <span className={`rounded-full px-3 py-1 text-xs font-black ${order.order_source === "En ligne" ? "bg-purple-50 text-purple-700" : "bg-emerald-50 text-emerald-700"}`}>
-                  {order.order_source || order.fulfillment_type}
-                </span>
-              </td>
-              <td className="py-3 font-black text-slate-900">{money(order.total_amount)}</td>
-              <td className="py-3"><StatusBadge status={order.status} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCancel, isLoading, adminReviewOnly = false }) {
+function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCancel, isLoading, adminReviewOnly = false, hideActions = false }) {
   if (!receipts.length) return <EmptyState text="Aucun reçu généré aujourd'hui." />;
 
   return (
@@ -683,6 +839,7 @@ function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCance
               <td className="py-3 font-semibold text-slate-500">{formatDateTime(order.updated_at)}</td>
               <td className="py-3 font-semibold text-slate-600">{orderCustomerLabel(order)}</td>
               <td className="py-3 font-black text-slate-950">{money(order.total_amount)}</td>
+              {!hideActions && (
               <td className="py-3 text-right">
                 <button type="button" onClick={(event) => { event.stopPropagation(); onPrint(order); }} className="rounded-md border border-emerald-200 px-3 py-1.5 text-xs font-black text-emerald-700">
                   {adminReviewOnly ? "Consulter" : "Imprimer"}
@@ -691,6 +848,7 @@ function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCance
                   {adminReviewOnly ? "Valider annulation" : "Annuler"}
                 </button>
               </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -881,6 +1039,15 @@ function reportHtml(report, user) {
   const methodRows = Object.entries(report.by_payment_method ?? {}).map(([method, amount]) => `
     <tr><td>${escapeHtml(method)}</td><td style="text-align:right;">${money(amount)}</td></tr>
   `).join("");
+  const discountRows = (report.discount_lines ?? []).map((line) => `
+    <tr>
+      <td>${escapeHtml(line.order_number)}</td>
+      <td>${escapeHtml(line.server_name || "-")}</td>
+      <td>${escapeHtml(line.cashier_name || "-")}</td>
+      <td style="text-align:right; color:#dc2626;">-${money(line.discount_amount)}</td>
+      <td style="text-align:right;">${money(line.total_amount)}</td>
+    </tr>
+  `).join("");
   const receiptRows = (report.receipts ?? []).map((order) => `
     <tr>
       <td>${escapeHtml(order.order_number)}</td>
@@ -911,11 +1078,16 @@ function reportHtml(report, user) {
         <p class="muted">Caissier: ${escapeHtml(user?.first_name || user?.username || "-")} · Généré le ${formatDateTime(new Date().toISOString())}</p>
         <div class="grid">
           <div class="box">Total encaissé<strong>${money(report.total_collected)}</strong></div>
+          <div class="box">Réductions<strong style="color:#dc2626;">-${money(report.total_discounts)}</strong></div>
           <div class="box">Transactions<strong>${Number(report.paid_orders_count || 0).toLocaleString("fr-FR")}</strong></div>
-          <div class="box">Panier moyen<strong>${money(report.average_ticket)}</strong></div>
         </div>
         <h2>Modes de paiement</h2>
         <table><tbody>${methodRows || "<tr><td>Aucun paiement</td><td></td></tr>"}</tbody></table>
+        <h2>Réductions accordées (${Number(report.discounted_orders_count || 0)})</h2>
+        <table>
+          <thead><tr><th>Commande</th><th>Serveur</th><th>Caissier</th><th style="text-align:right;">Réduction</th><th style="text-align:right;">Total payé</th></tr></thead>
+          <tbody>${discountRows || "<tr><td colspan=\"5\">Aucune réduction</td></tr>"}</tbody>
+        </table>
         <h2>Reçus</h2>
         <table>
           <thead><tr><th>Commande</th><th>Client/Table</th><th>Paiement</th><th style="text-align:right;">Montant</th></tr></thead>

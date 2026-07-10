@@ -25,6 +25,9 @@ class UserPublic(OrmModel):
     restaurant_id: Optional[str] = None
     restaurant_slug: Optional[str] = None
     branch_id: Optional[str] = None
+    quartier: Optional[str] = None
+    responsible_id: Optional[str] = None
+    responsible_name: Optional[str] = None
     is_owner: bool
     is_active: bool
     permissions: list[Permission] = Field(default_factory=list)
@@ -43,6 +46,8 @@ class UserCreateIn(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
     role: Role
     branch_id: Optional[str] = None
+    quartier: Optional[str] = Field(default=None, max_length=120)
+    responsible_id: Optional[str] = None
     permissions: list[Permission] = Field(default_factory=list)
 
     @validator("password")
@@ -76,6 +81,8 @@ class UserUpdateIn(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
     role: Optional[Role] = None
     branch_id: Optional[str] = None
+    quartier: Optional[str] = Field(default=None, max_length=120)
+    responsible_id: Optional[str] = None
     permissions: Optional[list[Permission]] = None
 
 

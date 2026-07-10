@@ -29,3 +29,4 @@ class BranchCreateIn(BaseModel):
     city: str = Field(min_length=2, max_length=100, pattern=NAME_PATTERN)
     address: str = Field(min_length=5, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
+    manager_id: Optional[str] = None

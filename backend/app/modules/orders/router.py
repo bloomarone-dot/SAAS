@@ -8,15 +8,17 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
+from app.modules.orders.cashier_analytics import build_cashier_analytics, build_network_analytics
 from app.modules.audit.service import log_action
 from app.modules.catalog.classification import classify_menu_item, requires_kitchen_preparation
 from app.modules.catalog.models import MenuCategory, MenuItem
 from app.modules.branches.models import DeliveryArea
 from app.modules.finance.models import CashRegister, PromotionCode
 from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
+from app.modules.kitchen.router import mark_order_kitchen_tickets_served
 from app.modules.orders.models import CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
-from app.modules.orders.schemas import CashierPaymentIn, CashierReportOut, OrderCashAssignmentIn, OrderDeleteIn, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
+from app.modules.orders.schemas import CashierDeliveryCreateIn, CashierDiscountLine, CashierNetworkReportOut, CashierPaymentIn, CashierReportOut, OrderCashAssignmentIn, OrderDeleteIn, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
 from app.modules.permissions.models import Permission, Role
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockMovement, StockMovementType, StockRecipeIngredient
@@ -103,10 +105,91 @@ def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = D
     return get_order_or_404(db, order.id, restaurant.id)
 
 
+@router.post("/cashier-delivery", response_model=OrderPublic, status_code=status.HTTP_201_CREATED)
+def create_cashier_delivery(
+    payload: CashierDeliveryCreateIn,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_can_update_cashier(current_user)
+    restaurant = db.get(Restaurant, current_user.restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    delivery_area = resolve_delivery_area(db, current_user.restaurant_id, payload.delivery_area_id)
+    if not delivery_area:
+        raise HTTPException(status_code=400, detail="Quartier de livraison invalide")
+
+    quantities = {item.menu_item_id: item.quantity for item in payload.items}
+    dishes = (
+        db.query(MenuItem)
+        .options(selectinload(MenuItem.category))
+        .filter(
+            MenuItem.restaurant_id == current_user.restaurant_id,
+            MenuItem.id.in_(list(quantities.keys())),
+            MenuItem.is_available.is_(True),
+        )
+        .all()
+    )
+    if len(dishes) != len(quantities):
+        raise HTTPException(status_code=400, detail="Un ou plusieurs plats ne sont plus disponibles")
+
+    delivery_fee = float(delivery_area.delivery_fee or restaurant.delivery_fee or 0)
+    order = CustomerOrder(
+        restaurant_id=current_user.restaurant_id,
+        branch_id=current_user.branch_id or delivery_area.branch_id,
+        cashier_id=current_user.id,
+        order_number=make_order_number(restaurant.slug),
+        customer_name=payload.customer_name.strip(),
+        customer_phone=payload.customer_phone.strip(),
+        customer_address=payload.customer_address,
+        notes=payload.notes,
+        fulfillment_type="Livraison",
+        payment_method=payload.payment_method,
+        delivery_area_id=delivery_area.id,
+        delivery_fee=delivery_fee,
+        status="Nouvelle",
+    )
+    for dish in dishes:
+        quantity = quantities[dish.id]
+        line_total = float(dish.price) * quantity
+        order.items.append(
+            CustomerOrderItem(
+                menu_item_id=dish.id,
+                name=dish.name,
+                sale_channel=classify_menu_item(dish),
+                quantity=quantity,
+                unit_price=float(dish.price),
+                line_total=line_total,
+            )
+        )
+        consume_recipe_stock(db, current_user.restaurant_id, dish, quantity)
+    recalculate_order_total(order)
+    db.add(order)
+    assign_order_to_cash_register(db, order, rule="AUTO")
+    log_action(
+        db,
+        current_user,
+        "order.cashier_delivery",
+        "order",
+        order.id,
+        f"Livraison caisse {order.order_number}",
+        {
+            "customer_phone": order.customer_phone,
+            "delivery_area_id": order.delivery_area_id,
+            "payment_method": order.payment_method,
+        },
+    )
+    db.commit()
+    db.refresh(order)
+    return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+
 @router.get("", response_model=list[OrderPublic])
 def list_orders(
     status_filter: str | None = Query(default=None, alias="status"),
     server_id: str | None = Query(default=None),
+    fulfillment_type: str | None = Query(default=None),
     limit: int = Query(default=150, ge=1, le=500),
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
@@ -122,6 +205,8 @@ def list_orders(
         query = query.filter(~CustomerOrder.status.in_(EXCLUDED_ACTIVE_STATUSES))
     if status_filter:
         query = query.filter(CustomerOrder.status == status_filter)
+    if fulfillment_type:
+        query = query.filter(CustomerOrder.fulfillment_type == fulfillment_type)
     if server_id:
         query = query.filter(CustomerOrder.server_id == server_id)
     orders = query.order_by(CustomerOrder.created_at.desc()).limit(limit).all()
@@ -157,11 +242,33 @@ def cashier_report(
         .all()
     )
     total_collected = sum(float(order.total_amount or 0) for order in receipts)
+    discount_lines: list[CashierDiscountLine] = []
+    total_discounts = 0.0
     by_payment_method: dict[str, float] = {}
     for order in receipts:
         method = order.payment_method or "Non renseigné"
         by_payment_method[method] = by_payment_method.get(method, 0) + float(order.total_amount or 0)
+        discount_value = float(order.discount_amount or 0)
+        if discount_value > 0:
+            total_discounts += discount_value
     enrich_orders(db, pending_orders + receipts)
+    for order in receipts:
+        discount_value = float(order.discount_amount or 0)
+        if discount_value <= 0:
+            continue
+        discount_lines.append(
+            CashierDiscountLine(
+                order_id=order.id,
+                order_number=order.order_number,
+                discount_amount=discount_value,
+                total_amount=float(order.total_amount or 0),
+                server_name=getattr(order, "server_name", None),
+                cashier_name=getattr(order, "cashier_name", None),
+                paid_at=order.paid_at or order.updated_at,
+            )
+        )
+    discount_lines.sort(key=lambda line: line.paid_at or datetime.min, reverse=True)
+    analytics = build_cashier_analytics(db, current_user.restaurant_id, receipts, start, end)
     return CashierReportOut(
         start_date=start,
         end_date=end,
@@ -169,10 +276,51 @@ def cashier_report(
         paid_orders_count=len(receipts),
         receipts_count=len(receipts),
         total_collected=total_collected,
+        total_discounts=round(total_discounts, 2),
+        discounted_orders_count=len(discount_lines),
+        discount_lines=discount_lines,
         average_ticket=(total_collected / len(receipts)) if receipts else 0,
         by_payment_method=by_payment_method,
         pending_orders=pending_orders,
         receipts=receipts,
+        analytics=analytics,
+    )
+
+
+@router.get("/cashier-network-report", response_model=CashierNetworkReportOut)
+def cashier_network_report(
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Rapport réseau réservé au super administrateur")
+    start, end = cashier_period(start_date, end_date)
+    restaurants = db.query(Restaurant).filter(Restaurant.is_active.is_(True)).all()
+    restaurant_ids = [restaurant.id for restaurant in restaurants]
+    receipts = (
+        db.query(CustomerOrder)
+        .filter(
+            CustomerOrder.restaurant_id.in_(restaurant_ids),
+            CustomerOrder.deleted_at.is_(None),
+            CustomerOrder.status.in_(PAID_STATUSES),
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start,
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end,
+        )
+        .all()
+        if restaurant_ids
+        else []
+    )
+    total_collected = sum(float(order.total_amount or 0) for order in receipts)
+    analytics = build_network_analytics(db, restaurant_ids, start, end)
+    return CashierNetworkReportOut(
+        start_date=start,
+        end_date=end,
+        total_collected=total_collected,
+        paid_orders_count=len(receipts),
+        average_ticket=(total_collected / len(receipts)) if receipts else 0,
+        analytics=analytics,
     )
 
 
@@ -442,6 +590,8 @@ def update_order_status(
     assert_status_transition_allowed(current_user, order, payload.status)
     previous_status = order.status
     order.status = payload.status
+    if payload.status in {"Livrée", "Livree"}:
+        mark_order_kitchen_tickets_served(db, order.id)
     sync_table_status(db, order)
     if payload.status == "Payée" and previous_status not in PAID_STATUSES:
         order.payment_status = "SUCCESS"
@@ -1041,6 +1191,7 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
         if user_id
     }
     table_ids = {order.table_id for order in orders if order.table_id}
+    area_ids = {order.delivery_area_id for order in orders if order.delivery_area_id}
     users = {
         user.id: user
         for user in db.query(User).filter(User.id.in_(user_ids)).all()
@@ -1049,15 +1200,26 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
         table.id: table
         for table in db.query(TableModel).filter(TableModel.id.in_(table_ids)).all()
     } if table_ids else {}
+    areas = {
+        area.id: area
+        for area in db.query(DeliveryArea).filter(DeliveryArea.id.in_(area_ids)).all()
+    } if area_ids else {}
     for order in orders:
         server = users.get(order.server_id)
         cashier = users.get(order.cashier_id)
         table = tables.get(order.table_id)
-        order.order_source = "Présentiel" if order.table_id or order.fulfillment_type == "Sur place" else "En ligne"
+        area = areas.get(order.delivery_area_id)
+        if order.cashier_id and order.fulfillment_type == "Livraison" and not order.table_id:
+            order.order_source = "Caisse"
+        elif order.table_id or order.fulfillment_type == "Sur place":
+            order.order_source = "Présentiel"
+        else:
+            order.order_source = "En ligne"
         order.server_name = f"{server.first_name} {server.last_name}" if server else None
         order.cashier_name = f"{cashier.first_name} {cashier.last_name}" if cashier else None
         order.table_name = table.number if table else None
         order.table_room = table.room if table else None
+        order.delivery_area_name = area.name if area else None
 
 
 def sync_table_status(db: Session, order: CustomerOrder) -> None:

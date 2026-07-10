@@ -629,6 +629,16 @@ def ensure_user_columns() -> None:
                 text("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
             )
 
+    if "quartier" not in existing:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN quartier VARCHAR(120) NULL"))
+
+    if "responsible_id" not in existing:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN responsible_id VARCHAR(36) NULL"))
+
+    ensure_branch_columns()
+
     if engine.dialect.name != "mysql":
         return
 
@@ -639,6 +649,18 @@ def ensure_user_columns() -> None:
     if email_column and not email_column.get("nullable", True):
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE users MODIFY COLUMN email VARCHAR(191) NULL"))
+
+
+def ensure_branch_columns() -> None:
+    """Ajoute le responsable de branche sans attendre Alembic."""
+    inspector = inspect(engine)
+    if "branches" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("branches")}
+    if "manager_id" not in existing:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE branches ADD COLUMN manager_id VARCHAR(36) NULL"))
 
 
 def ensure_performance_indexes() -> None:
@@ -894,6 +916,7 @@ def seed_demo_restaurant() -> None:
             restaurant = Restaurant(
                 name="Le Bon Coin",
                 slug="main",
+                subdomain="main",
                 logo_url="/logo.jpeg",
                 description="Fast-food et plats frais disponibles en livraison ou a emporter.",
                 address="Avenue principale",
@@ -913,6 +936,9 @@ def seed_demo_restaurant() -> None:
             )
             db.add(restaurant)
             db.flush()
+
+        if not restaurant.subdomain:
+            restaurant.subdomain = restaurant.slug.replace("-", "")[:120] or "main"
 
         branch = (
             db.query(Branch)

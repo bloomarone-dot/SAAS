@@ -186,34 +186,13 @@ export const APP_MENUS = {
   ],
   ADMIN: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    {
-      key: "staff",
-      label: "Utilisateurs",
-      icon: "Users",
-      children: [
-        { key: "staff", label: "Liste utilisateurs", icon: "Users" },
-        { key: "create-user", label: "Création utilisateur", icon: "UserPlus" },
-      ],
-    },
+    { key: "staff", label: "Utilisateurs", icon: "Users" },
     {
       key: "branches",
       label: "Branches",
       icon: "MapPin",
-      children: [
-        { key: "branches", label: "Gestion branches", icon: "MapPin" },
-        { key: "create-branch", label: "Création branche", icon: "Plus" },
-      ],
     },
-    {
-      key: "menu-categories",
-      label: "Catalogue",
-      icon: "UtensilsCrossed",
-      children: [
-        { key: "menu-categories", label: "Catégories", icon: "ClipboardList" },
-        { key: "menu-dishes", label: "Plats / boissons", icon: "UtensilsCrossed" },
-        { key: "availability", label: "Disponibilités", icon: "CheckCircle2" },
-      ],
-    },
+    { key: "menu-catalog", label: "Catalogue", icon: "UtensilsCrossed" },
     {
       key: "orders",
       label: "Commandes",
@@ -227,11 +206,6 @@ export const APP_MENUS = {
       key: "performance",
       label: "Performances",
       icon: "BarChart3",
-      defaultView: "server-performance",
-      children: [
-        { key: "server-performance", label: "Performance serveurs", icon: "Users" },
-        { key: "cashier-performance", label: "Performance caissiers", icon: "CreditCard" },
-      ],
     },
     {
       key: "cashier",
@@ -239,11 +213,7 @@ export const APP_MENUS = {
       icon: "CreditCard",
       children: [
         { key: "cashier", label: "Encaissements", icon: "CreditCard" },
-        { key: "payments", label: "Tous les paiements", icon: "Wallet" },
-        { key: "completed-payments", label: "Paiements effectués", icon: "CheckCircle2" },
-        { key: "receipts", label: "Reçus / factures", icon: "ReceiptText" },
-        { key: "discounts", label: "Codes promo", icon: "BadgePercent" },
-        { key: "expenses", label: "Dépenses", icon: "TrendingDown" },
+        { key: "payments", label: "Paiements", icon: "Wallet" },
       ],
     },
     {
@@ -282,6 +252,7 @@ export const APP_MENUS = {
       label: "Rapports",
       icon: "BarChart3",
       children: [
+        { key: "daily-report", label: "Rapport du jour", icon: "FileText" },
         { key: "reports", label: "Vue rapports", icon: "BarChart3" },
         { key: "sales-report", label: "Rapports ventes", icon: "TrendingUp" },
         { key: "profit-report", label: "Rapports bénéfices", icon: "Wallet" },
@@ -346,16 +317,7 @@ export const APP_MENUS = {
   CUISINE: [{ key: "dashboard", label: "Production cuisine", icon: "ChefHat" }],
   STOCK: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    {
-      key: "menu-categories",
-      label: "Catalogue",
-      icon: "UtensilsCrossed",
-      children: [
-        { key: "menu-categories", label: "Catégories", icon: "ClipboardList" },
-        { key: "menu-dishes", label: "Plats / boissons", icon: "UtensilsCrossed" },
-        { key: "availability", label: "Disponibilités", icon: "CheckCircle2" },
-      ],
-    },
+    { key: "menu-catalog", label: "Catalogue", icon: "UtensilsCrossed" },
     { key: "tables", label: "Tables", icon: "Table2" },
     { key: "depots", label: "Dépôts", icon: "Building2" },
     { key: "products", label: "Produits", icon: "Box" },
@@ -397,56 +359,8 @@ export const APP_MENUS = {
   ],
   CAISSE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
-    {
-      key: "payments",
-      label: "Tous les paiements",
-      icon: "Wallet",
-      children: [
-        { key: "payments", label: "Tous les paiements", icon: "Wallet" },
-        { key: "completed-payments", label: "Paiements effectués", icon: "CheckCircle2" },
-        {
-          key: "unpaid-orders",
-          label: "Commandes non payées",
-          icon: "ClipboardList",
-        },
-        {
-          key: "cash-order-detail",
-          label: "Commande à encaisser",
-          icon: "Eye",
-        },
-        { key: "discounts", label: "Remise autorisée", icon: "TrendingDown" },
-        { key: "payment-method", label: "Mode paiement", icon: "CreditCard" },
-        { key: "cash", label: "Espèces", icon: "Wallet" },
-        { key: "mobile", label: "Mobile Money", icon: "Phone" },
-        { key: "card", label: "Carte", icon: "CreditCard" },
-        {
-          key: "payment-validation",
-          label: "Validation paiement",
-          icon: "CheckCircle2",
-        },
-      ],
-    },
-    {
-      key: "receipts",
-      label: "Tickets",
-      icon: "ReceiptText",
-      children: [
-        { key: "print-receipt", label: "Impression reçu", icon: "ReceiptText" },
-        { key: "receipts", label: "Derniers reçus", icon: "History" },
-        { key: "cancel-payment", label: "Annuler paiement", icon: "Trash2" },
-      ],
-    },
-    {
-      key: "closing",
-      label: "Clôture",
-      icon: "Clock3",
-      children: [
-        { key: "cash-closing", label: "Clôture caisse", icon: "Clock3" },
-        { key: "cash-report", label: "Rapport caisse", icon: "BarChart3" },
-        { key: "payment-totals", label: "Totaux paiement", icon: "Wallet" },
-        { key: "payment-history", label: "Historique", icon: "History" },
-      ],
-    },
+    { key: "deliveries", label: "Livraisons", icon: "Truck" },
+    { key: "payments", label: "Paiements", icon: "Wallet" },
   ],
 };
 

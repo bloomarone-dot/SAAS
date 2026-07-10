@@ -12,6 +12,7 @@ class BranchUpdateIn(BaseModel):
     city: Optional[str] = Field(default=None, min_length=2, max_length=100, pattern=NAME_PATTERN)
     address: Optional[str] = Field(default=None, min_length=5, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
+    manager_id: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -24,6 +25,7 @@ class BranchDetailPublic(OrmModel):
     phone: Optional[str] = None
     is_active: bool
     created_at: datetime
+    manager_id: Optional[str] = None
     manager_name: Optional[str] = None
     users_count: int = 0
     cash_registers_count: int = 0
