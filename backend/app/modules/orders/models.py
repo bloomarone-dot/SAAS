@@ -18,6 +18,7 @@ class CustomerOrder(Base):
     table_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("restaurant_tables.id"), index=True, nullable=True)
     server_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
     cashier_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
+    created_by_cashier_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
     cash_register_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("cash_registers.id"), index=True, nullable=True)
     assigned_cashier_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=True)
     assignment_status: Mapped[str] = mapped_column(String(30), default="UNASSIGNED", nullable=False, index=True)

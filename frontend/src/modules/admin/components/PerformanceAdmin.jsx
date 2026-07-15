@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { apiFetch } from "@/config/http";
+import { PERIOD_OPTIONS } from "@/utils/greeting";
 import { AdminFormModal, PageHeader, StatusPill } from "@/modules/admin/components/AdminUi";
 
 function money(value) {
@@ -48,7 +48,7 @@ export function PerformanceAdmin({ initialTab = "server", onMessage }) {
     let mounted = true;
     setLoading(true);
     setSelectedRow(null);
-    apiFetch(`/api/v1/dashboard/${isCashier ? "cashier" : "server"}-performance?period=${period}`, {
+    apiFetch(`/api/v1/dashboard/${isCashier ? "cashier" : "server"}-performance?period=${period === "all" ? "year" : period}`, {
       fallback: "Impossible de charger les performances.",
     })
       .then((payload) => {
@@ -109,9 +109,10 @@ export function PerformanceAdmin({ initialTab = "server", onMessage }) {
             </button>
           ))}
         </div>
-        <select value={period} onChange={(event) => setPeriod(event.target.value)} className="form-control ml-auto h-10 w-40">
-          <option value="week">Semaine</option>
-          <option value="month">Mois</option>
+        <select value={period} onChange={(event) => setPeriod(event.target.value)} className="form-control ml-auto h-10 w-48">
+          {PERIOD_OPTIONS.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
         </select>
       </div>
 

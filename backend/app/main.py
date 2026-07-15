@@ -293,6 +293,7 @@ def ensure_order_columns() -> None:
         "table_id": "INTEGER NULL",
         "server_id": "VARCHAR(36) NULL",
         "cashier_id": "VARCHAR(36) NULL",
+        "created_by_cashier_id": "VARCHAR(36) NULL",
         "party_size": "INTEGER NOT NULL DEFAULT 1",
         "payment_status": "VARCHAR(40) NOT NULL DEFAULT 'En attente'",
         "transaction_id": "VARCHAR(100) NULL",

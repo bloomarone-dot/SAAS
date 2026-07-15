@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { DeliveryCashierPanel } from "@/modules/orders/components/DeliveryCashierPanel";
+import { DeliveryAdminPanel } from "@/modules/orders/components/DeliveryAdminPanel";
 import { apiFetch } from "@/config/http";
 
 function money(value) {
@@ -84,17 +84,13 @@ export function DeliveryDispatchAdmin({ currentUser, onMessage }) {
     <div className="space-y-6">
       <div>
         <p className="text-xs font-black uppercase text-[var(--dashboard-primary)]">Livraisons</p>
-        <h1 className="mt-1 text-3xl font-black text-[#070528]">Suivi et création des livraisons</h1>
+        <h1 className="mt-1 text-3xl font-black text-[#070528]">Suivi des livraisons</h1>
         <p className="mt-2 max-w-3xl text-sm font-semibold text-slate-600">
-          Les livraisons créées par la caisse apparaissent ici en temps réel. Vous pouvez aussi enregistrer une nouvelle livraison avec sélection des plats.
+          Consultez l'état des livraisons, la performance des caissières et l'historique des factures. Le mode de paiement est géré uniquement par la caisse.
         </p>
       </div>
 
-      <DeliveryCashierPanel
-        restaurantId={currentUser?.restaurant_id}
-        currentUser={currentUser}
-        onMessage={onMessage}
-      />
+      <DeliveryAdminPanel onMessage={onMessage} />
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">

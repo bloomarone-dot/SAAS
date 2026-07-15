@@ -11,9 +11,11 @@ const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Arch
 const KITCHEN_SEND_STATUSES = new Set(["Nouvelle", "Acceptée", "Acceptee", "En préparation", "En preparation"]);
 
 const PAYMENT_OPTIONS = [
+  "Paiement avant livraison",
+  "Paiement pendant la livraison",
+  "Paiement à la livraison",
   "Dépôt Orange Money",
   "Dépôt MTN Mobile Money",
-  "Paiement à la livraison",
   "Espèces",
 ];
 
@@ -274,6 +276,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
         </div>
         <div className="mt-3 space-y-1 text-xs font-semibold text-slate-600">
           <p><DashboardIcon name="MapPin" size={12} className="mr-1 inline" />{order.delivery_area_name || "Quartier non renseigné"}</p>
+          <p><DashboardIcon name="User" size={12} className="mr-1 inline" />Caissier(ère) : {order.created_by_cashier_name || order.cashier_name || "Non renseigné"}</p>
           <p><DashboardIcon name="Phone" size={12} className="mr-1 inline" />{order.payment_method}</p>
           <p className="line-clamp-2">{itemsLabel}</p>
           <p>{money(order.total_amount)} · {formatDateTime(order.created_at)}</p>

@@ -139,6 +139,7 @@ def create_cashier_delivery(
         restaurant_id=current_user.restaurant_id,
         branch_id=current_user.branch_id or delivery_area.branch_id,
         cashier_id=current_user.id,
+        created_by_cashier_id=current_user.id,
         order_number=make_order_number(restaurant.slug),
         customer_name=payload.customer_name.strip(),
         customer_phone=payload.customer_phone.strip(),
@@ -1187,7 +1188,7 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
     user_ids = {
         user_id
         for order in orders
-        for user_id in (order.server_id, order.cashier_id)
+        for user_id in (order.server_id, order.cashier_id, order.created_by_cashier_id)
         if user_id
     }
     table_ids = {order.table_id for order in orders if order.table_id}
@@ -1207,6 +1208,7 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
     for order in orders:
         server = users.get(order.server_id)
         cashier = users.get(order.cashier_id)
+        created_by = users.get(order.created_by_cashier_id or order.cashier_id)
         table = tables.get(order.table_id)
         area = areas.get(order.delivery_area_id)
         if order.cashier_id and order.fulfillment_type == "Livraison" and not order.table_id:
@@ -1217,6 +1219,7 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
             order.order_source = "En ligne"
         order.server_name = f"{server.first_name} {server.last_name}" if server else None
         order.cashier_name = f"{cashier.first_name} {cashier.last_name}" if cashier else None
+        order.created_by_cashier_name = f"{created_by.first_name} {created_by.last_name}" if created_by else None
         order.table_name = table.number if table else None
         order.table_room = table.room if table else None
         order.delivery_area_name = area.name if area else None

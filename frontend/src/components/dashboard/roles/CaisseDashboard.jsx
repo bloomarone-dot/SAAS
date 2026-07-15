@@ -13,6 +13,8 @@ import { apiFetch } from "@/config/http";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
+import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFilterBar";
+import { InvoiceHistoryPanel } from "@/modules/orders/components/InvoiceHistoryPanel";
 
 const paymentMethods = [
   { label: "Espèces", icon: "Wallet" },
@@ -111,6 +113,8 @@ export function CaisseDashboard({ overrides = {} }) {
   const [activeTab, setActiveTab] = useState(resolveCashierTab(activeView));
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [reportPeriod, setReportPeriod] = useState("today");
+  const [reportCustomPeriod, setReportCustomPeriod] = useState({ start: "", end: "" });
 
   useEffect(() => {
     setActiveTab(resolveCashierTab(activeView));
@@ -120,7 +124,7 @@ export function CaisseDashboard({ overrides = {} }) {
     loadCashierReport();
     loadRestaurant();
     loadPaymentRequests();
-  }, []);
+  }, [reportPeriod, reportCustomPeriod]);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -144,7 +148,7 @@ export function CaisseDashboard({ overrides = {} }) {
     if (methodByView[activeView]) setPaymentMethod(methodByView[activeView]);
   }, [activeView]);
 
-  useAutoRefresh(() => loadCashierReport({ silent: true }), 10000, []);
+  useAutoRefresh(() => loadCashierReport({ silent: true }), 10000, [reportPeriod, reportCustomPeriod]);
 
   async function loadCashierReport({ silent = false } = {}) {
     if (!silent) {
@@ -152,7 +156,7 @@ export function CaisseDashboard({ overrides = {} }) {
       setMessage("");
     }
     try {
-      const data = await orderApi.cashierReport();
+      const data = await orderApi.cashierReport(periodToApiDates(reportPeriod, reportCustomPeriod));
       setReport(data);
       setSelectedOrderId((current) => current || data.pending_orders?.[0]?.id || "");
       setSelectedReceiptId((current) => current || data.receipts?.[0]?.id || "");
@@ -457,17 +461,21 @@ export function CaisseDashboard({ overrides = {} }) {
       )}
 
       {activeTab === "receipts" && (
-        <DashboardSection title="Paiements encaissés" action={<SmallMeta>{receipts.length} reçu(s)</SmallMeta>}>
-          <ReceiptsTable
-            receipts={receipts}
-            selectedReceiptId={selectedReceipt?.id}
-            onSelect={(order) => setSelectedReceiptId(order.id)}
-            onPrint={printReceipt}
-            onCancel={cancelPayment}
-            isLoading={isLoading}
+        <>
+          <FilterBar className="mb-4">
+            <PeriodFilterBar
+              period={reportPeriod}
+              onPeriodChange={setReportPeriod}
+              customPeriod={reportCustomPeriod}
+              onCustomPeriodChange={setReportCustomPeriod}
+            />
+          </FilterBar>
+          <InvoiceHistoryPanel
+            allowRefund={!adminReviewOnly}
             adminReviewOnly={adminReviewOnly}
+            onMessage={setMessage}
           />
-        </DashboardSection>
+        </>
       )}
 
       {activeTab === "closing" && (

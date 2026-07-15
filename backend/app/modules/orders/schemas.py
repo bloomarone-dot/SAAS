@@ -97,6 +97,7 @@ class OrderPublic(OrmModel):
     table_id: Optional[int] = None
     server_id: Optional[str] = None
     cashier_id: Optional[str] = None
+    created_by_cashier_id: Optional[str] = None
     cash_register_id: Optional[str] = None
     assigned_cashier_id: Optional[str] = None
     assignment_status: str = "UNASSIGNED"
@@ -114,6 +115,7 @@ class OrderPublic(OrmModel):
     order_source: Optional[str] = None
     server_name: Optional[str] = None
     cashier_name: Optional[str] = None
+    created_by_cashier_name: Optional[str] = None
     table_name: Optional[str] = None
     table_room: Optional[str] = None
     payment_method: str

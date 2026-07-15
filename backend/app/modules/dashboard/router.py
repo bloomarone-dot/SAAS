@@ -430,7 +430,7 @@ def daily_report(
 
 @router.get("/server-performance")
 def server_performance(
-    period: str = Query(default="week", pattern="^(week|month)$"),
+    period: str = Query(default="week", pattern="^(today|yesterday|week|month|year)$"),
     server_id: str | None = Query(default=None),
     branch_id: str | None = Query(default=None),
     current_user: User = Depends(require_tenant_user),
@@ -454,7 +454,7 @@ def server_performance(
 
 @router.get("/cashier-performance")
 def cashier_performance(
-    period: str = Query(default="week", pattern="^(week|month)$"),
+    period: str = Query(default="week", pattern="^(today|yesterday|week|month|year)$"),
     cashier_id: str | None = Query(default=None),
     branch_id: str | None = Query(default=None),
     current_user: User = Depends(require_tenant_user),
@@ -490,8 +490,15 @@ def dashboard_period(start_date: datetime | None, end_date: datetime | None) -> 
 
 def performance_period(period: str) -> tuple[datetime, datetime]:
     now = utcnow()
-    if period == "month":
+    if period == "today":
+        start = datetime.combine(now.date(), datetime.min.time())
+    elif period == "yesterday":
+        day = now.date() - timedelta(days=1)
+        return datetime.combine(day, datetime.min.time()), datetime.combine(day, datetime.max.time())
+    elif period == "month":
         start = datetime(now.year, now.month, 1)
+    elif period == "year":
+        start = datetime(now.year, 1, 1)
     else:
         start_day = now.date() - timedelta(days=now.weekday())
         start = datetime.combine(start_day, datetime.min.time())
