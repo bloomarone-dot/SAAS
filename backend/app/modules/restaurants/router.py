@@ -10,6 +10,7 @@ from app.dependencies import assert_permission, get_current_user, require_tenant
 from app.modules.branches.models import Branch
 from app.modules.restaurants.models import Restaurant
 from app.modules.restaurants.schemas import (
+    RestaurantBrandingPublic,
     RestaurantCommissionIn,
     RestaurantDetailPublic,
     RestaurantProvisionIn,
@@ -304,6 +305,18 @@ def get_public_restaurant(slug: str, db: Session = Depends(get_db)):
         "description": restaurant.description,
         "is_active": restaurant.is_active,
     }
+
+
+@router.get("/me/branding", response_model=RestaurantBrandingPublic)
+def get_my_restaurant_branding(
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Retourne l'identite visuelle du restaurant pour tout utilisateur tenant."""
+    restaurant = db.get(Restaurant, current_user.restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+    return restaurant
 
 
 @router.get("/me", response_model=RestaurantPublic)

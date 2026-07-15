@@ -293,7 +293,7 @@ function FormMock({ role, view, meta }) {
             <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-emerald-50 text-[var(--dashboard-primary)]">
               <DashboardIcon name="Store" size={24} />
             </div>
-            <p className="mt-4 text-xl font-black text-slate-950">Le Bon Coin</p>
+            <p className="mt-4 text-xl font-black text-slate-950">{overrides?.theme?.name ?? "Restaurant"}</p>
             <p className="mt-2 text-sm font-medium text-slate-500">Les données saisies seront envoyées au module métier correspondant lorsqu’une action dédiée est disponible.</p>
           </div>
         </DashboardSection>

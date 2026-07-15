@@ -2,8 +2,8 @@ import { DashboardIcon } from "@/components/dashboard/icons";
 import { validationFor } from "@/utils/validation";
 
 const restaurantFields = [
-  ["name", "Nom du restaurant", "text", "Le Bon Coin"],
-  ["subdomain", "Sous-domaine", "text", "leboncoin"],
+  ["name", "Nom du restaurant", "text", "Mon Restaurant"],
+  ["subdomain", "Sous-domaine", "text", "mon-restaurant"],
   ["logo_url", "URL du logo", "url", "https://..."],
   ["cover_image_url", "Image de couverture", "url", "https://..."],
 ];

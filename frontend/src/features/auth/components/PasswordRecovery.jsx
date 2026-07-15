@@ -3,8 +3,6 @@ import { useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { formatApiError } from "@/utils/network";
 
-const logoImage = "/logo.jpeg";
-
 async function postJson(apiBaseUrl, path, body) {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
@@ -23,7 +21,9 @@ function Shell({ title, subtitle, children }) {
     <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <img src={logoImage} alt="Logo" className="mx-auto mb-5 h-16 w-16 rounded-lg object-cover shadow-sm ring-1 ring-emerald-100" />
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm">
+            <DashboardIcon name="Store" size={28} />
+          </div>
           <h2 className="mb-2 text-3xl font-black text-[#003f2f]">{title}</h2>
           <p className="text-sm leading-relaxed text-slate-500">{subtitle}</p>
         </div>

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, validator
 
+from app.modules.restaurants.schemas import RestaurantBrandingPublic
 from app.modules.users.schemas import UserPublic
 from app.security import validate_password_strength
 
@@ -17,6 +18,7 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserPublic
+    restaurant_branding: RestaurantBrandingPublic | None = None
 
 
 class ForgotPasswordIn(BaseModel):

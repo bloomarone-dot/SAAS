@@ -25,19 +25,19 @@ export function DashboardLayout({
   const roleMeta = getRoleMeta(role);
   const hideSidebar = role === "SERVEUR" || role === "CUISINE" || role === "COMPTABLE";
   const isSuperadmin = role === "SUPERADMIN";
-  const primary = isSuperadmin ? "#a855f7" : "#FF6347";
+  const primary = isSuperadmin ? "#a855f7" : (theme?.primary ?? "#078d50");
   const secondary =
     isSuperadmin ? "#020617" : (theme?.secondary ?? "#003f2f");
-  const accent = isSuperadmin ? "#06b6d4" : primary;
+  const accent = isSuperadmin ? "#06b6d4" : (theme?.accent ?? primary);
   const sidebarBackground = isSuperadmin ? "#1e293b" : "#ffffff";
   const sidebarText = isSuperadmin ? "#ffffff" : "#334155";
   const sidebarMutedText = isSuperadmin ? "rgba(255,255,255,0.62)" : "#94a3b8";
   const sidebarBorder = isSuperadmin ? "rgba(255,255,255,0.12)" : "#e2e8f0";
   const displayName =
-    isSuperadmin ? "Bl∞marone" : (theme?.name ?? "Le Bon Coin");
-  const sidebarLogo = isSuperadmin ? "/logoB.png" : "/logo.jpeg";
+    isSuperadmin ? "Bl∞marone" : (theme?.name ?? "Restaurant");
+  const sidebarLogoUrl = isSuperadmin ? "/logoB.png" : (theme?.logoUrl ?? "");
   const sidebarLogoAlt =
-    isSuperadmin ? "Logo plateforme" : "Logo restaurant";
+    isSuperadmin ? "Logo plateforme" : `Logo ${displayName}`;
   const unreadCount = notifications.filter((item) => !item.is_read).length;
   const { isFullscreen, toggleFullscreen } = useFullscreen();
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
@@ -157,9 +157,9 @@ export function DashboardLayout({
                       boxShadow: `inset 4px 0 0 ${primary}`,
                     }
                   : {
-                      backgroundColor: "rgba(255,99,71,0.1)",
-                      color: "#FF6347",
-                      boxShadow: "inset 4px 0 0 #FF6347",
+                      backgroundColor: `color-mix(in srgb, ${primary} 12%, transparent)`,
+                      color: primary,
+                      boxShadow: `inset 4px 0 0 ${primary}`,
                     }
                 : undefined
             }
@@ -204,8 +204,8 @@ export function DashboardLayout({
                               color: "white",
                             }
                           : {
-                              backgroundColor: "rgba(255,99,71,0.08)",
-                              color: "#FF6347",
+                              backgroundColor: `color-mix(in srgb, ${primary} 8%, transparent)`,
+                              color: primary,
                             }
                         : undefined
                     }
@@ -245,15 +245,27 @@ export function DashboardLayout({
           className={`flex h-16 items-center gap-3 border-b px-3 ${isCollapsed ? "justify-center" : ""}`}
           style={{ borderColor: sidebarBorder }}
         >
-          <img
-            src={sidebarLogo}
-            alt={sidebarLogoAlt}
-            className={`h-9 w-9 shrink-0 rounded object-cover ${
-              isSuperadmin
-                ? "border-2 border-white/30 bg-white"
-                : "border border-slate-200 bg-white shadow-sm"
-            }`}
-          />
+          {sidebarLogoUrl ? (
+            <img
+              src={sidebarLogoUrl}
+              alt={sidebarLogoAlt}
+              className={`h-9 w-9 shrink-0 rounded object-cover ${
+                isSuperadmin
+                  ? "border-2 border-white/30 bg-white"
+                  : "border border-slate-200 bg-white shadow-sm"
+              }`}
+            />
+          ) : (
+            <div
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded ${
+                isSuperadmin
+                  ? "border-2 border-white/30 bg-white text-slate-700"
+                  : "border border-slate-200 bg-slate-50 text-[var(--dashboard-primary)] shadow-sm"
+              }`}
+            >
+              <DashboardIcon name="Store" size={18} />
+            </div>
+          )}
           <div className={isCollapsed ? "hidden" : ""}>
             <h1
               className="text-base font-bold leading-tight"
@@ -367,15 +379,27 @@ export function DashboardLayout({
           >
             <div className="mb-7 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <img
-                  src={sidebarLogo}
-                  alt={sidebarLogoAlt}
-                  className={`h-11 w-11 rounded-full object-cover ${
-                    isSuperadmin
-                      ? "border-2 border-white/30 bg-white"
-                      : "border border-slate-200 bg-white shadow-sm"
-                  }`}
-                />
+                {sidebarLogoUrl ? (
+                  <img
+                    src={sidebarLogoUrl}
+                    alt={sidebarLogoAlt}
+                    className={`h-11 w-11 rounded-full object-cover ${
+                      isSuperadmin
+                        ? "border-2 border-white/30 bg-white"
+                        : "border border-slate-200 bg-white shadow-sm"
+                    }`}
+                  />
+                ) : (
+                  <div
+                    className={`flex h-11 w-11 items-center justify-center rounded-full ${
+                      isSuperadmin
+                        ? "border-2 border-white/30 bg-white text-slate-700"
+                        : "border border-slate-200 bg-slate-50 text-[var(--dashboard-primary)] shadow-sm"
+                    }`}
+                  >
+                    <DashboardIcon name="Store" size={20} />
+                  </div>
+                )}
                 <div>
                   <h1
                     className="text-base font-black leading-tight"
@@ -516,7 +540,7 @@ export function DashboardLayout({
               </span>
               {role === "SUPERADMIN"
                 ? "Plateforme SaaS"
-                : (theme?.name ?? "Restaurant Central")}
+                : (theme?.name ?? "Restaurant")}
             </button>
             <button
               type="button"

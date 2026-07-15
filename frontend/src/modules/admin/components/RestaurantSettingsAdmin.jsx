@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { PageHeader } from "@/modules/admin/components/AdminUi";
 import { formatApiError } from "@/utils/network";
+import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { validationFor } from "@/utils/validation";
 
 const emptySettings = {
@@ -105,11 +106,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         currency: data.currency ?? "XAF",
         timezone: data.timezone ?? "Africa/Douala",
       });
-      onThemeChange?.({
-        name: data.name,
-        primary: data.primary_color ?? "#E4572E",
-        secondary: data.secondary_color ?? "#1F2937",
-      });
+      onThemeChange?.(buildRestaurantTheme(data));
       loadDeliveryAreas();
     } catch (error) {
       onMessage(error.message);
@@ -216,11 +213,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
       });
       setRestaurant(updated);
       setIsEditing(false);
-      onThemeChange?.({
-        name: updated.name,
-        primary: updated.primary_color ?? "#E4572E",
-        secondary: updated.secondary_color ?? "#1F2937",
-      });
+      onThemeChange?.(buildRestaurantTheme(updated));
       onMessage("Informations du restaurant mises à jour.");
     } catch (error) {
       onMessage(error.message);
@@ -248,6 +241,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
       if (!response.ok) throw new Error(formatApiError(data.detail, "Import du logo impossible."));
       setRestaurant(data);
       setForm((current) => ({ ...current, logo_url: data.logo_url ?? "" }));
+      onThemeChange?.(buildRestaurantTheme(data));
       onMessage("Logo du restaurant importé.");
     } catch (error) {
       onMessage(error.message);

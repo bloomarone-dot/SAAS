@@ -57,6 +57,18 @@ class RestaurantPublic(OrmModel):
     created_at: datetime
 
 
+class RestaurantBrandingPublic(OrmModel):
+    """Identite visuelle du restaurant, accessible a tout utilisateur tenant."""
+
+    id: str
+    name: str
+    slug: str
+    logo_url: Optional[str] = None
+    primary_color: str
+    secondary_color: str
+    accent_color: str = "#F59E0B"
+
+
 class RestaurantProvisionIn(BaseModel):
     """Donnees necessaires pour creer un restaurant et son proprietaire."""
 

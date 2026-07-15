@@ -12,6 +12,7 @@ from app.modules.audit.service import log_action
 from app.modules.auth.schemas import ChangePasswordIn, ForgotPasswordIn, ForgotPasswordOut, LoginIn, ResetPasswordIn, TokenOut
 from app.modules.permissions.models import Role
 from app.modules.restaurants.models import Restaurant
+from app.modules.restaurants.schemas import RestaurantBrandingPublic
 from app.modules.users.models import User
 from app.modules.users.schemas import UserPublic
 from app.security import (
@@ -134,7 +135,19 @@ def restaurant_login(slug: str, payload: LoginIn, request: Request, db: Session 
     log_action(db, user, "auth.login", "user", user.id, f"Connexion {user.username} ({restaurant.slug})")
     db.commit()
     token = create_access_token(user.id, getattr(user, "token_version", 0) or 0)
-    return TokenOut(access_token=token, user=user)
+    return TokenOut(
+        access_token=token,
+        user=user,
+        restaurant_branding=RestaurantBrandingPublic(
+            id=restaurant.id,
+            name=restaurant.name,
+            slug=restaurant.slug,
+            logo_url=restaurant.logo_url,
+            primary_color=restaurant.primary_color,
+            secondary_color=restaurant.secondary_color,
+            accent_color=restaurant.accent_color or "#F59E0B",
+        ),
+    )
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordOut)

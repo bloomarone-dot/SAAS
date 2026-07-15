@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChefHat, Clock, CreditCard, Eye, EyeOff, LogIn, MapPin, MessageCircle, Minus, Phone, Plus, Search, ShieldCheck, ShoppingCart, Sparkles, Star, Store, Trash2, Truck, Utensils } from "lucide-react";
 import { TenantThemeProvider } from "@/tenancy/TenantProvider";
 import { initAos } from "@/utils/aos";
+import { normalizePublicRestaurant } from "@/utils/restaurantTheme";
 
 function navigate(path) {
   window.history.pushState({}, "", path);
@@ -29,7 +30,7 @@ function money(value, currency = "FCFA") {
   return `${Number(value || 0).toLocaleString("fr-FR")} ${currency}`;
 }
 
-function LoginCard({ icon, title, subtitle, accent, buttonLabel, onSubmit, footer }) {
+function LoginCard({ icon, title, subtitle, accent, buttonLabel, onSubmit, footer, brandLogoUrl, brandName }) {
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -53,9 +54,17 @@ function LoginCard({ icon, title, subtitle, accent, buttonLabel, onSubmit, foote
     <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-sm" style={{ background: accent }}>
-            {icon}
-          </div>
+          {brandLogoUrl ? (
+            <img
+              src={brandLogoUrl}
+              alt={brandName ? `Logo ${brandName}` : "Logo restaurant"}
+              className="mx-auto mb-4 h-16 w-16 rounded-lg object-cover shadow-sm ring-1 ring-slate-200"
+            />
+          ) : (
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg text-white shadow-sm" style={{ background: accent }}>
+              {icon}
+            </div>
+          )}
           <h2 className="text-2xl font-black text-slate-900">{title}</h2>
           <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
         </div>
@@ -215,7 +224,7 @@ export function RestaurantLoginPage({ apiBaseUrl, slug, onAuthenticated }) {
     setRestaurant(undefined);
     fetch(`${apiBaseUrl}/api/v1/restaurants/public/${encodeURIComponent(slug)}`)
       .then((response) => (response.ok ? response.json() : null))
-      .then((data) => setRestaurant(data))
+      .then((data) => setRestaurant(data ? normalizePublicRestaurant(data) : null))
       .catch(() => setRestaurant(null));
   }, [apiBaseUrl, slug]);
 
@@ -238,7 +247,9 @@ export function RestaurantLoginPage({ apiBaseUrl, slug, onAuthenticated }) {
   return (
     <TenantThemeProvider restaurant={restaurant}>
     <LoginCard
-      icon={restaurant?.logo_url ? <img src={restaurant.logo_url} alt="" className="h-12 w-12 rounded-lg object-cover" /> : <Store size={28} />}
+      brandLogoUrl={restaurant?.logo_url || ""}
+      brandName={restaurant?.name}
+      icon={<Store size={28} />}
       title={restaurant?.name || "Connexion restaurant"}
       subtitle="Connectez-vous à votre espace"
       accent="var(--tenant-primary)"
@@ -268,7 +279,16 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
         if (!response.ok) throw new Error(data?.detail || "Restaurant introuvable");
         return data;
       })
-      .then(setTenant)
+      .then((data) => {
+        if (!data?.restaurant) {
+          setTenant(data);
+          return;
+        }
+        setTenant({
+          ...data,
+          restaurant: normalizePublicRestaurant(data.restaurant),
+        });
+      })
       .catch(() => setTenant(null));
   }, [apiBaseUrl]);
 
@@ -307,7 +327,9 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
 }
 
 export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, loginPath, initialSection = null }) {
-  const [restaurant, setRestaurant] = useState(initialData?.restaurant ?? undefined); // undefined=loading, null=not found
+  const [restaurant, setRestaurant] = useState(
+    initialData?.restaurant ? normalizePublicRestaurant(initialData.restaurant) : undefined,
+  ); // undefined=loading, null=not found
   const [categories, setCategories] = useState(initialData?.categories || []);
   const [dishes, setDishes] = useState(initialData?.dishes || []);
   const [activeCategory, setActiveCategory] = useState("all");
@@ -343,7 +365,7 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
 
   useEffect(() => {
     if (initialData?.restaurant) {
-      setRestaurant(initialData.restaurant);
+      setRestaurant(normalizePublicRestaurant(initialData.restaurant));
       setCategories(initialData.categories || []);
       setDishes(initialData.dishes || []);
       return;
@@ -355,7 +377,7 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
           setRestaurant(null);
           return;
         }
-        setRestaurant(data.restaurant);
+        setRestaurant(normalizePublicRestaurant(data.restaurant));
         setCategories(data.categories || []);
         setDishes(data.dishes || []);
       })

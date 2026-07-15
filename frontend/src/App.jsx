@@ -53,6 +53,7 @@ const AccountingOperations = lazyNamed(
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
+import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { getApiBaseUrl } from "@/config/api";
 import { apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/config/http";
 import { getPublicHostKind, shouldResolveTenantFromHost } from "@/tenancy/tenantResolver";
@@ -284,14 +285,10 @@ export default function App() {
 
   async function fetchRestaurantTheme() {
     try {
-      const restaurant = await apiFetch("/api/v1/restaurants/me", {
+      const restaurant = await apiFetch("/api/v1/restaurants/me/branding", {
         fallback: "Impossible de charger le thème du restaurant.",
       });
-      setRestaurantTheme({
-        name: restaurant.name,
-        primary: restaurant.primary_color || "#078d50",
-        secondary: restaurant.secondary_color || "#003f2f",
-      });
+      setRestaurantTheme(buildRestaurantTheme(restaurant));
     } catch {
       // Theme loading should never block dashboard usage.
     }
@@ -323,7 +320,11 @@ export default function App() {
     pushAppRoute(data.user, "dashboard", true);
     if (data.user.role === "SUPERADMIN") fetchRestaurants();
     if (data.user.role === "ADMIN") fetchAdminSummary();
-    if (data.user.restaurant_id) fetchRestaurantTheme();
+    if (data.restaurant_branding) {
+      setRestaurantTheme(buildRestaurantTheme(data.restaurant_branding));
+    } else if (data.user.restaurant_id) {
+      fetchRestaurantTheme();
+    }
   }
 
   function isSessionAllowedOnCurrentHost(user) {
@@ -495,8 +496,9 @@ export default function App() {
             __summary: adminSummary,
             __apiBaseUrl: apiBaseUrl,
             __currentUser: session,
+            theme: restaurantTheme,
           }
-      : { __apiBaseUrl: apiBaseUrl, __currentUser: session };
+      : { __apiBaseUrl: apiBaseUrl, __currentUser: session, theme: restaurantTheme };
 
   return (
     <DashboardLayout
@@ -714,6 +716,7 @@ export default function App() {
             apiBaseUrl={apiBaseUrl}
             currentUser={session}
             onMessage={setMessage}
+            onThemeChange={setRestaurantTheme}
           />
         );
       }
