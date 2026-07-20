@@ -34,6 +34,7 @@ from app.modules.restaurants.models import Restaurant
 from app.modules.stock import router as stock
 from app.modules.users.models import User
 from app.modules.users import router as users
+from app.config_validation import validate_production_environment
 from app.security import hash_password
 from app.modules.kitchen.router import router as kitchen_router
 from app.modules.payments import router as payments
@@ -44,6 +45,7 @@ from app.modules.platform.service import subscription_enforcement_loop
 # Point d'entree FastAPI: assemble le middleware CORS, la creation de tables
 # en developpement et les routeurs versionnes de l'API.
 IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() in {"production", "prod"}
+validate_production_environment()
 
 # Logging structuré et configurable (LOG_LEVEL=INFO par défaut).
 logging.basicConfig(

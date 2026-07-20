@@ -2,15 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   PageContainer,
-  PageHeader,
   SecondaryAction,
 } from "@/modules/admin/components/AdminUi";
-import { formatApiError } from "@/utils/network";
+import { apiFetch, apiFetchText } from "@/config/http";
 
 import { today } from "./shared/format";
-import { tabs, resolveAccountingTab } from "./shared/constants";
+import { resolveAccountingTab } from "./shared/constants";
 import { exportExcel } from "./shared/exports";
+import { AccountingModuleShell } from "./shared/AccountingModuleShell";
+import { getAccountingModuleMeta } from "./shared/moduleCatalog";
 import { Dashboard } from "./Dashboard/Dashboard";
+import { ExpenseAnalytics } from "./Dashboard/ExpenseAnalytics";
 import { Accounts } from "./Compte/Accounts";
 import { Journals } from "./Journal/Journals";
 import { Entries } from "./Ecriture/Entries";
@@ -20,9 +22,25 @@ import { Statements } from "./Etats/Statements";
 import { FoodCost } from "./FoodCost/FoodCost";
 import { Echeancier } from "./Echeancier/Echeancier";
 import { Rapprochement } from "./Rapprochement/Rapprochement";
+import { CashOverview } from "./Cash/CashOverview";
 import { SimpleRows } from "./shared/ui";
 
-export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }) {
+const STOCK_NAV_ALIASES = {
+  entries: "accounting-entries",
+  expenses: "accounting-expenses",
+  revenues: "accounting-revenues",
+  payments: "accounting-payments",
+};
+
+const FINANCE_FALLBACK = "Action comptable impossible.";
+
+/** Adaptateur pour les sous-composants qui reçoivent encore une prop `api`. */
+function financeApi(path, options = {}) {
+  const { fallback = FINANCE_FALLBACK, ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
+}
+
+export function AccountingOperations({ onMessage, mode, onNavigate, role }) {
   const [tab, setTab] = useState(resolveAccountingTab(mode));
   const [accounts, setAccounts] = useState([]);
   const [journals, setJournals] = useState([]);
@@ -31,7 +49,7 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
   const [revenues, setRevenues] = useState([]);
   const [payments, setPayments] = useState([]);
   const [cashRegisters, setCashRegisters] = useState([]);
-  const [banks, setBanks] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
   const [summary, setSummary] = useState(null);
   const [statements, setStatements] = useState(null);
   const [accountForm, setAccountForm] = useState({
@@ -47,9 +65,10 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
   const [expenseForm, setExpenseForm] = useState({
     expense_date: today(),
     total_amount: "",
-    tax_rate: "19.25",
+    tax_rate: "0",
     description: "",
     payment_method: "cash",
+    category_id: "",
   });
   const [revenueForm, setRevenueForm] = useState({
     revenue_date: today(),
@@ -66,7 +85,8 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
     credit_account_id: "",
     amount: "",
   });
-  const token = localStorage.getItem("access_token");
+  const moduleMeta = getAccountingModuleMeta(tab);
+  const isDashboard = tab === "dashboard";
 
   useEffect(() => {
     setTab(resolveAccountingTab(mode));
@@ -88,37 +108,18 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
     loadAll();
   }, []);
 
-  async function api(path, options = {}) {
-    const fallback = options.fallback || "Action comptable impossible.";
-    const { fallback: _fallback, ...requestOptions } = options;
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...requestOptions,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(requestOptions.headers || {}),
-      },
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok)
-      throw new Error(
-        formatApiError(data?.detail ?? data?.message ?? data?.error, fallback),
-      );
-    return data;
-  }
-
   async function loadAll() {
     const resources = [
-      ["accounts", () => api("/api/v1/finance/accounts"), setAccounts, []],
-      ["journals", () => api("/api/v1/finance/journals"), setJournals, []],
-      ["entries", () => api("/api/v1/finance/entries"), setEntries, []],
-      ["expenses", () => api("/api/v1/finance/expenses"), setExpenses, []],
-      ["revenues", () => api("/api/v1/finance/revenues"), setRevenues, []],
-      ["payments", () => api("/api/v1/finance/payments"), setPayments, []],
-      ["cash", () => api("/api/v1/finance/cash-registers"), setCashRegisters, []],
-      ["banks", () => api("/api/v1/finance/bank-accounts"), setBanks, []],
-      ["summary", () => api("/api/v1/finance/summary"), setSummary, null],
-      ["statements", () => api("/api/v1/finance/statements"), setStatements, null],
+      ["accounts", () => financeApi("/api/v1/finance/accounts"), setAccounts, []],
+      ["journals", () => financeApi("/api/v1/finance/journals"), setJournals, []],
+      ["entries", () => financeApi("/api/v1/finance/entries"), setEntries, []],
+      ["expenses", () => financeApi("/api/v1/finance/expenses"), setExpenses, []],
+      ["revenues", () => financeApi("/api/v1/finance/revenues"), setRevenues, []],
+      ["payments", () => financeApi("/api/v1/finance/payments"), setPayments, []],
+      ["cash", () => financeApi("/api/v1/finance/cash-registers"), setCashRegisters, []],
+      ["expenseCategories", () => financeApi("/api/v1/finance/expense-categories"), setExpenseCategories, []],
+      ["summary", () => financeApi("/api/v1/finance/summary"), setSummary, null],
+      ["statements", () => financeApi("/api/v1/finance/statements"), setStatements, null],
     ];
     const results = await Promise.allSettled(resources.map(([, load]) => load()));
     const loaded = {};
@@ -144,7 +145,7 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
 
   async function submit(path, payload, done, method = "POST") {
     try {
-      const result = await api(path, { method, body: JSON.stringify(payload) });
+      const result = await financeApi(path, { method, body: payload });
       done?.();
       await loadAll();
       return result;
@@ -184,11 +185,9 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
 
   async function exportFec() {
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/finance/reports/fec`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const text = await apiFetchText("/api/v1/finance/reports/fec", {
+        fallback: "Export impossible.",
       });
-      if (!response.ok) throw new Error("Export impossible.");
-      const text = await response.text();
       const lines = text.split("\n").filter((line) => line.length);
       if (lines.length < 2)
         throw new Error("Aucune écriture comptable à exporter.");
@@ -215,9 +214,9 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
 
   async function auditExport(reportType, format) {
     try {
-      await api("/api/v1/finance/reports/export-audit", {
+      await financeApi("/api/v1/finance/reports/export-audit", {
         method: "POST",
-        body: JSON.stringify({ report_type: reportType, format }),
+        body: { report_type: reportType, format },
       });
     } catch (error) {
       onMessage?.(error.message);
@@ -233,142 +232,156 @@ export function AccountingOperations({ apiBaseUrl, onMessage, mode, onNavigate }
     if (result) await loadAll();
   }
 
-  const activeTabLabel = tabs.find(([key]) => key === tab)?.[1] || "Comptabilité";
-
   function navigateTab(view) {
-    if (onNavigate) onNavigate(view);
+    let target = view === "dashboard" ? "comptabilite" : view;
+    if (role === "STOCK" && STOCK_NAV_ALIASES[view]) {
+      target = STOCK_NAV_ALIASES[view];
+    }
+    if (onNavigate) onNavigate(target);
     else setTab(resolveAccountingTab(view));
+  }
+
+  function renderModuleContent() {
+    switch (tab) {
+      case "accounts":
+        return (
+          <Accounts
+            accounts={accounts}
+            form={accountForm}
+            setForm={setAccountForm}
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit("/api/v1/finance/accounts", accountForm, () =>
+                setAccountForm({ code: "", name: "", type: "asset" }),
+              );
+            }}
+          />
+        );
+      case "journals":
+        return (
+          <Journals
+            journals={journals}
+            form={journalForm}
+            setForm={setJournalForm}
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit("/api/v1/finance/journals", journalForm, () =>
+                setJournalForm({ code: "", name: "", type: "general" }),
+              );
+            }}
+          />
+        );
+      case "entries":
+        return (
+          <Entries
+            entries={entries}
+            accounts={accounts}
+            journals={journals}
+            form={entryForm}
+            setForm={setEntryForm}
+            onSubmit={createEntry}
+          />
+        );
+      case "expenses":
+        return (
+          <OperationForm
+            title="Sortie d'argent"
+            variant="expense"
+            expenseCategories={expenseCategories}
+            rows={expenses}
+            form={expenseForm}
+            setForm={setExpenseForm}
+            dateField="expense_date"
+            endpoint="/api/v1/finance/expenses"
+            submit={submit}
+            helperText="Exemples : payer le transport, un livreur, le loyer, l'électricité, un fournisseur en espèces. Les achats stock se font dans le module Stocks — ne les re-saisissez pas ici."
+          />
+        );
+      case "expense-analytics":
+        return <ExpenseAnalytics onMessage={onMessage} embedded={false} />;
+      case "encaissements":
+        return <Encaissements onMessage={onMessage} />;
+      case "revenues":
+        return (
+          <OperationForm
+            title="Recette manuelle"
+            rows={revenues}
+            form={revenueForm}
+            setForm={setRevenueForm}
+            dateField="revenue_date"
+            endpoint="/api/v1/finance/revenues"
+            submit={submit}
+            helperText="Recettes hors caisse (autres revenus). Les ventes encaissées en caisse sont dans Encaissements."
+          />
+        );
+      case "payments":
+        return (
+          <SimpleRows
+            title="Paiements"
+            description="Liste des paiements enregistrés dans la comptabilité."
+            rows={payments}
+            columns={["payment_date", "payment_type", "payment_method", "amount", "status"]}
+          />
+        );
+      case "cash":
+        return <CashOverview registers={cashRegisters} api={financeApi} />;
+      case "statements":
+        return <Statements data={statements} onExport={auditExport} />;
+      case "food-cost":
+        return <FoodCost api={financeApi} onMessage={onMessage} />;
+      case "echeancier":
+        return <Echeancier api={financeApi} onMessage={onMessage} />;
+      case "rapprochement":
+        return <Rapprochement api={financeApi} accounts={accounts} onMessage={onMessage} />;
+      default:
+        return null;
+    }
   }
 
   return (
     <PageContainer>
-      <PageHeader
-        eyebrow="Comptabilité"
-        title="Comptabilité générale"
-        subtitle="Suivez les écritures, dépenses, encaissements et états financiers du restaurant."
-        primaryAction={
-          tab !== "dashboard" ? (
-            <SecondaryAction icon="LayoutDashboard" onClick={() => navigateTab("dashboard")}>
-              Tableau de bord
-            </SecondaryAction>
-          ) : (
-            <SecondaryAction icon="Download" onClick={exportFec}>
-              Export FEC (Excel)
-            </SecondaryAction>
-          )
-        }
-        secondaryActions={
-          tab === "dashboard" ? (
-            <SecondaryAction icon="RotateCcw" onClick={restoreDefaults}>
-              Restaurer les valeurs par défaut
-            </SecondaryAction>
-          ) : null
-        }
-        meta={[
-          <span key="active">Vue active : {activeTabLabel}</span>,
-          <span key="accounts">{accounts.length.toLocaleString("fr-FR")} compte(s)</span>,
-          <span key="entries">{entries.length.toLocaleString("fr-FR")} écriture(s)</span>,
-          <span key="expenses">{expenses.length.toLocaleString("fr-FR")} dépense(s)</span>,
-        ]}
-      />
+      {isDashboard ? (
+        <>
+          <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#078d50]">Comptabilité</p>
+              <h1 className="mt-2 text-3xl font-black text-slate-950">Argent du restaurant</h1>
+              <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-500">
+                Entrées = ventes encaissées. Sorties = ce que vous payez (transport, livreur, charges…). Solde caisse = ce qu'il reste.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <SecondaryAction icon="Download" onClick={exportFec}>
+                Export FEC
+              </SecondaryAction>
+              <SecondaryAction icon="RotateCcw" onClick={restoreDefaults}>
+                Restaurer défauts
+              </SecondaryAction>
+            </div>
+          </div>
 
-      {tab === "dashboard" && (
-        <Dashboard summary={summary} entryTotals={entryTotals} onNavigate={navigateTab} />
-      )}
-      {tab === "accounts" && (
-        <Accounts
-          accounts={accounts}
-          form={accountForm}
-          setForm={setAccountForm}
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit("/api/v1/finance/accounts", accountForm, () =>
-              setAccountForm({ code: "", name: "", type: "asset" }),
-            );
-          }}
-        />
-      )}
-      {tab === "journals" && (
-        <Journals
-          journals={journals}
-          form={journalForm}
-          setForm={setJournalForm}
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit("/api/v1/finance/journals", journalForm, () =>
-              setJournalForm({ code: "", name: "", type: "general" }),
-            );
-          }}
-        />
-      )}
-      {tab === "entries" && (
-        <Entries
-          entries={entries}
-          accounts={accounts}
-          journals={journals}
-          form={entryForm}
-          setForm={setEntryForm}
-          onSubmit={createEntry}
-        />
-      )}
-      {tab === "expenses" && (
-        <OperationForm
-          title="Dépense"
-          rows={expenses}
-          form={expenseForm}
-          setForm={setExpenseForm}
-          dateField="expense_date"
-          endpoint="/api/v1/finance/expenses"
-          submit={submit}
-        />
-      )}
-      {tab === "encaissements" && <Encaissements onMessage={onMessage} />}
-      {tab === "revenues" && (
-        <OperationForm
-          title="Recette manuelle"
-          rows={revenues}
-          form={revenueForm}
-          setForm={setRevenueForm}
-          dateField="revenue_date"
-          endpoint="/api/v1/finance/revenues"
-          submit={submit}
-          helperText="Recettes hors caisse (autres revenus). Les ventes encaissées en caisse sont dans l'onglet Encaissements."
-        />
-      )}
-      {tab === "payments" && (
-        <SimpleRows
-          title="Paiements"
-          rows={payments}
-          columns={[
-            "payment_date",
-            "payment_type",
-            "payment_method",
-            "amount",
-            "status",
-          ]}
-        />
-      )}
-      {tab === "cash" && (
-        <SimpleRows
-          title="Caisses"
-          rows={cashRegisters}
-          columns={["name", "code", "is_active"]}
-        />
-      )}
-      {tab === "banks" && (
-        <SimpleRows
-          title="Banques"
-          rows={banks}
-          columns={["bank_name", "account_name", "account_number", "is_active"]}
-        />
-      )}
-      {tab === "statements" && (
-        <Statements data={statements} onExport={auditExport} />
-      )}
-      {tab === "food-cost" && <FoodCost api={api} onMessage={onMessage} />}
-      {tab === "echeancier" && <Echeancier api={api} onMessage={onMessage} />}
-      {tab === "rapprochement" && (
-        <Rapprochement api={api} accounts={accounts} onMessage={onMessage} />
+          <div className="space-y-8">
+            <Dashboard
+              summary={summary}
+              entryTotals={entryTotals}
+              counts={{
+                accounts: accounts.length,
+                entries: entries.length,
+                expenses: expenses.length,
+              }}
+              onNavigate={navigateTab}
+            />
+            <ExpenseAnalytics onMessage={onMessage} embedded />
+          </div>
+        </>
+      ) : (
+        <AccountingModuleShell
+          title={moduleMeta?.label || "Module comptable"}
+          description={moduleMeta?.description}
+          onBack={() => navigateTab("dashboard")}
+        >
+          {renderModuleContent()}
+        </AccountingModuleShell>
       )}
     </PageContainer>
   );

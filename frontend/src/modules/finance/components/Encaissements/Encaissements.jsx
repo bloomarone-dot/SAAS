@@ -86,8 +86,8 @@ export function Encaissements({ onMessage }) {
 
   return (
     <DashboardSection
-      title="Encaissements caisse"
-      description="Montants issus des commandes réellement payées en caisse (TTC), ventilés en HT et TVA collectée."
+      title="Entrées d'argent (ventes)"
+      description="Tout l'argent rentré grâce aux commandes payées : tables, livraisons, caisse. Ce n'est pas ce que vous payez — voir « Sorties d'argent » pour les dépenses."
     >
       <form onSubmit={loadReport} className="mb-4 grid gap-3 md:grid-cols-3">
         <Input label="Début" type="date" value={startDate} onChange={setStartDate} />

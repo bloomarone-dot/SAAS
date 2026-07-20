@@ -16,6 +16,7 @@ from app.modules.catalog.schemas import (
 )
 from app.modules.permissions.models import Permission
 from app.modules.users.models import User
+from app.tenancy import tenant_find, tenant_get_or_404
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -23,9 +24,12 @@ router = APIRouter(prefix="/catalog", tags=["catalog"])
 def validate_category(db: Session, category_id: str | None, restaurant_id: str | None) -> None:
     if not category_id:
         return
-    category = db.get(MenuCategory, category_id)
-    if not category or category.restaurant_id != restaurant_id:
+    if not restaurant_id or not tenant_find(db, MenuCategory, category_id, restaurant_id):
         raise HTTPException(status_code=400, detail="Categorie invalide pour ce restaurant")
+
+
+def category_for_item(db: Session, category_id: str | None, restaurant_id: str) -> MenuCategory | None:
+    return tenant_find(db, MenuCategory, category_id, restaurant_id)
 
 
 @router.get("/categories", response_model=list[MenuCategoryPublic])
@@ -62,9 +66,13 @@ def update_category(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
-    category = db.get(MenuCategory, category_id)
-    if not category or category.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Categorie introuvable")
+    category = tenant_get_or_404(
+        db,
+        MenuCategory,
+        category_id,
+        current_user.restaurant_id,
+        detail="Categorie introuvable",
+    )
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(category, field, value)
     log_action(db, current_user, "catalog.category_update", "menu_category", category.id, f"Modification catégorie carte {category.name}")
@@ -80,9 +88,13 @@ def delete_category(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
-    category = db.get(MenuCategory, category_id)
-    if not category or category.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Categorie introuvable")
+    category = tenant_get_or_404(
+        db,
+        MenuCategory,
+        category_id,
+        current_user.restaurant_id,
+        detail="Categorie introuvable",
+    )
     category.is_active = False
     for item in category.items:
         item.is_available = False
@@ -111,7 +123,7 @@ def create_item(
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
     validate_category(db, payload.category_id, current_user.restaurant_id)
     item = MenuItem(restaurant_id=current_user.restaurant_id, **payload.dict())
-    category = db.get(MenuCategory, item.category_id) if item.category_id else None
+    category = category_for_item(db, item.category_id, current_user.restaurant_id)
     item.sale_channel = classify_sale_channel(
         item.name,
         item.description,
@@ -141,14 +153,18 @@ def update_item(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
-    item = db.get(MenuItem, item_id)
-    if not item or item.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Plat introuvable")
+    item = tenant_get_or_404(
+        db,
+        MenuItem,
+        item_id,
+        current_user.restaurant_id,
+        detail="Plat introuvable",
+    )
     payload_data = payload.dict(exclude_unset=True)
     validate_category(db, payload_data.get("category_id"), current_user.restaurant_id)
     for field, value in payload_data.items():
         setattr(item, field, value)
-    category = db.get(MenuCategory, item.category_id) if item.category_id else None
+    category = category_for_item(db, item.category_id, current_user.restaurant_id)
     item.sale_channel = classify_sale_channel(
         item.name,
         item.description,
@@ -176,9 +192,13 @@ def delete_item(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
-    item = db.get(MenuItem, item_id)
-    if not item or item.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Plat introuvable")
+    item = tenant_get_or_404(
+        db,
+        MenuItem,
+        item_id,
+        current_user.restaurant_id,
+        detail="Plat introuvable",
+    )
     item.is_available = False
     log_action(db, current_user, "catalog.item_archive", "menu_item", item.id, f"Archivage plat vendable {item.name}")
     db.commit()

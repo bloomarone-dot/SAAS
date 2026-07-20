@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime
 from types import SimpleNamespace
 
+import app.modules.models  # noqa: F401 — enregistre Branch avant AuditLog/User
 from app.modules.payments.service import apply_webhook
 from app.security import verify_hmac_sha256_signature
 
@@ -18,10 +19,32 @@ class _EmptyQuery:
     def first(self):
         return None
 
+    def one_or_none(self):
+        return None
+
+
+class _ScopedQuery:
+    def __init__(self, *, order=None, restaurant=None):
+        self.order = order
+        self.restaurant = restaurant
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def one_or_none(self):
+        return self.order if self.order is not None else self.restaurant
+
+    def first(self):
+        return self.restaurant
+
 
 class FakeSession:
-    def __init__(self, order):
+    def __init__(self, order, restaurant=None):
         self.order = order
+        self.restaurant = restaurant or SimpleNamespace(bloomar_commission_rate=0)
         self.added = []
         self.commits = 0
 
@@ -31,7 +54,14 @@ class FakeSession:
     def get(self, model, entity_id):
         return self.order if entity_id == self.order.id else None
 
-    def query(self, *args, **kwargs):
+    def query(self, model):
+        from app.modules.orders.models import CustomerOrder
+        from app.modules.restaurants.models import Restaurant
+
+        if model is CustomerOrder:
+            return _ScopedQuery(order=self.order)
+        if model is Restaurant:
+            return _ScopedQuery(restaurant=self.restaurant)
         return _EmptyQuery()
 
     def commit(self):

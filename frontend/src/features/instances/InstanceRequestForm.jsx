@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CheckCircle, Send } from "lucide-react";
+import { apiFetchPublic } from "@/config/http";
 
 const EMPTY = {
   restaurant_name: "",
@@ -41,16 +42,11 @@ export default function InstanceRequestForm({ apiBaseUrl }) {
         business_type: form.business_type.trim() || null,
         message: form.message.trim() || null,
       };
-      const response = await fetch(`${apiBaseUrl}/api/v1/platform/instance-requests`, {
+      await apiFetchPublic("/api/v1/platform/instance-requests", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: payload,
+        fallback: "Envoi impossible. Réessayez.",
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = Array.isArray(data?.detail) ? data.detail.map((d) => d.msg).join(" · ") : data?.detail;
-        throw new Error(detail || "Envoi impossible. Réessayez.");
-      }
       setDone(true);
       setForm(EMPTY);
     } catch (err) {

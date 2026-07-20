@@ -5,7 +5,7 @@ import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFil
 import { DashboardSection, FilterBar } from "@/modules/admin/components/AdminUi";
 import { apiFetch } from "@/config/http";
 import { matchesPeriod } from "@/utils/greeting";
-import { orderApi } from "../services/orderApi";
+import { orderTakerDisplay } from "@/modules/orders/utils/orderLabels";
 import { InvoiceHistoryPanel } from "./InvoiceHistoryPanel";
 
 const STATUS_COLORS = {
@@ -102,7 +102,7 @@ export function DeliveryAdminPanel({ onMessage }) {
     return orders.filter((order) => {
       const matchesSearch =
         !query ||
-        [order.order_number, order.customer_name, order.customer_phone, order.delivery_area_name, order.created_by_cashier_name, order.cashier_name]
+        [order.order_number, order.customer_name, order.customer_phone, order.delivery_area_name, order.order_taker_name, order.created_by_cashier_name, order.cashier_name, order.assigned_cashier_name]
           .join(" ")
           .toLowerCase()
           .includes(query);
@@ -110,7 +110,8 @@ export function DeliveryAdminPanel({ onMessage }) {
       const matchesCashier =
         !cashierFilter ||
         order.created_by_cashier_id === cashierFilter ||
-        order.cashier_id === cashierFilter;
+        order.cashier_id === cashierFilter ||
+        order.assigned_cashier_id === cashierFilter;
       const matchesDate = matchesPeriod(order.created_at, period, customPeriod);
       return matchesSearch && matchesStatus && matchesCashier && (period === "all" || matchesDate);
     });
@@ -191,7 +192,7 @@ export function DeliveryAdminPanel({ onMessage }) {
                       </span>
                     </td>
                     <td className="text-sm font-semibold text-slate-700">
-                      {order.created_by_cashier_name || order.cashier_name || "Non renseigné"}
+                      {orderTakerDisplay(order)}
                     </td>
                     <td>
                       <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-black text-slate-500" title="Lecture seule admin">

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
+from app.tenancy import tenant_get_or_404, tenant_get_optional, tenant_find
 from app.modules.audit.service import log_action
 from app.modules.catalog.models import MenuItem
 from app.modules.notifications.service import notify
@@ -149,6 +150,11 @@ def ensure_default_data(db: Session, restaurant_id: str | None) -> None:
     migrate_legacy_stock_items(db, restaurant_id)
 
 
+def _session_inspector(db: Session):
+    """Inspector sur la connexion de la session (évite une 2e DB SQLite :memory:)."""
+    return inspect(db.connection())
+
+
 def migrate_legacy_stock_items(db: Session, restaurant_id: str) -> None:
     """Convertit les anciennes colonnes quantite en mouvements initiaux.
 
@@ -157,7 +163,7 @@ def migrate_legacy_stock_items(db: Session, restaurant_id: str) -> None:
     les produits avec le meme id pour preserver les liaisons recettes/commandes,
     puis on cree des mouvements ENTRY valides dans le depot correspondant.
     """
-    inspector = inspect(db.bind)
+    inspector = _session_inspector(db)
     if "stock_items" not in inspector.get_table_names():
         return
     if db.query(Product.id).filter(Product.restaurant_id == restaurant_id).first():
@@ -233,7 +239,7 @@ def ensure_product_creation_columns(db: Session) -> None:
     Le projet n'a pas encore une chaîne Alembic complète. Cette garde évite que
     l'ancien schéma `products` bloque le formulaire simplifié Code/Nom/Unité/Seuil.
     """
-    inspector = inspect(db.bind)
+    inspector = _session_inspector(db)
     if "products" not in inspector.get_table_names():
         return
     existing = {column["name"] for column in inspector.get_columns("products")}
@@ -268,7 +274,7 @@ def ensure_product_creation_columns(db: Session) -> None:
 def ensure_stock_entry_columns(db: Session) -> None:
     """Prépare les tables nécessaires à l'enregistrement d'une entrée de stock."""
     ensure_product_creation_columns(db)
-    inspector = inspect(db.bind)
+    inspector = _session_inspector(db)
     tables = set(inspector.get_table_names())
     if "stock_movements" not in tables:
         StockMovement.__table__.create(bind=db.bind, checkfirst=True)
@@ -361,12 +367,12 @@ def ensure_legacy_stock_references(
     vers `stock_items` et `stock_cost_centers`, alors que le modèle courant utilise
     `products` et `depots`. On crée seulement les lignes miroir manquantes.
     """
-    inspector = inspect(db.bind)
+    inspector = _session_inspector(db)
     tables = set(inspector.get_table_names())
     if "stock_items" in tables:
         exists = db.execute(text("SELECT 1 FROM stock_items WHERE id = :id"), {"id": product.id}).first()
         if not exists:
-            unit = db.get(Unit, product.unit_id) if product.unit_id else None
+            unit = unit_for_product(db, product)
             unit_label = getattr(unit, "symbol", None) or getattr(unit, "name", None) or "piece"
             db.execute(
                 text(
@@ -406,8 +412,8 @@ def ensure_legacy_stock_references(
         exists = db.execute(text("SELECT 1 FROM stock_cost_centers WHERE id = :id"), {"id": depot_id}).first()
         if exists:
             continue
-        depot = db.get(Depot, depot_id)
-        if not depot or depot.restaurant_id != restaurant_id:
+        depot = tenant_get_optional(db, Depot, depot_id, restaurant_id, detail="Depot introuvable")
+        if not depot:
             continue
         center_type = StockLocation.MAGASIN.value
         if depot.type == DepotType.CUISINE:
@@ -454,8 +460,8 @@ def depot_for_location(db: Session, restaurant_id: str, location: StockLocation)
 
 def resolve_unit(db: Session, restaurant_id: str, value: str | None) -> Unit:
     if value:
-        unit = db.get(Unit, value)
-        if unit and unit.restaurant_id == restaurant_id:
+        unit = tenant_get_optional(db, Unit, value, restaurant_id, detail="Unite introuvable")
+        if unit:
             return unit
         unit = (
             db.query(Unit)
@@ -473,14 +479,25 @@ def resolve_unit(db: Session, restaurant_id: str, value: str | None) -> Unit:
     return unit
 
 
+def unit_for_product(db: Session, product: Product, unit_id: str | None = None) -> Unit | None:
+    return tenant_find(db, Unit, unit_id or product.unit_id, product.restaurant_id)
+
+
+def purchase_unit_for_product(db: Session, product: Product) -> Unit | None:
+    return tenant_find(db, Unit, product.purchase_unit_id, product.restaurant_id)
+
+
 def get_product_or_404(db: Session, product_id: str, restaurant_id: str | None, *, for_update: bool = False) -> Product:
-    query = db.query(Product).filter(Product.id == product_id)
-    if for_update:
-        query = query.with_for_update()
-    product = query.one_or_none()
-    if not product or product.restaurant_id != restaurant_id:
+    if not restaurant_id:
         raise HTTPException(status_code=404, detail="Produit stock introuvable")
-    return product
+    return tenant_get_or_404(
+        db,
+        Product,
+        product_id,
+        restaurant_id,
+        detail="Produit stock introuvable",
+        for_update=for_update,
+    )
 
 
 def normalize_type(value: StockMovementType) -> StockMovementType:
@@ -538,10 +555,19 @@ def _stock_quantity_expr(depot_id: str | None):
 
 
 def stock_movements_support_aggregation(db: Session) -> bool:
-    inspector = inspect(db.bind)
-    if "stock_movements" not in inspector.get_table_names():
+    """Vérifie que stock_movements expose les colonnes nécessaires à l'agrégation SQL.
+
+    Important : inspecter la **connexion de la session** (pas l'Engine). Sur SQLite
+    `:memory:`, `inspect(engine)` ouvre une autre base vide et peut invalider /
+    rollback la transaction courante (mouvements flushés perdus → stock à 0).
+    """
+    try:
+        inspector = _session_inspector(db)
+        if "stock_movements" not in inspector.get_table_names():
+            return False
+        existing = {column["name"] for column in inspector.get_columns("stock_movements")}
+    except SQLAlchemyError:
         return False
-    existing = {column["name"] for column in inspector.get_columns("stock_movements")}
     required = {
         "restaurant_id",
         "product_id",
@@ -611,8 +637,8 @@ def product_public(
     total_stock: Decimal | None = None,
     include_stock_by_depot: bool = True,
 ) -> dict:
-    unit = db.get(Unit, product.unit_id)
-    purchase_unit = db.get(Unit, product.purchase_unit_id) if product.purchase_unit_id else None
+    unit = unit_for_product(db, product)
+    purchase_unit = purchase_unit_for_product(db, product)
     stock_by_depot = get_product_stock_by_depot(db, product) if include_stock_by_depot else []
     current_stock = total_stock if total_stock is not None else get_current_stock(db, product.id, restaurant_id=product.restaurant_id)
     return {
@@ -666,8 +692,8 @@ def validate_movement_payload(
             raise HTTPException(status_code=400, detail="Le depot source et le depot destination doivent etre differents")
     for depot_id in [source_depot_id, destination_depot_id]:
         if depot_id:
-            depot = db.get(Depot, depot_id)
-            if not depot or depot.restaurant_id != restaurant_id or not depot.is_active:
+            depot = tenant_get_optional(db, Depot, depot_id, restaurant_id, detail="Depot introuvable")
+            if not depot or not depot.is_active:
                 raise HTTPException(status_code=404, detail="Depot introuvable ou inactif")
     if movement_type in {StockMovementType.OUTPUT, StockMovementType.LOSS, StockMovementType.INVENTORY_MINUS, StockMovementType.TRANSFER}:
         available = get_current_stock(db, product_id, source_depot_id, restaurant_id)
@@ -1032,9 +1058,7 @@ def create_depot(payload: DepotIn, current_user: User = Depends(require_tenant_u
 @router.patch("/depots/{depot_id}", response_model=DepotPublic)
 def update_depot(depot_id: str, payload: DepotUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    depot = db.get(Depot, depot_id)
-    if not depot or depot.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Depot introuvable")
+    depot = tenant_get_or_404(db, Depot, depot_id, current_user.restaurant_id, detail="Depot introuvable")
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(depot, field, value)
     db.commit()
@@ -1045,9 +1069,7 @@ def update_depot(depot_id: str, payload: DepotUpdateIn, current_user: User = Dep
 @router.delete("/depots/{depot_id}", status_code=200)
 def deactivate_depot(depot_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    depot = db.get(Depot, depot_id)
-    if not depot or depot.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Depot introuvable")
+    depot = tenant_get_or_404(db, Depot, depot_id, current_user.restaurant_id, detail="Depot introuvable")
     depot.is_active = False
     db.commit()
     return {"message": "Depot desactive"}
@@ -1427,9 +1449,7 @@ def list_outputs(current_user: User = Depends(require_tenant_user), db: Session 
 @router.patch("/movements/{movement_id}/cancel", response_model=StockMovementPublic)
 def cancel_stock_movement(movement_id: str, reason: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    movement = db.get(StockMovement, movement_id)
-    if not movement or movement.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Mouvement introuvable")
+    movement = tenant_get_or_404(db, StockMovement, movement_id, current_user.restaurant_id, detail="Mouvement introuvable")
     if movement.status != StockMovementStatus.VALIDATED:
         raise HTTPException(status_code=400, detail="Seul un mouvement valide peut etre annule")
     movement.status = StockMovementStatus.CANCELLED
@@ -1449,9 +1469,7 @@ def update_stock_movement(
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    movement = db.get(StockMovement, movement_id)
-    if not movement or movement.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Mouvement introuvable")
+    movement = tenant_get_or_404(db, StockMovement, movement_id, current_user.restaurant_id, detail="Mouvement introuvable")
     if movement.status != StockMovementStatus.VALIDATED:
         raise HTTPException(status_code=400, detail="Seul un mouvement valide peut etre modifie")
     if payload.movement_date is not None:
@@ -1480,13 +1498,11 @@ def get_global_stock(current_user: User = Depends(require_tenant_user), db: Sess
 @router.get("/depots/{depot_id}/stock", response_model=list[DepotStockRow])
 def get_depot_stock(depot_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_READ)
-    depot = db.get(Depot, depot_id)
-    if not depot or depot.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Depot introuvable")
+    depot = tenant_get_or_404(db, Depot, depot_id, current_user.restaurant_id, detail="Depot introuvable")
     products = db.query(Product).filter(Product.restaurant_id == current_user.restaurant_id, Product.is_active.is_(True)).all()
     rows = []
     for product in products:
-        unit = db.get(Unit, product.unit_id)
+        unit = unit_for_product(db, product)
         quantity = get_current_stock(db, product.id, depot.id, current_user.restaurant_id)
         if quantity <= 0:
             continue
@@ -1506,7 +1522,7 @@ def get_low_stock_products(current_user: User = Depends(require_tenant_user), db
 def list_lots(product_id: str | None = None, depot_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     """Lots de stock encore disponibles (quantité restante > 0)."""
     assert_permission(current_user, Permission.STOCK_READ)
-    if "stock_lots" not in inspect(db.bind).get_table_names():
+    if "stock_lots" not in _session_inspector(db).get_table_names():
         return []
     query = db.query(StockLot).filter(StockLot.restaurant_id == current_user.restaurant_id, StockLot.quantity_remaining > 0)
     if product_id:
@@ -1556,9 +1572,7 @@ def create_inventory(payload: InventoryCreateIn, current_user: User = Depends(re
     assert_permission(current_user, Permission.STOCK_UPDATE)
     ensure_default_data(db, current_user.restaurant_id)
     depot_id = payload.depot_id or depot_for_location(db, current_user.restaurant_id, StockLocation.MAGASIN).id
-    depot = db.get(Depot, depot_id)
-    if not depot or depot.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Depot introuvable")
+    depot = tenant_get_or_404(db, Depot, depot_id, current_user.restaurant_id, detail="Depot introuvable")
     inventory = Inventory(
         restaurant_id=current_user.restaurant_id,
         inventory_date=payload.inventory_date or utcnow(),
@@ -1636,11 +1650,11 @@ def list_inventories(current_user: User = Depends(require_tenant_user), db: Sess
 @router.patch("/inventories/{inventory_id}/lines/{line_id}", response_model=InventoryDetailPublic)
 def update_inventory_line(inventory_id: str, line_id: str, payload: InventoryLineUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    inventory = db.get(Inventory, inventory_id)
-    if not inventory or inventory.restaurant_id != current_user.restaurant_id or inventory.status != InventoryStatus.DRAFT:
+    inventory = tenant_get_or_404(db, Inventory, inventory_id, current_user.restaurant_id, detail="Inventaire introuvable")
+    if inventory.status != InventoryStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Inventaire introuvable ou non modifiable")
-    line = db.get(InventoryDetail, line_id)
-    if not line or line.inventory_id != inventory.id:
+    line = tenant_get_or_404(db, InventoryDetail, line_id, current_user.restaurant_id, detail="Ligne inventaire introuvable")
+    if line.inventory_id != inventory.id:
         raise HTTPException(status_code=404, detail="Ligne inventaire introuvable")
     line.real_quantity = dec(payload.real_stock)
     line.gap_quantity = dec(line.theoretical_quantity) - dec(payload.real_stock)
@@ -1660,9 +1674,7 @@ def update_inventory_line(inventory_id: str, line_id: str, payload: InventoryLin
 @router.patch("/inventories/{inventory_id}/close", response_model=InventoryPublic)
 def validate_inventory(inventory_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    inventory = db.get(Inventory, inventory_id)
-    if not inventory or inventory.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Inventaire introuvable")
+    inventory = tenant_get_or_404(db, Inventory, inventory_id, current_user.restaurant_id, detail="Inventaire introuvable")
     if inventory.status != InventoryStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Inventaire deja traite")
     details = db.query(InventoryDetail).filter(InventoryDetail.inventory_id == inventory.id).all()
@@ -1799,9 +1811,7 @@ def create_packaging_link(payload: PackagingLinkIn, current_user: User = Depends
 @router.delete("/packaging-links/{link_id}", status_code=200)
 def archive_packaging_link(link_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    link = db.get(StockItemPackaging, link_id)
-    if not link or link.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Liaison introuvable")
+    link = tenant_get_or_404(db, StockItemPackaging, link_id, current_user.restaurant_id, detail="Liaison introuvable")
     link.is_active = False
     db.commit()
     return {"message": "Liaison archivee"}
@@ -1827,9 +1837,7 @@ def create_recipe_link(payload: RecipeIngredientIn, current_user: User = Depends
 @router.delete("/recipes/{link_id}", status_code=200)
 def delete_recipe_link(link_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    link = db.get(StockRecipeIngredient, link_id)
-    if not link or link.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Liaison introuvable")
+    link = tenant_get_or_404(db, StockRecipeIngredient, link_id, current_user.restaurant_id, detail="Liaison introuvable")
     link.is_active = False
     db.commit()
     return {"message": "Liaison archivee"}
@@ -1844,9 +1852,7 @@ def list_production_sheets(current_user: User = Depends(require_tenant_user), db
 @router.post("/production-sheets", response_model=ProductionSheetPublic, status_code=201)
 def create_production_sheet(payload: ProductionSheetIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.STOCK_UPDATE)
-    dish = db.get(MenuItem, payload.menu_item_id)
-    if not dish or dish.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Plat introuvable")
+    dish = tenant_get_or_404(db, MenuItem, payload.menu_item_id, current_user.restaurant_id, detail="Plat introuvable")
     links = db.query(StockRecipeIngredient).filter(StockRecipeIngredient.restaurant_id == current_user.restaurant_id, StockRecipeIngredient.menu_item_id == payload.menu_item_id, StockRecipeIngredient.is_active.is_(True)).all()
     if not links:
         raise HTTPException(status_code=400, detail="Aucun ingredient lie a ce plat")

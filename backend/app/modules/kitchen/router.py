@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
+from app.tenancy import tenant_get_or_404
 from app.database import get_db
 from app.dependencies import assert_permission, has_permission, require_tenant_user
 from app.modules.notifications.service import notify
@@ -131,14 +132,7 @@ def kitchen_month_stats(
 
 
 def get_order_for_user(db: Session, order_id: str, user: User) -> CustomerOrder:
-    order = (
-        db.query(CustomerOrder)
-        .filter(CustomerOrder.id == order_id, CustomerOrder.restaurant_id == user.restaurant_id)
-        .first()
-    )
-    if not order:
-        raise HTTPException(status_code=404, detail="Commande introuvable.")
-    return order
+    return tenant_get_or_404(db, CustomerOrder, order_id, user.restaurant_id, detail="Commande introuvable.")
 
 
 def assert_kitchen_read_allowed(user: User) -> None:

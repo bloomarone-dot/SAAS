@@ -23,6 +23,7 @@ from app.modules.users.schemas import (
     UserStatusUpdateIn,
     UserUpdateIn,
 )
+from app.tenancy import tenant_get_or_404
 from app.security import hash_password
 
 
@@ -63,9 +64,13 @@ def validate_branch(db: Session, branch_id: str | None, restaurant_id: str | Non
     if not branch_id:
         return
 
-    branch = db.get(Branch, branch_id)
-    if not branch or branch.restaurant_id != restaurant_id:
-        raise HTTPException(status_code=400, detail="Branche invalide pour ce restaurant")
+    branch = tenant_get_or_404(
+        db,
+        Branch,
+        branch_id,
+        restaurant_id,
+        detail="Branche invalide pour ce restaurant",
+    )
 
 
 def validate_responsible(
@@ -80,9 +85,13 @@ def validate_responsible(
     if user_id and responsible_id == user_id:
         raise HTTPException(status_code=400, detail="Un utilisateur ne peut pas être son propre responsable")
 
-    responsible = db.get(User, responsible_id)
-    if not responsible or responsible.restaurant_id != restaurant_id:
-        raise HTTPException(status_code=400, detail="Responsable invalide pour ce restaurant")
+    tenant_get_or_404(
+        db,
+        User,
+        responsible_id,
+        restaurant_id,
+        detail="Responsable invalide pour ce restaurant",
+    )
 
 
 @router.get("", response_model=list[UserPublic])
@@ -195,9 +204,7 @@ def update_user(
     if payload.permissions is not None:
         assert_owner_or_permission(current_user, Permission.USER_PERMISSIONS_UPDATE)
 
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    user = tenant_get_or_404(db, User, user_id, current_user.restaurant_id, detail="Utilisateur introuvable")
     assert_managed_user(current_user, user)
 
     if payload.role is not None:
@@ -264,9 +271,7 @@ def update_user_status(
     """Active ou desactive un compte utilisateur sans supprimer son historique."""
     assert_permission(current_user, Permission.USER_UPDATE)
 
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    user = tenant_get_or_404(db, User, user_id, current_user.restaurant_id, detail="Utilisateur introuvable")
     assert_managed_user(current_user, user)
 
     if user.id == current_user.id:
@@ -302,9 +307,7 @@ def update_user_permissions(
     """Remplace les droits precis d'un utilisateur du meme restaurant."""
     assert_owner_or_permission(current_user, Permission.USER_PERMISSIONS_UPDATE)
 
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    user = tenant_get_or_404(db, User, user_id, current_user.restaurant_id, detail="Utilisateur introuvable")
     assert_managed_user(current_user, user)
 
     replace_user_permissions(db, user, payload.permissions, current_user.id)
@@ -337,9 +340,7 @@ def reset_user_password(
     """Reinitialise le mot de passe d'un membre du personnel non proprietaire."""
     assert_permission(current_user, Permission.USER_UPDATE)
 
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    user = tenant_get_or_404(db, User, user_id, current_user.restaurant_id, detail="Utilisateur introuvable")
     assert_managed_user(current_user, user)
 
     if user.id == current_user.id:
@@ -376,9 +377,7 @@ def delete_user(
     """Archive un utilisateur non proprietaire sans supprimer son historique."""
     assert_permission(current_user, Permission.USER_UPDATE)
 
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    user = tenant_get_or_404(db, User, user_id, current_user.restaurant_id, detail="Utilisateur introuvable")
     assert_managed_user(current_user, user)
 
     if user.id == current_user.id:

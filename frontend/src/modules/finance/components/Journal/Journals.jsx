@@ -3,7 +3,7 @@ import { Input, Panel, Select, SimpleRows, Submit } from "../shared/ui";
 
 export function Journals({ journals, form, setForm, onSubmit }) {
   return (
-    <section className="grid gap-4 xl:grid-cols-[380px_1fr]">
+    <section className="grid gap-6 xl:grid-cols-[minmax(320px,400px)_1fr] xl:items-start">
       <Panel
         title="Créer un journal"
         description="Définissez les journaux de saisie pour classer les opérations comptables."

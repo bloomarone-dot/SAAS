@@ -116,6 +116,8 @@ class OrderPublic(OrmModel):
     server_name: Optional[str] = None
     cashier_name: Optional[str] = None
     created_by_cashier_name: Optional[str] = None
+    assigned_cashier_name: Optional[str] = None
+    order_taker_name: Optional[str] = None
     table_name: Optional[str] = None
     table_room: Optional[str] = None
     payment_method: str

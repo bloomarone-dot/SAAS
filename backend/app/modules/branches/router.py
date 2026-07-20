@@ -18,6 +18,7 @@ from app.modules.branches.schemas import BranchCreateIn, BranchPublic
 from app.modules.finance.models import CashRegister
 from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
+from app.tenancy import tenant_get_or_404
 
 
 router = APIRouter(prefix="/branches", tags=["branches"])
@@ -56,8 +57,14 @@ def create_branch(
     db.add(branch)
     db.flush()
     if payload.manager_id:
-        manager = db.get(User, payload.manager_id)
-        if manager and not manager.branch_id:
+        manager = tenant_get_or_404(
+            db,
+            User,
+            payload.manager_id,
+            current_user.restaurant_id,
+            detail="Responsable de branche invalide",
+        )
+        if not manager.branch_id:
             manager.branch_id = branch.id
     log_action(db, current_user, "branch.create", "branch", branch.id, f"Création branche {branch.name}", {"city": branch.city})
     db.commit()
@@ -160,17 +167,11 @@ def update_delivery_area(
 
 
 def get_branch_or_404(db: Session, restaurant_id: str, branch_id: str) -> Branch:
-    branch = db.query(Branch).filter(Branch.id == branch_id, Branch.restaurant_id == restaurant_id).first()
-    if not branch:
-        raise HTTPException(status_code=404, detail="Branche introuvable")
-    return branch
+    return tenant_get_or_404(db, Branch, branch_id, restaurant_id, detail="Branche introuvable")
 
 
 def get_delivery_area_or_404(db: Session, restaurant_id: str, area_id: str) -> DeliveryArea:
-    area = db.query(DeliveryArea).filter(DeliveryArea.id == area_id, DeliveryArea.restaurant_id == restaurant_id).first()
-    if not area:
-        raise HTTPException(status_code=404, detail="Quartier introuvable")
-    return area
+    return tenant_get_or_404(db, DeliveryArea, area_id, restaurant_id, detail="Quartier introuvable")
 
 
 def validate_branch_scope(db: Session, restaurant_id: str, branch_id: str | None) -> None:
@@ -182,9 +183,13 @@ def validate_branch_scope(db: Session, restaurant_id: str, branch_id: str | None
 def validate_manager(db: Session, manager_id: str | None, restaurant_id: str) -> None:
     if not manager_id:
         return
-    manager = db.get(User, manager_id)
-    if not manager or manager.restaurant_id != restaurant_id:
-        raise HTTPException(status_code=400, detail="Responsable de branche invalide")
+    manager = tenant_get_or_404(
+        db,
+        User,
+        manager_id,
+        restaurant_id,
+        detail="Responsable de branche invalide",
+    )
     if manager.role not in {Role.ADMIN, Role.MANAGER}:
         raise HTTPException(status_code=400, detail="Le responsable doit être un manager ou administrateur")
 
@@ -214,7 +219,7 @@ def enrich_branches(db: Session, branches: list[Branch], restaurant_id: str) -> 
     } if branch_ids else {}
     named_managers = {
         user.id: f"{user.first_name} {user.last_name}".strip() or user.username
-        for user in db.query(User).filter(User.id.in_(manager_ids)).all()
+        for user in db.query(User).filter(User.restaurant_id == restaurant_id, User.id.in_(manager_ids)).all()
     } if manager_ids else {}
     for branch in branches:
         branch.users_count = int(users_count.get(branch.id, 0))

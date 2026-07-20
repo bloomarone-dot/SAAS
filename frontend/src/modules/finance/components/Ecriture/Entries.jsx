@@ -2,7 +2,7 @@ import { Input, Panel, Select, SimpleRows, Submit } from "../shared/ui";
 
 export function Entries({ entries, accounts, journals, form, setForm, onSubmit }) {
   return (
-    <section className="space-y-4">
+    <section className="space-y-6">
       <Panel
         title="Créer une écriture équilibrée"
         description="Saisissez une opération avec un débit et un crédit du même montant."

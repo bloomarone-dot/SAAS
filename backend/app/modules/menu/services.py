@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.modules.catalog.classification import classify_sale_channel, requires_kitchen_preparation
 from app.modules.menu.models import CategoryModel, DishModel
 from app.modules.menu.schemas import CategoryCreate, DishCreate, DishUpdate
+from app.tenancy import tenant_find
 
 
 class MenuService:
@@ -30,8 +31,8 @@ class MenuService:
 
     @staticmethod
     def delete_category(db: Session, restaurant_id: str, category_id: str):
-        category = db.get(CategoryModel, category_id)
-        if not category or category.restaurant_id != restaurant_id:
+        category = tenant_find(db, CategoryModel, category_id, restaurant_id)
+        if not category:
             return False
         category.is_active = False
         for dish in category.items:
@@ -56,7 +57,7 @@ class MenuService:
             image_url=dish_data.image_url,
             is_available=dish_data.is_available,
         )
-        category = db.get(CategoryModel, dish.category_id) if dish.category_id else None
+        category = tenant_find(db, CategoryModel, dish.category_id, restaurant_id)
         dish.sale_channel = classify_sale_channel(
             dish.name,
             dish.description,
@@ -93,8 +94,8 @@ class MenuService:
 
     @staticmethod
     def update_dish(db: Session, restaurant_id: str, dish_id: str, dish_data: DishUpdate):
-        dish = db.get(DishModel, dish_id)
-        if not dish or dish.restaurant_id != restaurant_id:
+        dish = tenant_find(db, DishModel, dish_id, restaurant_id)
+        if not dish:
             return None
 
         update_data = dish_data.dict(exclude_unset=True)
@@ -104,7 +105,7 @@ class MenuService:
 
         for key, value in update_data.items():
             setattr(dish, key, value)
-        category = db.get(CategoryModel, dish.category_id) if dish.category_id else None
+        category = tenant_find(db, CategoryModel, dish.category_id, restaurant_id)
         dish.sale_channel = classify_sale_channel(
             dish.name,
             dish.description,
@@ -126,8 +127,8 @@ class MenuService:
 
     @staticmethod
     def toggle_dish_availability(db: Session, restaurant_id: str, dish_id: str):
-        dish = db.get(DishModel, dish_id)
-        if not dish or dish.restaurant_id != restaurant_id:
+        dish = tenant_find(db, DishModel, dish_id, restaurant_id)
+        if not dish:
             return None
         dish.is_available = not dish.is_available
         db.commit()
@@ -136,8 +137,8 @@ class MenuService:
 
     @staticmethod
     def delete_dish(db: Session, restaurant_id: str, dish_id: str):
-        dish = db.get(DishModel, dish_id)
-        if not dish or dish.restaurant_id != restaurant_id:
+        dish = tenant_find(db, DishModel, dish_id, restaurant_id)
+        if not dish:
             return False
         dish.is_available = False
         db.commit()
@@ -145,5 +146,4 @@ class MenuService:
 
     @staticmethod
     def category_belongs_to_restaurant(db: Session, restaurant_id: str, category_id: str) -> bool:
-        category = db.get(CategoryModel, category_id)
-        return bool(category and category.restaurant_id == restaurant_id)
+        return tenant_find(db, CategoryModel, category_id, restaurant_id) is not None

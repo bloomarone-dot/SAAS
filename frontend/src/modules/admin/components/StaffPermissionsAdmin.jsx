@@ -5,7 +5,14 @@ import { AdminFormModal, ModuleFilterBar, PageHeader } from "@/modules/admin/com
 import { matchesPeriod } from "@/utils/greeting";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { validationFor } from "@/utils/validation";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
+
+const STAFF_FALLBACK = "Action utilisateur impossible.";
+
+function staffApi(path, options = {}) {
+  const { fallback = STAFF_FALLBACK, ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
+}
 
 const STAFF_ROLES = ["MANAGER", "SERVEUR", "CUISINE", "CAISSE", "STOCK", "COMPTABLE"];
 
@@ -31,7 +38,7 @@ const roleLabels = {
   COMPTABLE: "Comptable",
 };
 
-export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
+export function StaffPermissionsAdmin({ currentUser, onMessage }) {
   const [users, setUsers] = useState([]);
   const [permissionGroups, setPermissionGroups] = useState([]);
   const [rolePresets, setRolePresets] = useState([]);
@@ -52,8 +59,6 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
   const [customPeriod, setCustomPeriod] = useState({ start: "", end: "" });
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
   const [isLoading, setIsLoading] = useState(false);
-
-  const token = localStorage.getItem("access_token");
 
   const selectedUser = useMemo(
     () => users.find((user) => user.id === selectedUserId) ?? null,
@@ -135,35 +140,14 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     setFormPermissions(formRoleDefaults);
   }, [form.role, formRoleDefaults]);
 
-  async function api(path, options = {}) {
-    const fallback = options.fallback || "Action utilisateur impossible.";
-    const { fallback: _fallback, ...requestOptions } = options;
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...requestOptions,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(requestOptions.headers ?? {}),
-      },
-    });
-
-    if (response.status === 204) return null;
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(formatApiError(data.detail ?? data.message ?? data.error, fallback));
-    }
-    return data;
-  }
-
   async function loadAccessData() {
     setIsLoading(true);
     try {
       const [usersData, groupsData, presetsData, branchesData] = await Promise.all([
-        api("/api/v1/users"),
-        api("/api/v1/permissions/groups"),
-        api("/api/v1/permissions/role-presets"),
-        api("/api/v1/branches").catch(() => []),
+        staffApi("/api/v1/users"),
+        staffApi("/api/v1/permissions/groups"),
+        staffApi("/api/v1/permissions/role-presets"),
+        staffApi("/api/v1/branches").catch(() => []),
       ]);
       setUsers(usersData);
       setPermissionGroups(groupsData);
@@ -227,9 +211,9 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
         responsible_id: form.responsible_id || null,
         permissions: formPermissions,
       };
-      const created = await api("/api/v1/users", {
+      const created = await staffApi("/api/v1/users", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       setUsers((current) => [created, ...current]);
       setForm(emptyForm);
@@ -247,9 +231,9 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     if (!selectedUser) return;
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/users/${selectedUser.id}/permissions`, {
+      const updated = await staffApi(`/api/v1/users/${selectedUser.id}/permissions`, {
         method: "PUT",
-        body: JSON.stringify({ permissions: draftPermissions }),
+        body: { permissions: draftPermissions },
       });
       setUsers((current) => current.map((user) => (user.id === updated.id ? updated : user)));
       onMessage("Permissions mises à jour.");
@@ -265,9 +249,9 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     if (!selectedUser || !editForm) return;
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/users/${selectedUser.id}`, {
+      const updated = await staffApi(`/api/v1/users/${selectedUser.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
+        body: {
           ...editForm,
           email: editForm.email.trim() || null,
           phone: editForm.phone.trim() || null,
@@ -275,7 +259,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
           quartier: editForm.quartier.trim() || null,
           responsible_id: editForm.responsible_id || null,
           permissions: draftPermissions,
-        }),
+        },
       });
       setUsers((current) => current.map((user) => (user.id === updated.id ? updated : user)));
       onMessage("Informations du personnel mises à jour.");
@@ -289,9 +273,9 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
   async function toggleStatus(user) {
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/users/${user.id}/status`, {
+      const updated = await staffApi(`/api/v1/users/${user.id}/status`, {
         method: "PATCH",
-        body: JSON.stringify({ is_active: !user.is_active }),
+        body: { is_active: !user.is_active },
       });
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       onMessage(updated.is_active ? "Compte activé." : "Compte désactivé.");
@@ -307,9 +291,9 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     if (!selectedUser) return;
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/users/${selectedUser.id}/password`, {
+      const updated = await staffApi(`/api/v1/users/${selectedUser.id}/password`, {
         method: "PATCH",
-        body: JSON.stringify({ password: passwordForm }),
+        body: { password: passwordForm },
       });
       setUsers((current) => current.map((user) => (user.id === updated.id ? updated : user)));
       setPasswordForm("");
@@ -331,7 +315,7 @@ export function StaffPermissionsAdmin({ apiBaseUrl, currentUser, onMessage }) {
     }
     setIsLoading(true);
     try {
-      await api(`/api/v1/users/${user.id}`, { method: "DELETE" });
+      await staffApi(`/api/v1/users/${user.id}`, { method: "DELETE" });
       setUsers((current) => current.map((item) => (item.id === user.id ? { ...item, is_active: false } : item)));
       onMessage("Utilisateur archivé. Il peut être restauré depuis cette liste.");
     } catch (error) {

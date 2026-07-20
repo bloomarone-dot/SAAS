@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChefHat, Clock, CreditCard, Eye, EyeOff, LogIn, MapPin, MessageCircle, Minus, Phone, Plus, Search, ShieldCheck, ShoppingCart, Sparkles, Star, Store, Trash2, Truck, Utensils } from "lucide-react";
 import { TenantThemeProvider } from "@/tenancy/TenantProvider";
+import { apiFetchPublic } from "@/config/http";
 import { initAos } from "@/utils/aos";
 import { normalizePublicRestaurant } from "@/utils/restaurantTheme";
 
@@ -9,18 +10,12 @@ function navigate(path) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-async function postLogin(url, login, password) {
-  const response = await fetch(url, {
+async function postLogin(path, login, password) {
+  return apiFetchPublic(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login, password }),
+    body: { login, password },
+    fallback: "Connexion impossible.",
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = Array.isArray(data?.detail) ? data.detail.map((d) => d.msg).join(" · ") : data?.detail;
-    throw new Error(detail || "Connexion impossible.");
-  }
-  return data;
 }
 
 const inputClass =
@@ -103,7 +98,7 @@ export function SuperAdminLoginPage({ apiBaseUrl, onAuthenticated }) {
       accent="#7c3aed"
       buttonLabel="Accéder à la plateforme"
       onSubmit={async (login, password) => {
-        const data = await postLogin(`${apiBaseUrl}/api/v1/auth/superadmin/login`, login, password);
+        const data = await postLogin("/api/v1/auth/superadmin/login", login, password);
         onAuthenticated(data);
       }}
     />
@@ -122,14 +117,10 @@ export function AccessPortalPage({ apiBaseUrl, message, onForgotPassword }) {
     setError("");
     setBusy(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/restaurants/public/${encodeURIComponent(normalized)}`);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(
-          data?.detail
-            || "Restaurant introuvable. Utilisez le slug exact (ex. leboncoin, le-bon-coin ou main), pas le nom d'utilisateur.",
-        );
-      }
+      await apiFetchPublic(`/api/v1/restaurants/public/${encodeURIComponent(normalized)}`, {
+        fallback:
+          "Restaurant introuvable. Utilisez le slug exact (ex. leboncoin, le-bon-coin ou main), pas le nom d'utilisateur.",
+      });
       navigate(`/r/${normalized}/login`);
     } catch (err) {
       setError(err.message || "Restaurant introuvable.");
@@ -222,11 +213,10 @@ export function RestaurantLoginPage({ apiBaseUrl, slug, onAuthenticated }) {
   const [restaurant, setRestaurant] = useState(undefined);
   useEffect(() => {
     setRestaurant(undefined);
-    fetch(`${apiBaseUrl}/api/v1/restaurants/public/${encodeURIComponent(slug)}`)
-      .then((response) => (response.ok ? response.json() : null))
+    apiFetchPublic(`/api/v1/restaurants/public/${encodeURIComponent(slug)}`)
       .then((data) => setRestaurant(data ? normalizePublicRestaurant(data) : null))
       .catch(() => setRestaurant(null));
-  }, [apiBaseUrl, slug]);
+  }, [slug]);
 
   if (restaurant === undefined) {
     return <PublicState title="Chargement" text="Vérification du restaurant…" />;
@@ -255,7 +245,7 @@ export function RestaurantLoginPage({ apiBaseUrl, slug, onAuthenticated }) {
       accent="var(--tenant-primary)"
       buttonLabel="Se connecter"
       onSubmit={async (login, password) => {
-        const data = await postLogin(`${apiBaseUrl}/api/v1/auth/restaurants/${slug}/login`, login, password);
+        const data = await postLogin(`/api/v1/auth/restaurants/${slug}/login`, login, password);
         onAuthenticated(data);
       }}
       footer={
@@ -273,12 +263,9 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
 
   useEffect(() => {
     const host = window.location.hostname;
-    fetch(`${apiBaseUrl}/api/v1/public/tenant/resolve?host=${encodeURIComponent(host)}`)
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data?.detail || "Restaurant introuvable");
-        return data;
-      })
+    apiFetchPublic(`/api/v1/public/tenant/resolve?host=${encodeURIComponent(host)}`, {
+      fallback: "Restaurant introuvable",
+    })
       .then((data) => {
         if (!data?.restaurant) {
           setTenant(data);
@@ -290,7 +277,7 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
         });
       })
       .catch(() => setTenant(null));
-  }, [apiBaseUrl]);
+  }, []);
 
   if (tenant === undefined) {
     return <PublicState title="Chargement du restaurant" text="Préparation de la vitrine..." />;
@@ -370,8 +357,7 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
       setDishes(initialData.dishes || []);
       return;
     }
-    fetch(`${apiBaseUrl}/api/v1/menu/public/${slug}`)
-      .then((r) => (r.ok ? r.json() : null))
+    apiFetchPublic(`/api/v1/menu/public/${slug}`)
       .then((data) => {
         if (!data) {
           setRestaurant(null);
@@ -382,7 +368,7 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
         setDishes(data.dishes || []);
       })
       .catch(() => setRestaurant(null));
-  }, [apiBaseUrl, slug, initialData]);
+  }, [slug, initialData]);
 
   useEffect(() => {
     if (!initialSection || restaurant === undefined) return;
@@ -488,16 +474,11 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
           quantity: line.quantity,
         })),
       };
-      const response = await fetch(`${apiBaseUrl}/api/v1/orders/public/${slug}`, {
+      const data = await apiFetchPublic(`/api/v1/orders/public/${slug}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: payload,
+        fallback: "Commande impossible pour le moment.",
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = Array.isArray(data?.detail) ? data.detail.map((item) => item.msg || item.message).filter(Boolean).join(" ") : data?.detail;
-        throw new Error(detail || "Commande impossible pour le moment.");
-      }
       setCart({});
       setOrderForm({
         customer_name: "",

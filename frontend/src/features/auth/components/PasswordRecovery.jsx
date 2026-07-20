@@ -1,20 +1,7 @@
 import { useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
-import { formatApiError } from "@/utils/network";
-
-async function postJson(apiBaseUrl, path, body) {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, "Récupération du mot de passe impossible."));
-  }
-  return data;
-}
+import { apiFetchPublic } from "@/config/http";
 
 function Shell({ title, subtitle, children }) {
   return (
@@ -39,7 +26,7 @@ const inputClass =
 const primaryBtn =
   "h-12 w-full rounded-lg bg-[#078d50] text-sm font-black text-white shadow-sm transition-all hover:bg-[#046b3c] disabled:cursor-not-allowed disabled:opacity-70";
 
-export function PasswordRecovery({ apiBaseUrl, mode = "forgot", token = "", onBackToLogin }) {
+export function PasswordRecovery({ mode = "forgot", token = "", onBackToLogin }) {
   const isReset = mode === "reset";
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -55,7 +42,11 @@ export function PasswordRecovery({ apiBaseUrl, mode = "forgot", token = "", onBa
     setError("");
     setBusy(true);
     try {
-      const data = await postJson(apiBaseUrl, "/api/v1/auth/forgot-password", { login: login.trim() });
+      const data = await apiFetchPublic("/api/v1/auth/forgot-password", {
+        method: "POST",
+        body: { login: login.trim() },
+        fallback: "Récupération du mot de passe impossible.",
+      });
       setDone(data.message || "Si le compte existe, un lien de réinitialisation a été envoyé par email.");
     } catch (err) {
       setError(err.message);
@@ -73,7 +64,11 @@ export function PasswordRecovery({ apiBaseUrl, mode = "forgot", token = "", onBa
     }
     setBusy(true);
     try {
-      await postJson(apiBaseUrl, "/api/v1/auth/reset-password", { token, password });
+      await apiFetchPublic("/api/v1/auth/reset-password", {
+        method: "POST",
+        body: { token, password },
+        fallback: "Récupération du mot de passe impossible.",
+      });
       setDone("Mot de passe réinitialisé. Vous pouvez maintenant vous connecter.");
     } catch (err) {
       setError(err.message);

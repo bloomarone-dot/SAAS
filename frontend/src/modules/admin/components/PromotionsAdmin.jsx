@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 
 import { AdminCard, AdminKpis, AdminPage, EmptyState, Field, PrimaryAction, SecondaryAction, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
+
+const PROMOTIONS_FALLBACK = "Action code promo impossible.";
+
+function promotionsApi(path, options = {}) {
+  const { fallback = PROMOTIONS_FALLBACK, ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
+}
 
 const emptyPromo = {
   code: "",
@@ -20,7 +27,7 @@ function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 }
 
-export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
+export function PromotionsAdmin({ onMessage }) {
   const [promotions, setPromotions] = useState([]);
   const [form, setForm] = useState(emptyPromo);
   const [editingId, setEditingId] = useState("");
@@ -28,27 +35,12 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
 
   useEffect(() => {
     loadPromotions();
-  }, [apiBaseUrl]);
-
-  async function api(path, options = {}) {
-    const token = localStorage.getItem("access_token");
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...(options.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(formatApiError(data?.detail, "Action code promo impossible."));
-    return data;
-  }
+  }, []);
 
   async function loadPromotions() {
     setIsLoading(true);
     try {
-      setPromotions(await api("/api/v1/finance/promotions"));
+      setPromotions(await promotionsApi("/api/v1/finance/promotions"));
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -76,9 +68,9 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
       ends_at: form.ends_at ? `${form.ends_at}T23:59:59` : null,
     };
     try {
-      const saved = await api(editingId ? `/api/v1/finance/promotions/${editingId}` : "/api/v1/finance/promotions", {
+      const saved = await promotionsApi(editingId ? `/api/v1/finance/promotions/${editingId}` : "/api/v1/finance/promotions", {
         method: editingId ? "PATCH" : "POST",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       setPromotions((current) => editingId ? current.map((promo) => promo.id === saved.id ? saved : promo) : [saved, ...current]);
       setForm(emptyPromo);
@@ -111,7 +103,7 @@ export function PromotionsAdmin({ apiBaseUrl, onMessage }) {
     if (!window.confirm(`Archiver le code ${promo.code} ?\n\nLe code restera en base de données.`)) return;
     setIsLoading(true);
     try {
-      await api(`/api/v1/finance/promotions/${promo.id}`, { method: "DELETE" });
+      await promotionsApi(`/api/v1/finance/promotions/${promo.id}`, { method: "DELETE" });
       setPromotions((current) => current.map((item) => (item.id === promo.id ? { ...item, is_active: false } : item)));
       onMessage(`Code promo ${promo.code} archivé.`);
     } catch (error) {

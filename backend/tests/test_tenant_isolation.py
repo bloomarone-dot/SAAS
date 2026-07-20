@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import Column, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from app.tenancy import tenant_get_or_404
+from app.tenancy import tenant_get_or_404, tenant_get_optional
 
 Base = declarative_base()
 
@@ -53,6 +53,18 @@ class TenantIsolationTests(unittest.TestCase):
         session = self.Session()
         with self.assertRaises(HTTPException) as ctx:
             tenant_get_or_404(session, Widget, "inconnu", "resto-A")
+        self.assertEqual(ctx.exception.status_code, 404)
+        session.close()
+
+    def test_tenant_get_optional_returns_none_for_empty_pk(self):
+        session = self.Session()
+        self.assertIsNone(tenant_get_optional(session, Widget, None, "resto-A"))
+        session.close()
+
+    def test_tenant_get_optional_cross_tenant_is_404(self):
+        session = self.Session()
+        with self.assertRaises(HTTPException) as ctx:
+            tenant_get_optional(session, Widget, "w2", "resto-A")
         self.assertEqual(ctx.exception.status_code, 404)
         session.close()
 

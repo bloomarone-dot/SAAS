@@ -4,7 +4,7 @@ import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { apiFetch } from "@/config/http";
-import { MtnMoneyPayment } from "./MtnMoneyPayment";
+import { orderTakerDisplay, orderTakerRole, isDeliveryOrder } from "@/modules/orders/utils/orderLabels";
 import { OrangeMoneyPayment } from "./OrangeMoneyPayment";
 
 const statuses = ["Toutes", "Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
@@ -394,7 +394,11 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onDetail, onEdit, on
               <td className="py-3 font-black text-slate-950">{order.order_number}</td>
               <td className="py-3">
                 <p className="font-black text-slate-900">{order.table_id ? `Table ${order.table_name || order.table_id}` : order.customer_name}</p>
-                <p className="text-xs font-semibold text-slate-500">{order.server_name || order.customer_phone || "-"}</p>
+                <p className="text-xs font-semibold text-slate-500">
+                  {isDeliveryOrder(order)
+                    ? orderTakerDisplay(order)
+                    : order.server_name || order.customer_phone || "-"}
+                </p>
               </td>
               <td className="py-3 font-black text-slate-900">{money(order.total_amount)}</td>
               <td className="py-3"><StatusBadge status={order.status} /></td>
@@ -454,7 +458,7 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
         <p className="text-2xl font-black text-[var(--dashboard-secondary)]">{order.order_number}</p>
         <p className="mt-1 text-sm font-semibold text-slate-500">{order.customer_name} · {new Date(order.created_at).toLocaleString("fr-FR")}</p>
         <p className="mt-1 text-xs font-bold text-slate-500">
-          {order.order_source || order.fulfillment_type} · {order.table_id ? `${order.table_room || "Salle"} / Table ${order.table_name || order.table_id}` : "Commande client"} · Serveuse : {order.server_name || "-"}
+          {order.order_source || order.fulfillment_type} · {order.table_id ? `${order.table_room || "Salle"} / Table ${order.table_name || order.table_id}` : "Commande client"} · {orderTakerRole(order)} : {orderTakerDisplay(order)}
         </p>
         <div className="mt-2"><StatusBadge status={order.status} /></div>
       </div>

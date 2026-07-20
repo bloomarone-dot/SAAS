@@ -1,48 +1,26 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.modules.auth.auth_resolution import authenticate_user_from_access_token, resolve_access_token
 from app.modules.permissions.models import Permission, Role
-from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
-from app.security import decode_access_token
 
 
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    """Recupere l'utilisateur authentifie depuis le bearer token."""
-    payload = decode_access_token(credentials.credentials)
-    user_id = payload.get("sub") if payload else None
-
-    if not user_id:
+    """Recupere l'utilisateur authentifie depuis Bearer (prioritaire) ou cookie access."""
+    token = resolve_access_token(request, credentials)
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token invalide")
-
-    user = db.get(User, user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Utilisateur invalide")
-
-    # Revocation: un jeton emis avant un reset de mot de passe ou une deconnexion
-    # globale porte une version anterieure et n'est plus accepte.
-    if int(payload.get("ver", 0)) != int(getattr(user, "token_version", 0) or 0):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expirée")
-
-    # Suspension tenant: un restaurant suspendu (ou impaye) bloque tous ses comptes,
-    # quel que soit le jeton deja emis. Le superadmin (sans restaurant) n'est pas concerne.
-    if user.restaurant_id:
-        restaurant = db.get(Restaurant, user.restaurant_id)
-        if not restaurant or not restaurant.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Restaurant suspendu. Contactez l'administration de la plateforme.",
-            )
-
-    return user
+    return authenticate_user_from_access_token(db, token)
 
 
 def require_tenant_user(current_user: User = Depends(get_current_user)) -> User:

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminFormModal, DashboardSection, FilterBar, SecondaryAction } from "@/modules/admin/components/AdminUi";
 import { menuApi } from "@/modules/menu/services/menuApi";
+import { orderTakerDisplay } from "@/modules/orders/utils/orderLabels";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
@@ -276,7 +277,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
         </div>
         <div className="mt-3 space-y-1 text-xs font-semibold text-slate-600">
           <p><DashboardIcon name="MapPin" size={12} className="mr-1 inline" />{order.delivery_area_name || "Quartier non renseigné"}</p>
-          <p><DashboardIcon name="User" size={12} className="mr-1 inline" />Caissier(ère) : {order.created_by_cashier_name || order.cashier_name || "Non renseigné"}</p>
+          <p><DashboardIcon name="User" size={12} className="mr-1 inline" />Prise en charge : {orderTakerDisplay(order)}</p>
           <p><DashboardIcon name="Phone" size={12} className="mr-1 inline" />{order.payment_method}</p>
           <p className="line-clamp-2">{itemsLabel}</p>
           <p>{money(order.total_amount)} · {formatDateTime(order.created_at)}</p>

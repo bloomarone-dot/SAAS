@@ -19,13 +19,41 @@ const emptyDish = {
   cost_per_dish: "",
   image_url: "",
   is_available: true,
+  requires_kitchen: null,
 };
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 }
 
-function buildDishPayload(categoryId, dishForm) {
+function isDrinkCategory(name = "") {
+  const normalized = name.trim().toLowerCase();
+  return /boisson|cocktail|bar\b|vin\b|bi[eè]re|spiritueux|soft|soda|jus\b|whisky|rhum|caf[eé]|th[eé]/.test(normalized);
+}
+
+function getCatalogTerms(categoryName = "") {
+  const drink = isDrinkCategory(categoryName);
+  return {
+    item: drink ? "produit" : "plat",
+    Item: drink ? "Produit" : "Plat",
+    items: drink ? "produits" : "plats",
+    Items: drink ? "Produits" : "Plats",
+    costLabel: drink ? "Coût unitaire" : "Coût par plat",
+    imageLabel: drink ? "Image produit" : "Image plat",
+    icon: drink ? "Package" : "Utensils",
+    defaultRequiresKitchen: drink ? false : true,
+  };
+}
+
+function buildDishPayload(categoryId, dishForm, categoryName = "") {
+  const terms = getCatalogTerms(categoryName);
+  let requiresKitchen = dishForm.requires_kitchen;
+  if (requiresKitchen === "" || requiresKitchen === null || requiresKitchen === undefined) {
+    requiresKitchen = terms.defaultRequiresKitchen;
+  } else {
+    requiresKitchen = Boolean(requiresKitchen);
+  }
+
   return {
     category_id: categoryId,
     name: dishForm.name.trim(),
@@ -34,7 +62,7 @@ function buildDishPayload(categoryId, dishForm) {
     description: dishForm.description.trim() || null,
     image_url: dishForm.image_url.trim() || null,
     is_available: dishForm.is_available,
-    requires_kitchen: null,
+    requires_kitchen: requiresKitchen,
   };
 }
 
@@ -55,6 +83,9 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
   const [uploadingImage, setUploadingImage] = useState(false);
 
   const readOnly = role === "CUISINE";
+  const dishModalCategory = categories.find((category) => category.id === dishModalCategoryId);
+  const createTerms = getCatalogTerms(categoryForm.name);
+  const dishModalTerms = getCatalogTerms(dishModalCategory?.name);
 
   const visibleCategories = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -84,6 +115,15 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
   useEffect(() => {
     loadCatalog();
   }, [restaurantId]);
+
+  useEffect(() => {
+    if (!showCreateModal) return;
+    const terms = getCatalogTerms(categoryForm.name);
+    setDishForm((current) => ({
+      ...current,
+      requires_kitchen: terms.defaultRequiresKitchen,
+    }));
+  }, [categoryForm.name, showCreateModal]);
 
   async function loadCatalog() {
     setLoading(true);
@@ -144,8 +184,9 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
 
   async function createCategoryWithDish(event) {
     event.preventDefault();
+    const terms = getCatalogTerms(categoryForm.name);
     if (!dishForm.name.trim() || !dishForm.price) {
-      setError("Renseignez au moins le nom et le prix du premier plat.");
+      setError(`Renseignez au moins le nom et le prix du premier ${terms.item}.`);
       return;
     }
     try {
@@ -155,7 +196,9 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
         description: categoryForm.description.trim() || null,
         image_url: categoryForm.image_url.trim() || null,
       });
-      const createdDish = await menuApi.createDish(buildDishPayload(createdCategory.id, dishForm));
+      const createdDish = await menuApi.createDish(
+        buildDishPayload(createdCategory.id, dishForm, createdCategory.name),
+      );
       setCategories((current) => [createdCategory, ...current]);
       setDishesByCategory((current) => ({
         ...current,
@@ -164,7 +207,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
       setExpandedCategoryId(createdCategory.id);
       resetCreateModal();
       setError("");
-      onMessage?.(`Catégorie « ${createdCategory.name} » et plat créés.`);
+      onMessage?.(`Catégorie « ${createdCategory.name} » et ${terms.item} créés.`);
     } catch (err) {
       setError(err.message || "Création du catalogue impossible.");
     }
@@ -183,16 +226,24 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
   }
 
   function openAddDishModal(categoryId) {
+    const category = categories.find((item) => item.id === categoryId);
+    const terms = getCatalogTerms(category?.name);
     setDishModalCategoryId(categoryId);
-    setExtraDishForm(emptyDish);
+    setExtraDishForm({
+      ...emptyDish,
+      requires_kitchen: terms.defaultRequiresKitchen,
+    });
     setShowDishModal(true);
   }
 
   async function createExtraDish(event) {
     event.preventDefault();
     if (!dishModalCategoryId) return;
+    const terms = getCatalogTerms(dishModalCategory?.name);
     try {
-      const created = await menuApi.createDish(buildDishPayload(dishModalCategoryId, extraDishForm));
+      const created = await menuApi.createDish(
+        buildDishPayload(dishModalCategoryId, extraDishForm, dishModalCategory?.name),
+      );
       setDishesByCategory((current) => ({
         ...current,
         [dishModalCategoryId]: [created, ...(current[dishModalCategoryId] ?? [])],
@@ -200,9 +251,9 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
       setShowDishModal(false);
       setExtraDishForm(emptyDish);
       setExpandedCategoryId(dishModalCategoryId);
-      onMessage?.(`Plat « ${created.name} » ajouté.`);
+      onMessage?.(`${terms.Item} « ${created.name} » ajouté.`);
     } catch (err) {
-      setError(err.message || "Ajout du plat impossible.");
+      setError(err.message || `Ajout du ${terms.item} impossible.`);
     }
   }
 
@@ -233,18 +284,16 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
     return <div className="p-6 text-sm font-semibold text-slate-500">Chargement du catalogue...</div>;
   }
 
-  const dishModalCategory = categories.find((category) => category.id === dishModalCategoryId);
-
   return (
     <section className="space-y-6">
       <PageHeader
         title="Catalogue"
-        subtitle="Créez une catégorie et son premier plat en une seule étape. La liste s'affiche ensuite en pleine largeur."
+        subtitle="Créez une catégorie et son premier article en une seule étape. Les boissons sont gérées comme des produits."
         primaryAction={
           !readOnly && (
             <button type="button" onClick={() => setShowCreateModal(true)} className="lte-btn lte-btn-primary">
               <DashboardIcon name="Plus" size={17} />
-              Catégorie + plat
+              Catégorie + article
             </button>
           )
         }
@@ -259,7 +308,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
       <ModuleFilterBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Rechercher une catégorie ou un plat..."
+        searchPlaceholder="Rechercher une catégorie ou un article..."
         showPeriod={false}
         showBranch={false}
       >
@@ -278,7 +327,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="text-lg font-black text-[var(--dashboard-secondary)]">Catalogue complet</h2>
           <p className="text-sm font-medium text-slate-500">
-            {visibleCategories.length} catégorie(s) · cliquez sur une ligne pour voir ses plats
+            {visibleCategories.length} catégorie(s) · cliquez sur une ligne pour voir ses articles
           </p>
         </div>
 
@@ -286,9 +335,9 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
           <table className="lte-table min-w-[900px]">
             <thead>
               <tr>
-                <th>Catégorie / Plat</th>
+                <th>Catégorie / Article</th>
                 <th>Prix</th>
-                <th>Plats</th>
+                <th>Articles</th>
                 <th>Statut</th>
                 <th className="text-right">Actions</th>
               </tr>
@@ -297,6 +346,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
               {visibleCategories.map((category) => {
                 const dishes = dishesForCategory(category.id);
                 const expanded = expandedCategoryId === category.id;
+                const terms = getCatalogTerms(category.name);
                 return (
                   <Fragment key={category.id}>
                     <tr
@@ -340,7 +390,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
                             >
                               <DashboardIcon name="Plus" size={15} />
-                              Plat
+                              {terms.Item}
                             </button>
                           )}
                           {!readOnly && (
@@ -370,8 +420,8 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                                   {dish.image_url ? (
                                     <img src={dish.image_url} alt="" className="h-10 w-10 rounded-lg object-cover" />
                                   ) : (
-                                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-[var(--dashboard-primary)]">
-                                      <DashboardIcon name="Utensils" size={16} />
+                                    <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${terms.icon === "Package" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-[var(--dashboard-primary)]"}`}>
+                                      <DashboardIcon name={terms.icon} size={16} />
                                     </span>
                                   )}
                                   <div className="min-w-[180px] flex-1">
@@ -409,8 +459,8 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                             </div>
                           ) : (
                             <EmptyState
-                              title="Aucun plat"
-                              text={readOnly ? "Aucun plat dans cette catégorie." : "Ajoutez un plat à cette catégorie."}
+                              title={`Aucun ${terms.item}`}
+                              text={readOnly ? `Aucun ${terms.item} dans cette catégorie.` : `Ajoutez un ${terms.item} à cette catégorie.`}
                             />
                           )}
                         </td>
@@ -423,7 +473,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
           </table>
 
           {!visibleCategories.length && (
-            <EmptyState title="Aucune catégorie" text="Créez une catégorie avec son premier plat pour commencer." />
+            <EmptyState title="Aucune catégorie" text="Créez une catégorie avec son premier article pour commencer." />
           )}
         </div>
 
@@ -435,8 +485,8 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
       <AdminFormModal
         open={showCreateModal}
         onClose={resetCreateModal}
-        title="Catégorie + premier plat"
-        description="Créez la catégorie et son premier plat ou boisson en une seule fois."
+        title={`Catégorie + premier ${createTerms.item}`}
+        description={`Créez la catégorie et son premier ${createTerms.item} en une seule fois.`}
         size="xl"
         footer={
           <>
@@ -444,7 +494,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
               Annuler
             </button>
             <button type="submit" form="catalog-create-form" className="lte-btn lte-btn-primary">
-              Créer catégorie et plat
+              Créer catégorie et {createTerms.item}
             </button>
           </>
         }
@@ -495,18 +545,18 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
 
           <div className="border-t border-slate-200 pt-5">
             <p className="mb-3 text-xs font-black uppercase tracking-wide text-[var(--dashboard-primary)]">
-              2. Premier plat / boisson
+              2. Premier {createTerms.item}
             </p>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="lte-form-group md:col-span-2">
-                <span className="lte-label">Nom du plat <span className="req">*</span></span>
+                <span className="lte-label">Nom du {createTerms.item} <span className="req">*</span></span>
                 <input
                   required
                   name="name"
                   value={dishForm.name}
                   onChange={updateDishForm}
                   className="form-control"
-                  placeholder="Ex : Poulet braisé, Coca-Cola..."
+                  placeholder={createTerms.item === "produit" ? "Ex : Coca-Cola, Jus de bissap..." : "Ex : Poulet braisé, Ndolé..."}
                 />
               </label>
               <label className="lte-form-group">
@@ -522,7 +572,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                 />
               </label>
               <label className="lte-form-group">
-                <span className="lte-label">Coût unitaire</span>
+                <span className="lte-label">{createTerms.costLabel}</span>
                 <input
                   type="number"
                   min="0"
@@ -543,7 +593,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                 />
               </label>
               <label className="lte-form-group">
-                <span className="lte-label">Image plat</span>
+                <span className="lte-label">{createTerms.imageLabel}</span>
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
@@ -564,6 +614,25 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                 />
                 Disponible à la vente
               </label>
+              {!readOnly && (
+                <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:col-span-2">
+                  <input
+                    type="checkbox"
+                    name="requires_kitchen"
+                    checked={dishForm.requires_kitchen !== false}
+                    onChange={updateDishForm}
+                    className="mt-1"
+                  />
+                  <span className="text-sm font-semibold text-slate-700">
+                    Préparer en cuisine
+                    <span className="mt-1 block text-xs font-medium text-slate-500">
+                      {createTerms.item === "produit"
+                        ? "Décochez pour les boissons bar (sodas, vin, whisky). Cochez pour les boissons à préparer (jus naturel)."
+                        : "Cochez pour les plats chauds et préparations cuisine."}
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
           </div>
         </form>
@@ -575,8 +644,8 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
           setShowDishModal(false);
           setExtraDishForm(emptyDish);
         }}
-        title={`Ajouter un plat — ${dishModalCategory?.name ?? ""}`}
-        description="Ajoutez un autre plat ou boisson à cette catégorie."
+        title={`Ajouter un ${dishModalTerms.item} — ${dishModalCategory?.name ?? ""}`}
+        description={`Ajoutez un autre ${dishModalTerms.item} à cette catégorie.`}
         size="lg"
         footer={
           <>
@@ -591,14 +660,14 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
               Annuler
             </button>
             <button type="submit" form="catalog-extra-dish-form" className="lte-btn lte-btn-primary">
-              Ajouter le plat
+              Ajouter le {dishModalTerms.item}
             </button>
           </>
         }
       >
         <form id="catalog-extra-dish-form" onSubmit={createExtraDish} className="grid gap-4 md:grid-cols-2">
           <label className="lte-form-group md:col-span-2">
-            <span className="lte-label">Nom <span className="req">*</span></span>
+            <span className="lte-label">Nom du {dishModalTerms.item} <span className="req">*</span></span>
             <input required name="name" value={extraDishForm.name} onChange={updateExtraDishForm} className="form-control" />
           </label>
           <label className="lte-form-group">
@@ -606,7 +675,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
             <input required type="number" min="0" name="price" value={extraDishForm.price} onChange={updateExtraDishForm} className="form-control" />
           </label>
           <label className="lte-form-group">
-            <span className="lte-label">Coût unitaire</span>
+            <span className="lte-label">{dishModalTerms.costLabel}</span>
             <input type="number" min="0" name="cost_per_dish" value={extraDishForm.cost_per_dish} onChange={updateExtraDishForm} className="form-control" />
           </label>
           <label className="lte-form-group md:col-span-2">
@@ -614,7 +683,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
             <textarea name="description" rows={2} value={extraDishForm.description} onChange={updateExtraDishForm} className="form-control" />
           </label>
           <label className="lte-form-group md:col-span-2">
-            <span className="lte-label">Image plat</span>
+            <span className="lte-label">{dishModalTerms.imageLabel}</span>
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
@@ -630,6 +699,25 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
             <input type="checkbox" name="is_available" checked={extraDishForm.is_available} onChange={updateExtraDishForm} />
             Disponible à la vente
           </label>
+          {!readOnly && (
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:col-span-2">
+              <input
+                type="checkbox"
+                name="requires_kitchen"
+                checked={extraDishForm.requires_kitchen !== false}
+                onChange={updateExtraDishForm}
+                className="mt-1"
+              />
+              <span className="text-sm font-semibold text-slate-700">
+                Préparer en cuisine
+                <span className="mt-1 block text-xs font-medium text-slate-500">
+                  {dishModalTerms.item === "produit"
+                    ? "Décochez pour les boissons bar. Cochez pour les boissons à préparer en cuisine."
+                    : "Cochez pour les plats chauds et préparations cuisine."}
+                </span>
+              </span>
+            </label>
+          )}
         </form>
       </AdminFormModal>
     </section>

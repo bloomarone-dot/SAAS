@@ -54,3 +54,22 @@ class ChangePasswordIn(BaseModel):
     @validator("new_password")
     def new_password_is_strong(cls, value: str) -> str:
         return validate_password_strength(value)
+
+
+class RefreshTokenIn(BaseModel):
+    """Refresh token transmis en JSON (temporaire, en attendant les cookies HttpOnly)."""
+
+    refresh_token: str | None = Field(default=None, min_length=20)
+
+
+class TokenPairOut(BaseModel):
+    """Couple access + refresh pour la rotation de session."""
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserPublic
+
+
+class LogoutOut(BaseModel):
+    message: str

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { APP_MENUS } from "@/config/menu";
+import { apiFetch, getToken, setToken } from "@/config/http";
 import { InstallAppButton } from "@/components/InstallAppButton";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { DashboardIcon } from "./icons";
@@ -61,33 +62,30 @@ export function DashboardLayout({
     loadNotifications();
     const timer = window.setInterval(loadNotifications, 15000);
     return () => window.clearInterval(timer);
-  }, [apiBaseUrl]);
+  }, []);
 
   async function loadNotifications() {
-    if (!apiBaseUrl) return;
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
+    if (!getToken()) return;
     try {
-      const response = await fetch(
-        `${apiBaseUrl}/api/v1/notifications?limit=30`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-      if (!response.ok) return;
-      setNotifications(await response.json());
+      const data = await apiFetch("/api/v1/notifications?limit=30", {
+        fallback: "Notifications indisponibles.",
+      });
+      setNotifications(Array.isArray(data) ? data : []);
     } catch {
-      // Notifications must not block dashboard usage.
+      // Les notifications ne doivent pas bloquer l'utilisation du tableau de bord.
     }
   }
 
   async function markNotificationRead(notificationId) {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
-    await fetch(`${apiBaseUrl}/api/v1/notifications/${notificationId}/read`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
+    if (!getToken()) return;
+    try {
+      await apiFetch(`/api/v1/notifications/${notificationId}/read`, {
+        method: "PATCH",
+        fallback: "Impossible de marquer la notification comme lue.",
+      });
+    } catch {
+      // Ne pas bloquer la navigation si la mise à jour échoue.
+    }
     loadNotifications();
   }
 
@@ -99,12 +97,15 @@ export function DashboardLayout({
   }
 
   async function markAllNotificationsRead() {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
-    await fetch(`${apiBaseUrl}/api/v1/notifications/read-all`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
+    if (!getToken()) return;
+    try {
+      await apiFetch("/api/v1/notifications/read-all", {
+        method: "PATCH",
+        fallback: "Impossible de marquer toutes les notifications comme lues.",
+      });
+    } catch {
+      // Ne pas bloquer l'interface si la mise à jour échoue.
+    }
     loadNotifications();
   }
 
@@ -635,13 +636,13 @@ export function DashboardLayout({
       </main>
 
       {isChangePasswordOpen && (
-        <ChangePasswordModal apiBaseUrl={apiBaseUrl} onClose={() => setIsChangePasswordOpen(false)} />
+        <ChangePasswordModal onClose={() => setIsChangePasswordOpen(false)} />
       )}
     </div>
   );
 }
 
-function ChangePasswordModal({ apiBaseUrl, onClose }) {
+function ChangePasswordModal({ onClose }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -657,23 +658,16 @@ function ChangePasswordModal({ apiBaseUrl, onClose }) {
     }
     setBusy(true);
     try {
-      const token = localStorage.getItem("access_token");
-      const response = await fetch(`${apiBaseUrl}/api/v1/auth/change-password`, {
+      const data = await apiFetch("/api/v1/auth/change-password", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ current_password: current, new_password: next }),
+        body: { current_password: current, new_password: next },
+        fallback: "Changement impossible.",
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = typeof data?.detail === "string" ? data.detail : "Changement impossible.";
-        setError(detail);
-        return;
-      }
       // Le backend renvoie un nouveau jeton (les autres sessions sont révoquées).
-      if (data.access_token) localStorage.setItem("access_token", data.access_token);
+      if (data?.access_token) setToken(data.access_token);
       setDone(true);
-    } catch {
-      setError("Connexion impossible. Réessayez.");
+    } catch (err) {
+      setError(err.message || "Connexion impossible. Réessayez.");
     } finally {
       setBusy(false);
     }

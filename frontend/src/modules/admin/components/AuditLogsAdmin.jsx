@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { FilterBar, PageHeader } from "@/modules/admin/components/AdminUi";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
 
 const actionLabels = {
   "order.update": "Commande modifiée",
@@ -33,7 +33,7 @@ const actionLabels = {
   "stock.production_sheet_create": "Fiche production",
 };
 
-export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
+export function AuditLogsAdmin({ onMessage }) {
   const [logs, setLogs] = useState([]);
   const [action, setAction] = useState("");
   const [entityType, setEntityType] = useState("");
@@ -49,16 +49,13 @@ export function AuditLogsAdmin({ apiBaseUrl, onMessage }) {
   async function loadLogs() {
     setIsLoading(true);
     try {
-      const token = localStorage.getItem("access_token");
       const query = new URLSearchParams({ limit: "150" });
       if (action) query.set("action", action);
       if (entityType) query.set("entity_type", entityType);
-      const response = await fetch(`${apiBaseUrl}/api/v1/audit-logs?${query.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const data = await apiFetch(`/api/v1/audit-logs?${query.toString()}`, {
+        fallback: "Chargement des journaux impossible.",
       });
-      const data = await response.json().catch(() => []);
-      if (!response.ok) throw new Error(formatApiError(data.detail, "Chargement des journaux impossible."));
-      setLogs(data);
+      setLogs(Array.isArray(data) ? data : []);
     } catch (error) {
       onMessage(error.message);
     } finally {

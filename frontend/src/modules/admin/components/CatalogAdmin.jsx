@@ -3,8 +3,15 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { DashboardSection, EmptyState as AdminEmptyState, FilterBar, PageHeader } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
 import { validationFor } from "@/utils/validation";
+
+const CATALOG_FALLBACK = "Action catalogue impossible.";
+
+function catalogApi(path, options = {}) {
+  const { fallback = CATALOG_FALLBACK, ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
+}
 
 const emptyCategory = { name: "", description: "" };
 const emptyItem = {
@@ -26,7 +33,7 @@ function optionalText(value) {
   return trimmed || null;
 }
 
-export function CatalogAdmin({ apiBaseUrl, onMessage }) {
+export function CatalogAdmin({ onMessage }) {
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);
   const [categoryForm, setCategoryForm] = useState(emptyCategory);
@@ -36,8 +43,6 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
   const [availabilityFilter, setAvailabilityFilter] = useState("ALL");
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
   const [isLoading, setIsLoading] = useState(false);
-
-  const token = localStorage.getItem("access_token");
 
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -69,28 +74,12 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
     loadCatalog();
   }, []);
 
-  async function api(path, options = {}) {
-    const fallback = options.fallback || "Action catalogue impossible.";
-    const { fallback: _fallback, ...requestOptions } = options;
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...requestOptions,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(requestOptions.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(formatApiError(data.detail ?? data.message ?? data.error, fallback));
-    return data;
-  }
-
   async function loadCatalog() {
     setIsLoading(true);
     try {
       const [categoryData, itemData] = await Promise.all([
-        api("/api/v1/catalog/categories"),
-        api("/api/v1/catalog/items"),
+        catalogApi("/api/v1/catalog/categories"),
+        catalogApi("/api/v1/catalog/items"),
       ]);
       setCategories(categoryData);
       setItems(itemData);
@@ -116,13 +105,13 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
     event.preventDefault();
     setIsLoading(true);
     try {
-      const created = await api("/api/v1/catalog/categories", {
+      const created = await catalogApi("/api/v1/catalog/categories", {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           ...categoryForm,
           name: categoryForm.name.trim(),
           description: optionalText(categoryForm.description),
-        }),
+        },
       });
       setCategories((current) => [created, ...current]);
       setItemForm((current) => ({ ...current, category_id: current.category_id || created.id }));
@@ -139,16 +128,16 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
     event.preventDefault();
     setIsLoading(true);
     try {
-      const created = await api("/api/v1/catalog/items", {
+      const created = await catalogApi("/api/v1/catalog/items", {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           ...itemForm,
           name: itemForm.name.trim(),
           price: Number(itemForm.price),
           cost_per_dish: Number(itemForm.cost_per_dish || 0),
           image_url: optionalText(itemForm.image_url),
           description: optionalText(itemForm.description),
-        }),
+        },
       });
       setItems((current) => [created, ...current]);
       setItemForm({ ...emptyItem, category_id: itemForm.category_id });
@@ -163,9 +152,9 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
   async function toggleAvailability(item) {
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/catalog/items/${item.id}`, {
+      const updated = await catalogApi(`/api/v1/catalog/items/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ is_available: !item.is_available }),
+        body: { is_available: !item.is_available },
       });
       setItems((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
       onMessage(updated.is_available ? "Plat remis en vente." : "Plat retiré temporairement.");
@@ -180,7 +169,7 @@ export function CatalogAdmin({ apiBaseUrl, onMessage }) {
     if (!window.confirm(`Archiver le plat ${item.name} ?\n\nLe plat restera en base de données et pourra être remis en vente.`)) return;
     setIsLoading(true);
     try {
-      await api(`/api/v1/catalog/items/${item.id}`, { method: "DELETE" });
+      await catalogApi(`/api/v1/catalog/items/${item.id}`, { method: "DELETE" });
       setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, is_available: false } : entry)));
       onMessage("Plat archivé du catalogue.");
     } catch (error) {

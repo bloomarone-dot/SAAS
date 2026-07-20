@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
-import { formatApiError } from "@/utils/network";
 
 export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
   const [query, setQuery] = useState("");
@@ -44,7 +43,7 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
   async function showOwner(owner) {
     setIsLoadingOwner(true);
     try {
-      const detail = await platformApi(apiBaseUrl, `/api/v1/restaurants/${owner.restaurantId}`);
+      const detail = await platformApi(`/api/v1/restaurants/${owner.restaurantId}`);
       setSelectedOwner(detail.owner ? { ...detail.owner, restaurant: detail.restaurant } : { restaurant: detail.restaurant });
       setOwnerPassword("");
     } catch (error) {
@@ -59,9 +58,9 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
     if (!selectedOwner?.id) return;
     setIsLoadingOwner(true);
     try {
-      await platformApi(apiBaseUrl, `/api/v1/platform/users/${selectedOwner.id}/password`, {
+      await platformApi(`/api/v1/platform/users/${selectedOwner.id}/password`, {
         method: "PATCH",
-        body: JSON.stringify({ password: ownerPassword }),
+        body: { password: ownerPassword },
       });
       setOwnerPassword("");
       onMessage("Mot de passe du propriétaire réinitialisé.");
@@ -201,7 +200,7 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
   async function loadDetail(id) {
     setIsLoading(true);
     try {
-      setDetail(await platformApi(apiBaseUrl, `/api/v1/restaurants/${id}`));
+      setDetail(await platformApi(`/api/v1/restaurants/${id}`));
       setOwnerPassword("");
     } catch (error) {
       onMessage(error.message);
@@ -235,9 +234,9 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
     if (!detail?.owner?.id) return;
     setIsLoading(true);
     try {
-      await platformApi(apiBaseUrl, `/api/v1/platform/users/${detail.owner.id}/password`, {
+      await platformApi(`/api/v1/platform/users/${detail.owner.id}/password`, {
         method: "PATCH",
-        body: JSON.stringify({ password: ownerPassword }),
+        body: { password: ownerPassword },
       });
       setOwnerPassword("");
       onMessage("Mot de passe de l'admin propriétaire réinitialisé.");
@@ -395,7 +394,7 @@ export function SuperadminGlobalStats({ apiBaseUrl, restaurants, onMessage }) {
   async function loadOverview() {
     setIsLoading(true);
     try {
-      setOverview(await platformApi(apiBaseUrl, "/api/v1/platform/overview"));
+      setOverview(await platformApi("/api/v1/platform/overview"));
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -451,7 +450,7 @@ export function SuperadminPlatformActivity({ apiBaseUrl, onMessage }) {
   async function loadActivity() {
     setIsLoading(true);
     try {
-      setRows(await platformApi(apiBaseUrl, "/api/v1/platform/activity"));
+      setRows(await platformApi("/api/v1/platform/activity"));
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -550,9 +549,9 @@ export function SuperadminActivation({ apiBaseUrl, restaurants, onRefreshRestaur
   async function updateStatus(restaurant, isActive) {
     setIsSaving(restaurant.id);
     try {
-      await platformApi(apiBaseUrl, `/api/v1/restaurants/${restaurant.id}/status`, {
+      await platformApi(`/api/v1/restaurants/${restaurant.id}/status`, {
         method: "PATCH",
-        body: JSON.stringify({ is_active: isActive }),
+        body: { is_active: isActive },
       });
       await onRefreshRestaurants?.();
       onMessage(`${restaurant.name} ${isActive ? "activé" : "suspendu"}.`);
@@ -565,9 +564,9 @@ export function SuperadminActivation({ apiBaseUrl, restaurants, onRefreshRestaur
 
   async function saveCommission(restaurant, rate) {
     try {
-      await platformApi(apiBaseUrl, `/api/v1/restaurants/${restaurant.id}/commission`, {
+      await platformApi(`/api/v1/restaurants/${restaurant.id}/commission`, {
         method: "PATCH",
-        body: JSON.stringify({ bloomar_commission_rate: rate }),
+        body: { bloomar_commission_rate: rate },
       });
       await onRefreshRestaurants?.();
       onMessage(`Commission Bloomar de ${restaurant.name} fixée à ${rate}%.`);
@@ -620,7 +619,7 @@ export function SuperadminPayments({ apiBaseUrl, onMessage }) {
   async function loadPayments() {
     setIsLoading(true);
     try {
-      setRows(await platformApi(apiBaseUrl, "/api/v1/platform/payments"));
+      setRows(await platformApi("/api/v1/platform/payments"));
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -708,7 +707,7 @@ export function SuperadminSubscriptions({ apiBaseUrl, restaurants, onMessage }) 
   async function loadSubscriptions() {
     setIsLoading(true);
     try {
-      setRows(await platformApi(apiBaseUrl, "/api/v1/platform/subscriptions"));
+      setRows(await platformApi("/api/v1/platform/subscriptions"));
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -733,9 +732,9 @@ export function SuperadminSubscriptions({ apiBaseUrl, restaurants, onMessage }) 
     if (!selected) return;
     setIsSaving(true);
     try {
-      const updated = await platformApi(apiBaseUrl, `/api/v1/platform/subscriptions/${selected.restaurant_id}`, {
+      const updated = await platformApi(`/api/v1/platform/subscriptions/${selected.restaurant_id}`, {
         method: "PATCH",
-        body: JSON.stringify({
+        body: {
           ...form,
           plan: form.plan.trim(),
           amount: Number(form.amount || 0),
@@ -743,7 +742,7 @@ export function SuperadminSubscriptions({ apiBaseUrl, restaurants, onMessage }) 
           status: form.status.trim(),
           renewal_date: form.renewal_date || null,
           notes: optionalText(form.notes),
-        }),
+        },
       });
       setRows((current) => current.map((row) => (row.restaurant_id === updated.restaurant_id ? updated : row)));
       setSelected(updated);
@@ -858,7 +857,7 @@ export function SuperadminPlatform({ apiBaseUrl, restaurants, onMessage, onRefre
     setIsLoading(true);
     try {
       const [data] = await Promise.all([
-        platformApi(apiBaseUrl, "/api/v1/platform/overview"),
+        platformApi("/api/v1/platform/overview"),
         onRefreshRestaurants?.(),
       ]);
       setOverview(data);
@@ -944,7 +943,7 @@ export function SuperadminSettings({ apiBaseUrl, onMessage }) {
   async function loadSettings() {
     setIsLoading(true);
     try {
-      setSettings(await platformApi(apiBaseUrl, "/api/v1/platform/settings"));
+      setSettings(await platformApi("/api/v1/platform/settings"));
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -956,9 +955,9 @@ export function SuperadminSettings({ apiBaseUrl, onMessage }) {
     event.preventDefault();
     setIsSaving(true);
     try {
-      const updated = await platformApi(apiBaseUrl, "/api/v1/platform/settings", {
+      const updated = await platformApi("/api/v1/platform/settings", {
         method: "PATCH",
-        body: JSON.stringify(settings),
+        body: settings,
       });
       setSettings(updated);
       onMessage("Paramètres plateforme sauvegardés.");
@@ -1062,7 +1061,7 @@ export function SuperadminInstanceRequests({ apiBaseUrl, onMessage, onRefreshRes
     (async () => {
       try {
         const suffix = statusFilter === "all" ? "" : `?status=${statusFilter}`;
-        const data = await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests${suffix}`);
+        const data = await platformApi(`/api/v1/platform/instance-requests${suffix}`);
         if (active) setRequests(data);
       } catch (error) {
         onMessage(error.message);
@@ -1073,14 +1072,14 @@ export function SuperadminInstanceRequests({ apiBaseUrl, onMessage, onRefreshRes
 
   async function reload() {
     const suffix = statusFilter === "all" ? "" : `?status=${statusFilter}`;
-    setRequests(await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests${suffix}`));
+    setRequests(await platformApi(`/api/v1/platform/instance-requests${suffix}`));
   }
 
   async function approve(request) {
     if (!window.confirm(`Approuver et créer l'instance « ${request.restaurant_name} » ?`)) return;
     setBusyId(request.id);
     try {
-      const result = await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests/${request.id}/approve`, { method: "POST" });
+      const result = await platformApi(`/api/v1/platform/instance-requests/${request.id}/approve`, { method: "POST" });
       setCredentials(result);
       onMessage(`Instance « ${request.restaurant_name} » créée.`);
       await onRefreshRestaurants?.();
@@ -1096,7 +1095,7 @@ export function SuperadminInstanceRequests({ apiBaseUrl, onMessage, onRefreshRes
     if (!window.confirm(`Rejeter la demande de « ${request.restaurant_name} » ?`)) return;
     setBusyId(request.id);
     try {
-      await platformApi(apiBaseUrl, `/api/v1/platform/instance-requests/${request.id}/reject`, { method: "POST" });
+      await platformApi(`/api/v1/platform/instance-requests/${request.id}/reject`, { method: "POST" });
       onMessage("Demande rejetée.");
       await reload();
     } catch (error) {

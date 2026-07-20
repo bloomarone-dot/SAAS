@@ -9,7 +9,7 @@ from app.modules.permissions.models import Role
 from app.modules.stock.models import Depot, Product, StockMovement, Unit
 from app.modules.stock.router import create_product
 from app.modules.stock.schemas import ProductIn
-from app.modules.users.models import User
+from app.modules.users.models import User, UserPermission
 
 
 RESTO = "resto-A"
@@ -26,6 +26,7 @@ class StockProductCreationTests(unittest.TestCase):
                 Depot.__table__,
                 Unit.__table__,
                 User.__table__,
+                UserPermission.__table__,
                 AuditLog.__table__,
             ],
         )

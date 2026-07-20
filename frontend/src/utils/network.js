@@ -29,17 +29,6 @@ export function isNetworkError(error) {
   return !navigator.onLine || message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("Connexion indisponible");
 }
 
-export async function fetchJson(url, options = {}, fallback = "Action impossible: le serveur n'a pas fourni de détail.") {
-  try {
-    const response = await fetch(url, options);
-    const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
-    return data;
-  } catch (error) {
-    throw new Error(friendlyNetworkMessage(error, fallback));
-  }
-}
-
 export function enqueueOfflineAction(action) {
   const queue = readOfflineQueue();
   const entry = {
@@ -71,20 +60,23 @@ export async function flushOfflineQueue(apiBaseUrl) {
   const queue = readOfflineQueue();
   if (!queue.length) return { synced: 0, remaining: 0 };
 
+  const { apiFetch, apiFetchPublic } = await import("@/config/http");
   const remaining = [];
   let synced = 0;
   for (const action of queue) {
     try {
       for (const request of action.requests ?? []) {
-        const token = localStorage.getItem("access_token");
-        await fetchJson(`${apiBaseUrl}${request.path}`, {
+        const fallback = action.errorMessage ?? "Synchronisation impossible.";
+        const options = {
           method: request.method ?? "POST",
-          headers: {
-            ...(request.body ? { "Content-Type": "application/json" } : {}),
-            ...(request.requiresAuth && token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: request.body ? JSON.stringify(request.body) : undefined,
-        }, action.errorMessage ?? "Synchronisation impossible.");
+          body: request.body,
+          fallback,
+        };
+        if (request.requiresAuth) {
+          await apiFetch(request.path, options);
+        } else {
+          await apiFetchPublic(request.path, options);
+        }
       }
       synced += 1;
     } catch (error) {

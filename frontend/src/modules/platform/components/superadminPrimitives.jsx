@@ -3,7 +3,7 @@ import { useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { DashboardSection, FilterBar, PageContainer, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
 
 // Primitives UI et utilitaires partages des sections superadmin.
 // Extrait de SuperadminSections.jsx pour reduire la taille du composant.
@@ -315,21 +315,12 @@ export function optionalText(value) {
   return trimmed || null;
 }
 
-export async function platformApi(apiBaseUrl, path, options = {}) {
-  const token = localStorage.getItem("access_token");
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(options.headers ?? {}),
-    },
-  });
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(formatApiError(data?.detail, "Action plateforme impossible."));
-  }
-  return data;
+/**
+ * Client HTTP plateforme — délègue au client central sans dupliquer Bearer / parsing.
+ */
+export function platformApi(path, options = {}) {
+  const { fallback = "Action plateforme impossible.", ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
 }
 
 export function ExportActions({ title, filename, rows, columns, fullWidth = false }) {

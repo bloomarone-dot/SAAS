@@ -7,7 +7,7 @@ import {
   PageHeader,
   SecondaryAction,
 } from "@/modules/admin/components/AdminUi";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
 
 import { dateToApiDateTime, formatLocalDate, today, uniqueDepots } from "./shared/format";
 import {
@@ -33,7 +33,15 @@ import { Reports } from "./Rapport/Reports";
 import { Alerts } from "./Alerte/Alerts";
 import { MovementList } from "./shared/MovementList";
 
-export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
+const STOCK_FALLBACK = "Action stock impossible.";
+
+/** Adaptateur pour déléguer vers le client HTTP central sans dupliquer la logique. */
+function stockApi(path, options = {}) {
+  const { fallback = STOCK_FALLBACK, ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
+}
+
+export function StockOperations({ mode = "stock", onMessage }) {
   const [activeTab, setActiveTab] = useState(resolveInitialTab(mode));
   const [summary, setSummary] = useState(null);
   const [products, setProducts] = useState([]);
@@ -65,8 +73,6 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     product_id: "",
     movement_type: "",
   });
-
-  const token = localStorage.getItem("access_token");
 
   useEffect(() => {
     setActiveTab(resolveInitialTab(mode));
@@ -174,42 +180,13 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     loadReport();
   }, [filters.depot_id]);
 
-  async function api(path, options = {}) {
-    const fallback = options.fallback || "Action stock impossible.";
-    const { fallback: _fallback, ...requestOptions } = options;
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...requestOptions,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(requestOptions.headers || {}),
-      },
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => null);
-      throw new Error(
-        formatApiError(
-          Array.isArray(data?.detail)
-            ? data.detail
-                .map((item) => item.msg || item.message || item.type)
-                .filter(Boolean)
-                .join(" ")
-            : (data?.detail ?? data?.message ?? data?.error),
-          fallback,
-        ),
-      );
-    }
-    if (response.status === 204) return null;
-    return response.json();
-  }
-
   async function loadAll() {
     setIsLoading(true);
     const resources = [
       [
         "summary",
         () =>
-          api("/api/v1/stock/summary", {
+          stockApi("/api/v1/stock/summary", {
             fallback: "Résumé stock indisponible.",
           }),
         setSummary,
@@ -218,7 +195,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "products",
         () =>
-          api("/api/v1/stock/products", {
+          stockApi("/api/v1/stock/products", {
             fallback: "Chargement des produits impossible.",
           }),
         setProducts,
@@ -227,7 +204,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "depots",
         () =>
-          api("/api/v1/stock/depots", {
+          stockApi("/api/v1/stock/depots", {
             fallback: "Chargement des dépôts impossible.",
           }),
         setDepots,
@@ -236,7 +213,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "units",
         () =>
-          api("/api/v1/stock/units", {
+          stockApi("/api/v1/stock/units", {
             fallback: "Chargement des unités impossible.",
           }),
         setUnits,
@@ -245,7 +222,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "suppliers",
         () =>
-          api("/api/v1/stock/suppliers", {
+          stockApi("/api/v1/stock/suppliers", {
             fallback: "Chargement des fournisseurs impossible.",
           }),
         setSuppliers,
@@ -254,7 +231,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "movements",
         () =>
-          api("/api/v1/stock/movements", {
+          stockApi("/api/v1/stock/movements", {
             fallback: "Chargement des mouvements impossible.",
           }),
         setMovements,
@@ -263,7 +240,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "inventories",
         () =>
-          api("/api/v1/stock/inventories", {
+          stockApi("/api/v1/stock/inventories", {
             fallback: "Chargement des inventaires impossible.",
           }),
         setInventories,
@@ -272,7 +249,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "lots",
         () =>
-          api("/api/v1/stock/lots", {
+          stockApi("/api/v1/stock/lots", {
             fallback: "Chargement des lots impossible.",
           }),
         setLots,
@@ -281,7 +258,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "expiringLots",
         () =>
-          api("/api/v1/stock/lots/expiring?days=14", {
+          stockApi("/api/v1/stock/lots/expiring?days=14", {
             fallback: "Chargement des lots expirants impossible.",
           }).catch(() => []),
         setExpiringLots,
@@ -290,7 +267,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
       [
         "report",
         () =>
-          api("/api/v1/stock/reports", {
+          stockApi("/api/v1/stock/reports", {
             fallback: "Rapport stock indisponible.",
           }),
         setReport,
@@ -316,7 +293,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
 
   async function loadInventoryRows(depotId) {
     try {
-      const rows = await api(`/api/v1/stock/depots/${depotId}/stock`, {
+      const rows = await stockApi(`/api/v1/stock/depots/${depotId}/stock`, {
         fallback: "Chargement du stock du dépôt impossible.",
       });
       setInventoryRows(
@@ -362,7 +339,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
 
   async function cancelMovement(movement) {
     try {
-      await api(`/api/v1/stock/movements/${movement.id}/cancel`, {
+      await stockApi(`/api/v1/stock/movements/${movement.id}/cancel`, {
         method: "PATCH",
         fallback: "Annulation du mouvement impossible.",
       });
@@ -378,11 +355,11 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     const nextReason = window.prompt("Motif de modification (obligatoire)", movement.reason || "");
     if (nextReason === null || !nextReason.trim()) return;
     try {
-      await api(`/api/v1/stock/movements/${movement.id}`, {
+      await stockApi(`/api/v1/stock/movements/${movement.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
+        body: {
           reason: nextReason.trim(),
-        }),
+        },
         fallback: "Modification du mouvement impossible.",
       });
       emit("Mouvement mis à jour.");
@@ -538,7 +515,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
         })),
       },
       async (inventory) => {
-        await api(`/api/v1/stock/inventories/${inventory.id}/validate`, {
+        await stockApi(`/api/v1/stock/inventories/${inventory.id}/validate`, {
           method: "PATCH",
         });
         setActiveTab("reports");
@@ -560,7 +537,7 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
     });
     try {
       setIsReportLoading(true);
-      setReport(await api(`/api/v1/stock/reports?${params.toString()}`));
+      setReport(await stockApi(`/api/v1/stock/reports?${params.toString()}`));
     } catch (error) {
       emit(error.message || "Rapport indisponible.");
     } finally {
@@ -576,9 +553,9 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
   ) {
     let result = null;
     try {
-      result = await api(path, {
+      result = await stockApi(path, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: payload,
         fallback,
       });
     } catch (error) {
@@ -595,9 +572,9 @@ export function StockOperations({ apiBaseUrl, mode = "stock", onMessage }) {
 
   async function auditExport(reportType, format) {
     try {
-      await api("/api/v1/stock/reports/export-audit", {
+      await stockApi("/api/v1/stock/reports/export-audit", {
         method: "POST",
-        body: JSON.stringify({ report_type: reportType, format }),
+        body: { report_type: reportType, format },
         fallback: "Journalisation de l'export impossible.",
       });
     } catch (error) {

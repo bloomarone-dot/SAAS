@@ -4,6 +4,7 @@ from app.modules.shared.models import utcnow
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from app.tenancy import tenant_get_or_404
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
 from app.modules.orders.models import CustomerOrder
@@ -179,14 +180,7 @@ def create_table_order(
 
 
 def get_table_for_user(db: Session, table_id: int, user: User) -> TableModel:
-    db_table = (
-        db.query(TableModel)
-        .filter(TableModel.id == table_id, TableModel.restaurant_id == user.restaurant_id)
-        .first()
-    )
-    if not db_table:
-        raise HTTPException(status_code=404, detail="Table introuvable.")
-    return db_table
+    return tenant_get_or_404(db, TableModel, table_id, user.restaurant_id, detail="Table introuvable.")
 
 
 def assert_table_read_allowed(user: User) -> None:

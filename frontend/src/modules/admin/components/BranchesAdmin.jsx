@@ -5,7 +5,14 @@ import { AdminFormModal, ModuleFilterBar, PageHeader, TableFooter } from "@/modu
 import { matchesPeriod } from "@/utils/greeting";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { validationFor } from "@/utils/validation";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
+
+const BRANCHES_FALLBACK = "Action branche impossible.";
+
+function branchesApi(path, options = {}) {
+  const { fallback = BRANCHES_FALLBACK, ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
+}
 
 const initialBranch = {
   name: "",
@@ -17,7 +24,7 @@ const initialBranch = {
 
 const MANAGER_ROLES = ["MANAGER", "ADMIN"];
 
-export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false }) {
+export function BranchesAdmin({ onMessage, showCreateOnMount = false }) {
   const [branches, setBranches] = useState([]);
   const [form, setForm] = useState(initialBranch);
   const [search, setSearch] = useState("");
@@ -31,8 +38,6 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false
   const [editForm, setEditForm] = useState(initialBranch);
   const [editingBranchId, setEditingBranchId] = useState("");
   const [staff, setStaff] = useState([]);
-
-  const token = localStorage.getItem("access_token");
 
   const managerOptions = useMemo(
     () => staff.filter((user) => user.is_active && MANAGER_ROLES.includes(user.role)),
@@ -76,27 +81,9 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false
     if (showCreateOnMount) setShowCreateForm(true);
   }, [showCreateOnMount]);
 
-  async function api(path, options = {}) {
-    const fallback = options.fallback || "Action branche impossible.";
-    const { fallback: _fallback, ...requestOptions } = options;
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...requestOptions,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(requestOptions.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(formatApiError(data.detail ?? data.message ?? data.error, fallback));
-    }
-    return data;
-  }
-
   async function fetchStaff() {
     try {
-      setStaff(await api("/api/v1/users"));
+      setStaff(await branchesApi("/api/v1/users"));
     } catch {
       setStaff([]);
     }
@@ -105,7 +92,7 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false
   async function fetchBranches() {
     setIsLoading(true);
     try {
-      setBranches(await api("/api/v1/branches"));
+      setBranches(await branchesApi("/api/v1/branches"));
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -151,15 +138,15 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false
     if (!editingBranchId) return;
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/branches/detail/${editingBranchId}`, {
+      const updated = await branchesApi(`/api/v1/branches/detail/${editingBranchId}`, {
         method: "PATCH",
-        body: JSON.stringify({
+        body: {
           name: editForm.name.trim(),
           city: editForm.city.trim(),
           address: editForm.address.trim(),
           phone: editForm.phone.trim() || null,
           manager_id: editForm.manager_id || null,
-        }),
+        },
       });
       setBranches((current) => current.map((branch) => (branch.id === updated.id ? updated : branch)));
       closeEditForm();
@@ -175,9 +162,9 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false
     if (!window.confirm(`Désactiver la branche "${branch.name}" ?`)) return;
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/branches/detail/${branch.id}`, {
+      const updated = await branchesApi(`/api/v1/branches/detail/${branch.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ is_active: false }),
+        body: { is_active: false },
       });
       setBranches((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       onMessage(`Branche "${updated.name}" désactivée.`);
@@ -191,9 +178,9 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false
   async function activateBranch(branch) {
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/branches/detail/${branch.id}`, {
+      const updated = await branchesApi(`/api/v1/branches/detail/${branch.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ is_active: true }),
+        body: { is_active: true },
       });
       setBranches((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       onMessage(`Branche "${updated.name}" réactivée.`);
@@ -208,13 +195,13 @@ export function BranchesAdmin({ apiBaseUrl, onMessage, showCreateOnMount = false
     event.preventDefault();
     setIsLoading(true);
     try {
-      const created = await api("/api/v1/branches", {
+      const created = await branchesApi("/api/v1/branches", {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           ...Object.fromEntries(Object.entries(form).map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])),
           phone: form.phone.trim() || null,
           manager_id: form.manager_id || null,
-        }),
+        },
       });
       setBranches((current) => [created, ...current]);
       closeCreateForm();

@@ -6,9 +6,9 @@ import {
   CalendarClock,
   CheckCheck,
   CreditCard,
-  Landmark,
   Percent,
   ReceiptText,
+  TrendingDown,
   Wallet,
 } from "lucide-react";
 
@@ -17,12 +17,12 @@ export const tabs = [
   ["accounts", "Plan comptable", BookOpen],
   ["journals", "Journaux", ReceiptText],
   ["entries", "Écritures", Calculator],
-  ["expenses", "Dépenses", Wallet],
-  ["encaissements", "Encaissements", CreditCard],
+  ["expenses", "Sorties d'argent", Wallet],
+  ["expense-analytics", "Où part l'argent ?", TrendingDown],
+  ["encaissements", "Entrées d'argent", CreditCard],
   ["revenues", "Recettes manuelles", CreditCard],
   ["payments", "Paiements", CreditCard],
-  ["cash", "Caisses", Wallet],
-  ["banks", "Banques", Landmark],
+  ["cash", "Ma caisse", Wallet],
   ["statements", "États financiers", Building2],
   ["food-cost", "Coût matière (%)", Percent],
   ["echeancier", "Échéancier", CalendarClock],
@@ -52,6 +52,7 @@ const TAB_KEYS = tabs.map(([key]) => key);
 export function resolveAccountingTab(mode) {
   if (TAB_KEYS.includes(mode)) return mode;
   const aliases = {
+    comptabilite: "dashboard",
     "accounting-dashboard": "dashboard",
     "accounting-entries": "entries",
     "accounting-expenses": "expenses",
@@ -71,6 +72,8 @@ export function resolveAccountingTab(mode) {
     profits: "statements",
     "monthly-result": "statements",
     "counted-damages": "expenses",
+    "expense-analytics": "expense-analytics",
+    "spending-analytics": "expense-analytics",
   };
   return aliases[mode] || "dashboard";
 }

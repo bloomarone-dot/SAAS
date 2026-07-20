@@ -12,6 +12,12 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))
 PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+REFRESH_TOKEN_BYTES = int(os.getenv("REFRESH_TOKEN_BYTES", "32"))
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").lower()
+COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", "").strip() or None
+AUTH_MODE = os.getenv("AUTH_MODE", "bearer").lower()
 MIN_PASSWORD_LENGTH = 8
 
 # Tout secret contenant un de ces motifs est un placeholder de template: on le

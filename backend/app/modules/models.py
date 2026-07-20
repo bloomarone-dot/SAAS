@@ -4,6 +4,7 @@ Ce module force l'import des modeles de chaque domaine avant la creation des
 tables ou le lancement des migrations.
 """
 
+from app.modules.auth.models import RefreshToken
 from app.modules.branches.models import Branch, DeliveryArea
 from app.modules.audit.models import AuditLog
 from app.modules.catalog.models import MenuCategory, MenuItem
@@ -29,6 +30,7 @@ from app.modules.tables.models import TableModel
 from app.modules.users.models import User, UserPermission
 
 __all__ = [
+    "RefreshToken",
     "Branch",
     "DeliveryArea",
     "AuditLog",

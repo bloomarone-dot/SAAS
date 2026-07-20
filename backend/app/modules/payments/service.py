@@ -156,6 +156,26 @@ def record_push_response(
     db.commit()
 
 
+def load_transaction_order(db: Session, tx: PaymentTransaction) -> CustomerOrder | None:
+    """Charge la commande liee en imposant le meme restaurant que la transaction."""
+    if not tx.order_id or not tx.restaurant_id:
+        return None
+    return (
+        db.query(CustomerOrder)
+        .filter(
+            CustomerOrder.id == tx.order_id,
+            CustomerOrder.restaurant_id == tx.restaurant_id,
+        )
+        .one_or_none()
+    )
+
+
+def load_transaction_restaurant(db: Session, tx: PaymentTransaction) -> Restaurant | None:
+    if not tx.restaurant_id:
+        return None
+    return db.query(Restaurant).filter(Restaurant.id == tx.restaurant_id).one_or_none()
+
+
 def release_failed_payment(
     db: Session,
     tx: PaymentTransaction,
@@ -166,7 +186,7 @@ def release_failed_payment(
     tx.failure_reason = reason
     tx.active_order_key = None
     tx.completed_at = utcnow()
-    order = db.get(CustomerOrder, tx.order_id) if tx.order_id else None
+    order = load_transaction_order(db, tx)
     if order and order.transaction_id == tx.id:
         order.status = order.payment_previous_status or "Livrée"
         order.payment_previous_status = None
@@ -217,7 +237,7 @@ def apply_webhook(
 
     if new_status == "SUCCESS":
         gross = Decimal(str(tx.amount))
-        restaurant = db.get(Restaurant, tx.restaurant_id) if tx.restaurant_id else None
+        restaurant = load_transaction_restaurant(db, tx)
         bloomar_rate = Decimal(str(getattr(restaurant, "bloomar_commission_rate", 0) or 0))
         split = compute_payment_split(gross, bloomar_rate)
         aggregator_fee = split["aggregator_fee"]
@@ -229,7 +249,7 @@ def apply_webhook(
         tx.restaurant_net = float(restaurant_net)
         tx.active_order_key = None
         tx.completed_at = now
-        order = db.get(CustomerOrder, tx.order_id) if tx.order_id else None
+        order = load_transaction_order(db, tx)
         if order:
             order.status = "Payée"
             order.payment_status = "SUCCESS"
@@ -261,7 +281,7 @@ def apply_webhook(
         )
         notify_payment_outcome(db, tx, order, success=True)
     elif new_status in TERMINAL_FAILURE_STATUSES:
-        order = db.get(CustomerOrder, tx.order_id) if tx.order_id else None
+        order = load_transaction_order(db, tx)
         release_failed_payment(db, tx, new_status, body.get("message"))
         notify_payment_outcome(db, tx, order, success=False)
     else:

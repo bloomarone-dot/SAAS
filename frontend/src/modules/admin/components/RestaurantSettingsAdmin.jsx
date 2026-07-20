@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { PageHeader } from "@/modules/admin/components/AdminUi";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
 import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { validationFor } from "@/utils/validation";
 
@@ -38,7 +38,14 @@ const emptySettings = {
   timezone: "Africa/Douala",
 };
 
-export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, onThemeChange }) {
+const SETTINGS_FALLBACK = "Action de configuration impossible.";
+
+function settingsApi(path, options = {}) {
+  const { fallback = SETTINGS_FALLBACK, ...rest } = options;
+  return apiFetch(path, { fallback, ...rest });
+}
+
+export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange }) {
   const [restaurant, setRestaurant] = useState(null);
   const [form, setForm] = useState(emptySettings);
   const [isLoading, setIsLoading] = useState(false);
@@ -46,7 +53,6 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
   const [deliveryAreas, setDeliveryAreas] = useState([]);
   const [areaForm, setAreaForm] = useState({ name: "", delivery_fee: "", average_delivery_minutes: "" });
 
-  const token = localStorage.getItem("access_token");
   const canUpdate = currentUser?.is_owner;
   const fieldsDisabled = !canUpdate || !isEditing || isLoading;
 
@@ -54,26 +60,10 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
     loadSettings();
   }, []);
 
-  async function api(path, options = {}) {
-    const fallback = options.fallback || "Action de configuration impossible.";
-    const { fallback: _fallback, ...requestOptions } = options;
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...requestOptions,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(requestOptions.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(formatApiError(data.detail ?? data.message ?? data.error, fallback));
-    return data;
-  }
-
   async function loadSettings() {
     setIsLoading(true);
     try {
-      const data = await api("/api/v1/restaurants/me");
+      const data = await settingsApi("/api/v1/restaurants/me");
       setRestaurant(data);
       setForm({
         name: data.name ?? "",
@@ -127,7 +117,7 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
 
   async function loadDeliveryAreas() {
     try {
-      setDeliveryAreas(await api("/api/v1/branches/delivery-areas"));
+      setDeliveryAreas(await settingsApi("/api/v1/branches/delivery-areas"));
     } catch {
       setDeliveryAreas([]);
     }
@@ -137,14 +127,14 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
     event?.preventDefault?.();
     setIsLoading(true);
     try {
-      const created = await api("/api/v1/branches/delivery-areas", {
+      const created = await settingsApi("/api/v1/branches/delivery-areas", {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           name: areaForm.name.trim(),
           delivery_fee: Number(areaForm.delivery_fee || 0),
           average_delivery_minutes: areaForm.average_delivery_minutes ? Number(areaForm.average_delivery_minutes) : null,
           is_active: true,
-        }),
+        },
       });
       setDeliveryAreas((current) => [created, ...current]);
       setAreaForm({ name: "", delivery_fee: "", average_delivery_minutes: "" });
@@ -159,9 +149,9 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
   async function toggleDeliveryArea(area) {
     setIsLoading(true);
     try {
-      const updated = await api(`/api/v1/branches/delivery-areas/${area.id}`, {
+      const updated = await settingsApi(`/api/v1/branches/delivery-areas/${area.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ is_active: !area.is_active }),
+        body: { is_active: !area.is_active },
       });
       setDeliveryAreas((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       onMessage("Statut du quartier mis à jour.");
@@ -207,9 +197,9 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
         currency: form.currency.trim().toUpperCase(),
         timezone: form.timezone.trim(),
       };
-      const updated = await api("/api/v1/restaurants/me/settings", {
+      const updated = await settingsApi("/api/v1/restaurants/me/settings", {
         method: "PATCH",
-        body: JSON.stringify(payload),
+        body: payload,
       });
       setRestaurant(updated);
       setIsEditing(false);
@@ -230,15 +220,11 @@ export function RestaurantSettingsAdmin({ apiBaseUrl, currentUser, onMessage, on
     try {
       const body = new FormData();
       body.append("file", file);
-      const response = await fetch(`${apiBaseUrl}/api/v1/restaurants/me/logo`, {
+      const data = await apiFetch("/api/v1/restaurants/me/logo", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
         body,
+        fallback: "Import du logo impossible.",
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(formatApiError(data.detail, "Import du logo impossible."));
       setRestaurant(data);
       setForm((current) => ({ ...current, logo_url: data.logo_url ?? "" }));
       onThemeChange?.(buildRestaurantTheme(data));

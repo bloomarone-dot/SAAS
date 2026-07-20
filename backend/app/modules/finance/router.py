@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
+from app.tenancy import tenant_get_or_404, tenant_get_optional
 from app.modules.audit.service import log_action
 from app.modules.catalog.models import MenuItem
 from app.modules.finance.models import (
@@ -39,7 +40,7 @@ from app.modules.finance.models import (
     Tax,
     TaxType,
 )
-from app.modules.orders.models import CustomerOrder, CustomerOrderItem
+from app.modules.finance.spending_analytics import build_spending_analytics
 from app.modules.permissions.models import Permission
 from app.modules.stock.models import StockMovement, StockMovementStatus, StockMovementType
 from app.modules.users.models import User
@@ -382,10 +383,7 @@ def journal_by_type(db: Session, restaurant_id: str, journal_type: JournalType) 
 
 
 def account_or_404(db: Session, account_id: str, restaurant_id: str) -> AccountingAccount:
-    account = db.get(AccountingAccount, account_id)
-    if not account or account.restaurant_id != restaurant_id:
-        raise HTTPException(status_code=404, detail="Compte comptable introuvable")
-    return account
+    return tenant_get_or_404(db, AccountingAccount, account_id, restaurant_id, detail="Compte comptable introuvable")
 
 
 def generate_entry_number(db: Session, restaurant_id: str, entry_date: datetime | None = None) -> str:
@@ -428,8 +426,8 @@ def assert_period_open(db: Session, restaurant_id: str, entry_date: datetime) ->
 
 def create_accounting_entry(db: Session, restaurant_id: str, user_id: str, payload: EntryIn, *, status: EntryStatus = EntryStatus.DRAFT) -> AccountingEntry:
     assert_period_open(db, restaurant_id, payload.entry_date or utcnow())
-    journal = db.get(AccountingJournal, payload.journal_id)
-    if not journal or journal.restaurant_id != restaurant_id or not journal.is_active:
+    journal = tenant_get_or_404(db, AccountingJournal, payload.journal_id, restaurant_id, detail="Journal comptable introuvable ou inactif")
+    if not journal.is_active:
         raise HTTPException(status_code=404, detail="Journal comptable introuvable ou inactif")
     for line in payload.lines:
         account = account_or_404(db, line.account_id, restaurant_id)
@@ -536,17 +534,23 @@ def account_balance(db: Session, restaurant_id: str, account_id: str, start: dat
 def payment_asset_account(db: Session, restaurant_id: str, method: PaymentMethod, cash_register_id: str | None, bank_account_id: str | None) -> str:
     defaults = ensure_default_accounting(db, restaurant_id)
     if method == PaymentMethod.CASH:
-        register = db.get(CashRegister, cash_register_id) if cash_register_id else db.query(CashRegister).filter(CashRegister.restaurant_id == restaurant_id, CashRegister.is_active.is_(True)).first()
+        if cash_register_id:
+            register = tenant_get_or_404(db, CashRegister, cash_register_id, restaurant_id, detail="Caisse introuvable")
+            return register.account_id
+        register = db.query(CashRegister).filter(CashRegister.restaurant_id == restaurant_id, CashRegister.is_active.is_(True)).first()
         return register.account_id if register else defaults["cash"].id
     if method in {PaymentMethod.BANK, PaymentMethod.MOBILE_MONEY}:
-        bank = db.get(BankAccount, bank_account_id) if bank_account_id else db.query(BankAccount).filter(BankAccount.restaurant_id == restaurant_id, BankAccount.is_active.is_(True)).first()
+        if bank_account_id:
+            bank = tenant_get_or_404(db, BankAccount, bank_account_id, restaurant_id, detail="Compte bancaire introuvable")
+            return bank.account_id
+        bank = db.query(BankAccount).filter(BankAccount.restaurant_id == restaurant_id, BankAccount.is_active.is_(True)).first()
         return bank.account_id if bank else defaults["bank"].id
     return defaults["bank"].id
 
 
 def create_expense_entry(db: Session, restaurant_id: str, user_id: str, expense: Expense, payment_method: PaymentMethod, cash_register_id: str | None, bank_account_id: str | None) -> AccountingEntry:
     defaults = ensure_default_accounting(db, restaurant_id)
-    category = db.get(ExpenseCategory, expense.category_id) if expense.category_id else None
+    category = tenant_get_optional(db, ExpenseCategory, expense.category_id, restaurant_id, detail="Categorie de depense introuvable") if expense.category_id else None
     debit_account_id = category.default_account_id if category and category.default_account_id else defaults["misc_expense"].id
     credit_account_id = payment_asset_account(db, restaurant_id, payment_method, cash_register_id, bank_account_id) if expense.payment_status == PaymentStatus.PAID else defaults["suppliers"].id
     journal = journal_by_type(db, restaurant_id, JournalType.CASH if payment_method == PaymentMethod.CASH else JournalType.PURCHASE)
@@ -1143,9 +1147,7 @@ def create_accounting_journal(payload: JournalIn, current_user: User = Depends(r
 @router.patch("/journals/{journal_id}")
 def update_journal(journal_id: str, payload: JournalIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    journal = db.get(AccountingJournal, journal_id)
-    if not journal or journal.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Journal introuvable")
+    journal = tenant_get_or_404(db, AccountingJournal, journal_id, current_user.restaurant_id, detail="Journal introuvable")
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(journal, field, value)
     db.commit()
@@ -1156,9 +1158,7 @@ def update_journal(journal_id: str, payload: JournalIn, current_user: User = Dep
 @router.delete("/journals/{journal_id}")
 def disable_journal(journal_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    journal = db.get(AccountingJournal, journal_id)
-    if not journal or journal.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Journal introuvable")
+    journal = tenant_get_or_404(db, AccountingJournal, journal_id, current_user.restaurant_id, detail="Journal introuvable")
     journal.is_active = False
     db.commit()
     return {"message": "Journal desactive"}
@@ -1191,18 +1191,14 @@ def create_entry(payload: EntryIn, current_user: User = Depends(require_tenant_u
 @router.get("/entries/{entry_id}")
 def get_entry(entry_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_READ)
-    entry = db.get(AccountingEntry, entry_id)
-    if not entry or entry.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Ecriture introuvable")
+    entry = tenant_get_or_404(db, AccountingEntry, entry_id, current_user.restaurant_id, detail="Ecriture introuvable")
     return entry_public(db, entry)
 
 
 @router.patch("/entries/{entry_id}/validate")
 def validate_entry(entry_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    entry = db.get(AccountingEntry, entry_id)
-    if not entry or entry.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Ecriture introuvable")
+    entry = tenant_get_or_404(db, AccountingEntry, entry_id, current_user.restaurant_id, detail="Ecriture introuvable")
     validate_accounting_entry(db, entry, current_user)
     db.commit()
     return entry_public(db, entry)
@@ -1211,9 +1207,7 @@ def validate_entry(entry_id: str, current_user: User = Depends(require_tenant_us
 @router.patch("/entries/{entry_id}/cancel")
 def cancel_entry(entry_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    entry = db.get(AccountingEntry, entry_id)
-    if not entry or entry.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Ecriture introuvable")
+    entry = tenant_get_or_404(db, AccountingEntry, entry_id, current_user.restaurant_id, detail="Ecriture introuvable")
     cancel_accounting_entry(db, entry, current_user)
     db.commit()
     return entry_public(db, entry)
@@ -1254,9 +1248,7 @@ def create_expense(payload: ExpenseIn, current_user: User = Depends(require_tena
 @router.patch("/expenses/{expense_id}/validate")
 def validate_expense(expense_id: str, payment_method: PaymentMethod = PaymentMethod.CASH, cash_register_id: str | None = None, bank_account_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    expense = db.get(Expense, expense_id)
-    if not expense or expense.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Depense introuvable")
+    expense = tenant_get_or_404(db, Expense, expense_id, current_user.restaurant_id, detail="Depense introuvable")
     if expense.status != OperationStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Depense deja traitee")
     entry = create_expense_entry(db, current_user.restaurant_id, current_user.id, expense, payment_method, cash_register_id, bank_account_id)
@@ -1304,9 +1296,7 @@ def create_revenue(payload: RevenueIn, current_user: User = Depends(require_tena
 @router.patch("/revenues/{revenue_id}/validate")
 def validate_revenue(revenue_id: str, payment_method: PaymentMethod = PaymentMethod.CASH, cash_register_id: str | None = None, bank_account_id: str | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    revenue = db.get(Revenue, revenue_id)
-    if not revenue or revenue.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Recette introuvable")
+    revenue = tenant_get_or_404(db, Revenue, revenue_id, current_user.restaurant_id, detail="Recette introuvable")
     if revenue.status != OperationStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Recette deja traitee")
     entry = create_revenue_entry(db, current_user.restaurant_id, current_user.id, revenue, payment_method, cash_register_id, bank_account_id)
@@ -1381,9 +1371,7 @@ def list_payment_schedules(status: str | None = None, direction: str | None = No
 @router.patch("/payment-schedules/{schedule_id}/pay")
 def pay_payment_schedule(schedule_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    schedule = db.get(PaymentSchedule, schedule_id)
-    if not schedule or schedule.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Échéance introuvable")
+    schedule = tenant_get_or_404(db, PaymentSchedule, schedule_id, current_user.restaurant_id, detail="Échéance introuvable")
     if schedule.status != "pending":
         raise HTTPException(status_code=400, detail="Échéance déjà traitée")
     schedule.status = "paid"
@@ -1430,9 +1418,7 @@ def payment_schedule_report(current_user: User = Depends(require_tenant_user), d
 def reconcile_entry_line(line_id: str, reconciled: bool = True, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     """Pointe (ou dépointe) une ligne d'écriture contre le relevé bancaire."""
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    line = db.get(AccountingEntryLine, line_id)
-    if not line or line.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Ligne d'écriture introuvable")
+    line = tenant_get_or_404(db, AccountingEntryLine, line_id, current_user.restaurant_id, detail="Ligne d'écriture introuvable")
     line.reconciled = reconciled
     line.reconciled_at = utcnow() if reconciled else None
     db.commit()
@@ -1503,9 +1489,7 @@ def create_payment(payload: PaymentIn, current_user: User = Depends(require_tena
 @router.patch("/payments/{payment_id}/validate")
 def validate_payment(payment_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    payment = db.get(Payment, payment_id)
-    if not payment or payment.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Paiement introuvable")
+    payment = tenant_get_or_404(db, Payment, payment_id, current_user.restaurant_id, detail="Paiement introuvable")
     if payment.status != OperationStatus.DRAFT:
         raise HTTPException(status_code=400, detail="Paiement deja traite")
     entry = create_payment_entry(db, current_user.restaurant_id, current_user.id, payment)
@@ -1541,9 +1525,7 @@ def create_cash_register(payload: CashRegisterIn, current_user: User = Depends(r
 @router.get("/cash-registers/{cash_register_id}/balance")
 def get_cash_balance(cash_register_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_READ)
-    register = db.get(CashRegister, cash_register_id)
-    if not register or register.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Caisse introuvable")
+    register = tenant_get_or_404(db, CashRegister, cash_register_id, current_user.restaurant_id, detail="Caisse introuvable")
     return {"cash_register_id": register.id, "balance": account_balance(db, current_user.restaurant_id, register.account_id)}
 
 
@@ -1567,9 +1549,7 @@ def create_bank_account(payload: BankAccountIn, current_user: User = Depends(req
 @router.get("/bank-accounts/{bank_account_id}/balance")
 def get_bank_balance(bank_account_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_READ)
-    bank = db.get(BankAccount, bank_account_id)
-    if not bank or bank.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Compte bancaire introuvable")
+    bank = tenant_get_or_404(db, BankAccount, bank_account_id, current_user.restaurant_id, detail="Compte bancaire introuvable")
     return {"bank_account_id": bank.id, "balance": account_balance(db, current_user.restaurant_id, bank.account_id)}
 
 
@@ -1686,6 +1666,26 @@ def get_accounting_journal(start_date: datetime | None = None, end_date: datetim
     return get_ledger(None, start_date, end_date, journal_id, current_user, db)
 
 
+@router.get("/reports/spending-analytics")
+def spending_analytics(
+    period: str = Query(default="month"),
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    """Analyse des dépenses et achats avec comparaison vs période précédente."""
+    assert_permission(current_user, Permission.ACCOUNTING_READ)
+    resolved_period = period if not (start_date and end_date) else "custom"
+    return build_spending_analytics(
+        db,
+        current_user.restaurant_id,
+        period=resolved_period,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
 @router.get("/reports/expenses")
 def get_expense_report(start_date: datetime | None = None, end_date: datetime | None = None, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     statement = get_income_statement(start_date, end_date, current_user, db)
@@ -1781,9 +1781,7 @@ def vat_declaration(
 @router.post("/stock-movements/{movement_id}/generate-entry", status_code=201)
 def generate_stock_accounting_entry(movement_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.ACCOUNTING_UPDATE)
-    movement = db.get(StockMovement, movement_id)
-    if not movement or movement.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Mouvement de stock introuvable")
+    movement = tenant_get_or_404(db, StockMovement, movement_id, current_user.restaurant_id, detail="Mouvement de stock introuvable")
     if movement.status != StockMovementStatus.VALIDATED:
         raise HTTPException(status_code=400, detail="Seuls les mouvements de stock valides peuvent generer une ecriture")
     accounts = ensure_default_accounting(db, current_user.restaurant_id)
@@ -2052,9 +2050,7 @@ def create_promotion(payload: PromotionCodeIn, current_user: User = Depends(requ
 @router.patch("/promotions/{promo_id}")
 def update_promotion(promo_id: str, payload: PromotionCodeUpdateIn, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.CASHIER_UPDATE)
-    promo = db.get(PromotionCode, promo_id)
-    if not promo or promo.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Code promo introuvable")
+    promo = tenant_get_or_404(db, PromotionCode, promo_id, current_user.restaurant_id, detail="Code promo introuvable")
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(promo, field, value)
     db.commit()
@@ -2065,9 +2061,7 @@ def update_promotion(promo_id: str, payload: PromotionCodeUpdateIn, current_user
 @router.delete("/promotions/{promo_id}", status_code=204)
 def delete_promotion(promo_id: str, current_user: User = Depends(require_tenant_user), db: Session = Depends(get_db)):
     assert_permission(current_user, Permission.CASHIER_UPDATE)
-    promo = db.get(PromotionCode, promo_id)
-    if not promo or promo.restaurant_id != current_user.restaurant_id:
-        raise HTTPException(status_code=404, detail="Code promo introuvable")
+    promo = tenant_get_or_404(db, PromotionCode, promo_id, current_user.restaurant_id, detail="Code promo introuvable")
     promo.is_active = False
     db.commit()
     return None

@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle, Loader2, Phone, RefreshCw, XCircle } from "lucide-react";
-import { formatApiError } from "@/utils/network";
+import { apiFetch } from "@/config/http";
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLLS = 24;
@@ -18,7 +18,7 @@ function formatMsisdn(raw) {
   return raw.replace(/\D/g, "").replace(/^(?:237|\+237|00237)/, "").slice(0, 9);
 }
 
-export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
+export function MtnMoneyPayment({ order, onSuccess, onClose }) {
   const [msisdn, setMsisdn] = useState("");
   const [step, setStep] = useState("form");
   const [txId, setTxId] = useState(null);
@@ -32,21 +32,6 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
     return () => clearInterval(pollRef.current);
   }, []);
 
-  async function apiFetch(path, options = {}) {
-    const token = localStorage.getItem("access_token");
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(options.headers ?? {}),
-      },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, "Action MTN Money impossible."));
-    return data;
-  }
-
   async function initiate() {
     const cleaned = formatMsisdn(msisdn);
     if (cleaned.length < 8) {
@@ -59,10 +44,11 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
     try {
       const result = await apiFetch("/api/v1/payments/mtn/initiate", {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           order_id: order.id,
           payer_msisdn: cleaned,
-        }),
+        },
+        fallback: "Action MTN Money impossible.",
       });
 
       setTxId(result.transaction_id);
@@ -94,7 +80,9 @@ export function MtnMoneyPayment({ apiBaseUrl, order, onSuccess, onClose }) {
       count++;
       setPollCount(count);
       try {
-        const result = await apiFetch(`/api/v1/payments/mtn/status/${id}`);
+        const result = await apiFetch(`/api/v1/payments/mtn/status/${id}`, {
+          fallback: "Action MTN Money impossible.",
+        });
         setStatusData(result);
 
         if (result.status === "SUCCESS") {
