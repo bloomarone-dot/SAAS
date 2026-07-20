@@ -55,6 +55,7 @@ from app.modules.payments.service import (
 )
 from app.modules.permissions.models import Permission
 from app.modules.users.models import User
+from app.rate_limits import payment_rate_limit
 from app.security import decode_access_token, verify_hmac_sha256_signature
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,7 @@ async def _initiate(
 
 
 @router.post("/orange/initiate", response_model=OrangePayInitOut, status_code=201)
+@payment_rate_limit
 async def initiate_orange_payment(
     payload: OrangePayInitIn,
     request: Request,
@@ -210,6 +212,7 @@ async def initiate_orange_payment(
 
 
 @router.post("/mtn/initiate", response_model=MtnPayInitOut, status_code=201)
+@payment_rate_limit
 async def initiate_mtn_payment(
     payload: MtnPayInitIn,
     request: Request,
@@ -241,9 +244,11 @@ async def initiate_mtn_payment(
 
 
 @router.get("/{provider}/status/{transaction_id}", response_model=PaymentStatusOut)
+@payment_rate_limit
 def get_payment_status(
     provider: str,
     transaction_id: str,
+    request: Request,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
@@ -384,7 +389,9 @@ async def mtn_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/transactions", response_model=list[PaymentStatusOut])
+@payment_rate_limit
 def list_transactions(
+    request: Request,
     start_date: datetime | None = Query(default=None),
     end_date: datetime | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -453,8 +460,10 @@ async def _broadcast_request(request_obj: PaymentRequest, event_name: str) -> No
 
 
 @router.post("/requests", response_model=PaymentRequestOut, status_code=201)
+@payment_rate_limit
 async def create_payment_request_endpoint(
     payload: PaymentRequestCreateIn,
+    request: Request,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
@@ -473,7 +482,9 @@ async def create_payment_request_endpoint(
 
 
 @router.get("/requests", response_model=list[PaymentRequestOut])
+@payment_rate_limit
 def list_payment_requests_endpoint(
+    request: Request,
     status: str | None = Query(default="PENDING"),
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
@@ -494,6 +505,7 @@ def _load_pending_request(db: Session, request_id: str, restaurant_id: str) -> P
 
 
 @router.post("/requests/{request_id}/validate", response_model=PaymentRequestActionOut)
+@payment_rate_limit
 async def validate_payment_request_endpoint(
     request_id: str,
     request: Request,
@@ -567,15 +579,17 @@ async def validate_payment_request_endpoint(
 
 
 @router.post("/requests/{request_id}/reject", response_model=PaymentRequestActionOut)
+@payment_rate_limit
 async def reject_payment_request_endpoint(
     request_id: str,
+    request: Request,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
     assert_permission(current_user, Permission.CASHIER_UPDATE)
     request_obj = _load_pending_request(db, request_id, current_user.restaurant_id)
-    order = db.get(CustomerOrder, request_obj.order_id)
-    reject_payment_request(db, request_obj, current_user, order.order_number if order else "")
+    order = tenant_get_or_404(db, CustomerOrder, request_obj.order_id, current_user.restaurant_id, detail="Commande introuvable")
+    reject_payment_request(db, request_obj, current_user, order.order_number)
     await _broadcast_request(request_obj, "payment_request_rejected")
     return PaymentRequestActionOut(
         request_id=request_obj.id,

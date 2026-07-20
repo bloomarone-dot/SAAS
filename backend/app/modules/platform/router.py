@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from app.modules.shared.models import utcnow
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -28,6 +28,7 @@ from app.modules.platform.schemas import (
 from app.modules.restaurants.models import Restaurant
 from app.modules.restaurants.router import generate_slug
 from app.modules.users.models import User
+from app.rate_limits import auth_rate_limit
 from app.security import generate_temporary_password, hash_password
 
 
@@ -78,9 +79,14 @@ def _unique_username(db: Session, seed: str) -> str:
 # --- Demandes d'instance (landing publique + gestion superadmin) ---
 
 @router.post("/instance-requests", response_model=InstanceRequestPublic, status_code=201)
-def create_instance_request(payload: InstanceRequestCreateIn, db: Session = Depends(get_db)):
+@auth_rate_limit
+def create_instance_request(
+    payload: InstanceRequestCreateIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """PUBLIC : un propriétaire sollicite la création de son instance restaurant."""
-    request = InstanceRequest(
+    instance_request = InstanceRequest(
         restaurant_name=payload.restaurant_name.strip(),
         owner_name=payload.owner_name.strip(),
         owner_email=(payload.owner_email or "").lower().strip() or None,
@@ -92,18 +98,21 @@ def create_instance_request(payload: InstanceRequestCreateIn, db: Session = Depe
         message=payload.message,
         status="pending",
     )
-    db.add(request)
+    db.add(instance_request)
     notify(
         db,
         title="Nouvelle demande d'instance",
-        message=f"{request.restaurant_name} — {request.owner_name} ({request.owner_phone}) sollicite une instance.",
+        message=(
+            f"{instance_request.restaurant_name} — {instance_request.owner_name} "
+            f"({instance_request.owner_phone}) sollicite une instance."
+        ),
         role=Role.SUPERADMIN.value,
         category="platform",
         link="instance-requests",
     )
     db.commit()
-    db.refresh(request)
-    return request
+    db.refresh(instance_request)
+    return instance_request
 
 
 @router.get("/instance-requests", response_model=list[InstanceRequestPublic])
@@ -392,6 +401,7 @@ def reset_platform_user_password(
         raise HTTPException(status_code=400, detail="Ce compte plateforme ne peut pas etre modifie ici")
 
     user.password_hash = hash_password(payload.password)
+    user.token_version = (getattr(user, "token_version", 0) or 0) + 1
     db.commit()
     return {"message": "Mot de passe réinitialisé."}
 

@@ -5,6 +5,7 @@ import { AdminFormModal, DashboardSection, FilterBar, PageContainer, PageHeader,
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { DeliveryCashierPanel } from "@/modules/orders/components/DeliveryCashierPanel";
 import { CashierReportAnalytics } from "@/modules/orders/components/CashierReportAnalytics";
+import { InvoiceHistoryPanel } from "@/modules/orders/components/InvoiceHistoryPanel";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
 import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
@@ -14,7 +15,7 @@ import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFilterBar";
-import { InvoiceHistoryPanel } from "@/modules/orders/components/InvoiceHistoryPanel";
+import { orderTakerDisplay, orderTakerGroupKey, orderTakerRole, isDeliveryOrder } from "@/modules/orders/utils/orderLabels";
 
 const paymentMethods = [
   { label: "Espèces", icon: "Wallet" },
@@ -215,7 +216,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const pendingOrders = useMemo(
     () => (report.pending_orders ?? []).filter((order) => {
       if (!query) return true;
-      return [order.order_number, order.customer_name, orderCustomerLabel(order), order.server_name, order.status]
+      return [order.order_number, order.customer_name, orderCustomerLabel(order), orderTakerDisplay(order), order.status]
         .join(" ")
         .toLowerCase()
         .includes(query);
@@ -229,10 +230,10 @@ export function CaisseDashboard({ overrides = {} }) {
     .filter(([method]) => /mobile|orange|mtn/i.test(method))
     .reduce((total, [, amount]) => total + Number(amount || 0), 0);
 
-  const ordersByServer = useMemo(() => {
+  const ordersByStaff = useMemo(() => {
     const groups = new Map();
     for (const order of pendingOrders) {
-      const key = order.server_name || "Sans serveur assigné";
+      const key = orderTakerGroupKey(order);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(order);
     }
@@ -437,8 +438,8 @@ export function CaisseDashboard({ overrides = {} }) {
               </button>
             }
           >
-            <PendingOrdersByServer
-              groups={ordersByServer.slice(0, 4)}
+            <PendingOrdersByStaff
+              groups={ordersByStaff.slice(0, 4)}
               onSelect={openPaymentModal}
               compact
             />
@@ -455,8 +456,8 @@ export function CaisseDashboard({ overrides = {} }) {
       )}
 
       {activeTab === "pending" && (
-        <DashboardSection title="Commandes à encaisser par serveur" action={<SmallMeta>{pendingOrders.length} en attente</SmallMeta>}>
-          <PendingOrdersByServer groups={ordersByServer} onSelect={openPaymentModal} />
+        <DashboardSection title="Commandes à encaisser" action={<SmallMeta>{pendingOrders.length} en attente</SmallMeta>}>
+          <PendingOrdersByStaff groups={ordersByStaff} onSelect={openPaymentModal} />
         </DashboardSection>
       )}
 
@@ -514,7 +515,7 @@ export function CaisseDashboard({ overrides = {} }) {
         open={showPaymentModal && Boolean(selectedOrder)}
         onClose={() => setShowPaymentModal(false)}
         title={selectedOrder ? `Encaisser · ${selectedOrder.order_number}` : ""}
-        description={selectedOrder ? `${orderCustomerLabel(selectedOrder)}${selectedOrder.server_name ? ` · Serveur ${selectedOrder.server_name}` : ""}` : ""}
+        description={selectedOrder ? `${orderCustomerLabel(selectedOrder)}${orderTakerDisplay(selectedOrder, "") ? ` · ${orderTakerRole(selectedOrder)} ${orderTakerDisplay(selectedOrder)}` : ""}` : ""}
         size="xl"
         footer={
           <>
@@ -673,17 +674,17 @@ export function CaisseDashboard({ overrides = {} }) {
   );
 }
 
-function PendingOrdersByServer({ groups, onSelect, compact = false }) {
+function PendingOrdersByStaff({ groups, onSelect, compact = false }) {
   if (!groups.length) return <EmptyState text="Aucune commande prête ou servie à encaisser." />;
 
   return (
     <div className="space-y-6">
-      {groups.map(([serverName, orders]) => (
-        <div key={serverName} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      {groups.map(([staffName, orders]) => (
+        <div key={staffName} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
             <div className="flex items-center gap-2">
               <DashboardIcon name="User" size={16} className="text-emerald-700" />
-              <p className="text-sm font-black text-slate-900">{serverName}</p>
+              <p className="text-sm font-black text-slate-900">{staffName}</p>
             </div>
             <SmallMeta>{orders.length} commande(s)</SmallMeta>
           </div>
@@ -948,9 +949,14 @@ function receiptHtml(order, restaurant, currentUser) {
     ? `${getApiBaseUrl()}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
     : rawLogo;
   const cashierName = order.cashier_name
+    || order.created_by_cashier_name
+    || order.order_taker_name
     || [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ")
     || currentUser?.username
     || "Non renseigné";
+  const staffName = isDeliveryOrder(order)
+    ? (order.order_taker_name || order.created_by_cashier_name || order.cashier_name || "Non renseignée")
+    : (order.server_name || "Non assigné");
   const items = order.items ?? [];
   const subtotal = items.reduce((total, item) => total + Number(item.line_total || 0), 0);
   const totalTtc = Number(order.total_amount || 0);
@@ -1024,9 +1030,12 @@ function receiptHtml(order, restaurant, currentUser) {
             <strong>Commande</strong><span>${escapeHtml(order.order_number)}</span>
             <strong>Restaurant</strong><span>${escapeHtml(restaurant?.name || restaurantName)}</span>
             <strong>Client</strong><span>${escapeHtml(order.customer_name || orderCustomerLabel(order) || "Client anonyme")}</span>
-            <strong>Table</strong><span>${escapeHtml(order.table_id ? `${order.table_room || "Salle"} · Table ${order.table_name || order.table_id}` : "-")}</span>
-            <strong>Serveur</strong><span>${escapeHtml(order.server_name || "Non assigné")}</span>
-            <strong>Caissier</strong><span>${escapeHtml(cashierName)}</span>
+            ${isDeliveryOrder(order)
+              ? `<strong>Quartier</strong><span>${escapeHtml(order.delivery_area_name || "-")}</span>
+            <strong>Prise en charge</strong><span>${escapeHtml(staffName)}</span>`
+              : `<strong>Table</strong><span>${escapeHtml(order.table_id ? `${order.table_room || "Salle"} · Table ${order.table_name || order.table_id}` : "-")}</span>
+            <strong>Serveur</strong><span>${escapeHtml(staffName)}</span>
+            <strong>Caissier</strong><span>${escapeHtml(cashierName)}</span>`}
             <strong>Paiement</strong><span>${escapeHtml(order.payment_method || "Non renseigné")}</span>
             <strong>Encaissement</strong><span>${escapeHtml(formatDateTime(order.paid_at || order.updated_at || new Date().toISOString()))}</span>
             <strong>Impression</strong><span>${escapeHtml(formatDateTime(order.printed_at || new Date().toISOString()))}</span>

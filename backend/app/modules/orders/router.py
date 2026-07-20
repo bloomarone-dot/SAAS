@@ -3,11 +3,12 @@ from app.modules.shared.models import utcnow
 from datetime import time
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
+from app.rate_limits import public_order_rate_limit
 from app.modules.orders.cashier_analytics import build_cashier_analytics, build_network_analytics
 from app.modules.audit.service import log_action
 from app.modules.catalog.classification import classify_menu_item, requires_kitchen_preparation
@@ -37,7 +38,8 @@ CASHIER_PENDING_STATUSES = PAYABLE_STATUSES | {"PENDING_PAYMENT"}
 
 
 @router.post("/public/{slug}", response_model=OrderPublic, status_code=status.HTTP_201_CREATED)
-def create_public_order(slug: str, payload: PublicOrderCreateIn, db: Session = Depends(get_db)):
+@public_order_rate_limit
+def create_public_order(slug: str, payload: PublicOrderCreateIn, request: Request, db: Session = Depends(get_db)):
     restaurant = (
         db.query(Restaurant)
         .filter(Restaurant.slug == slug, Restaurant.is_active.is_(True))
@@ -263,8 +265,13 @@ def cashier_report(
                 order_number=order.order_number,
                 discount_amount=discount_value,
                 total_amount=float(order.total_amount or 0),
-                server_name=getattr(order, "server_name", None),
-                cashier_name=getattr(order, "cashier_name", None),
+                server_name=getattr(order, "server_name", None) if order.table_id else None,
+                cashier_name=(
+                    getattr(order, "created_by_cashier_name", None)
+                    or getattr(order, "cashier_name", None)
+                    if order.fulfillment_type == "Livraison"
+                    else getattr(order, "cashier_name", None)
+                ),
                 paid_at=order.paid_at or order.updated_at,
             )
         )
@@ -495,8 +502,20 @@ def send_order_to_kitchen(
     for item in order.items:
         if item.sale_channel == "EMBALLAGE":
             continue
-        dish = db.get(MenuItem, item.menu_item_id) if item.menu_item_id else None
-        category = db.get(MenuCategory, dish.category_id) if dish and dish.category_id else None
+        dish = (
+            db.query(MenuItem)
+            .filter(MenuItem.id == item.menu_item_id, MenuItem.restaurant_id == order.restaurant_id)
+            .one_or_none()
+            if item.menu_item_id
+            else None
+        )
+        category = (
+            db.query(MenuCategory)
+            .filter(MenuCategory.id == dish.category_id, MenuCategory.restaurant_id == order.restaurant_id)
+            .one_or_none()
+            if dish and dish.category_id
+            else None
+        )
         if dish is not None:
             needs_kitchen = (
                 dish.requires_kitchen
@@ -597,6 +616,8 @@ def update_order_status(
     if payload.status == "Payée" and previous_status not in PAID_STATUSES:
         order.payment_status = "SUCCESS"
         order.cashier_id = current_user.id
+        if not order.created_by_cashier_id:
+            order.created_by_cashier_id = current_user.id
         order.paid_at = utcnow()
         from app.modules.finance.router import post_order_sale_entry_safe
 
@@ -797,6 +818,8 @@ def assign_cash_register(
     order.assigned_cashier_id = assigned_cashier_id
     order.assignment_status = "ASSIGNED"
     order.assigned_at = utcnow()
+    if assigned_cashier_id and not order.created_by_cashier_id:
+        order.created_by_cashier_id = assigned_cashier_id
     log_action(
         db,
         current_user,
@@ -969,6 +992,8 @@ def settle_cash_payment(
     deduct_order_packaging_stock(db, order, user.id)
     order.cashier_id = user.id
     order.assigned_cashier_id = user.id
+    if not order.created_by_cashier_id:
+        order.created_by_cashier_id = user.id
     if cash_register_id:
         get_cash_register_or_404(db, order.restaurant_id, cash_register_id)
         order.cash_register_id = cash_register_id
@@ -1172,14 +1197,16 @@ def assert_order_edit_allowed(user: User, order: CustomerOrder, payload: OrderUp
 
 
 def get_order_or_404(db: Session, order_id: str, restaurant_id: str) -> CustomerOrder:
-    order = (
-        db.query(CustomerOrder)
-        .options(selectinload(CustomerOrder.items))
-        .filter(CustomerOrder.id == order_id, CustomerOrder.restaurant_id == restaurant_id)
-        .one_or_none()
+    from app.tenancy import tenant_get_or_404
+
+    order = tenant_get_or_404(
+        db,
+        CustomerOrder,
+        order_id,
+        restaurant_id,
+        detail="Commande introuvable",
+        options=(selectinload(CustomerOrder.items),),
     )
-    if not order:
-        raise HTTPException(status_code=404, detail="Commande introuvable")
     enrich_orders(db, [order])
     return order
 
@@ -1188,7 +1215,12 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
     user_ids = {
         user_id
         for order in orders
-        for user_id in (order.server_id, order.cashier_id, order.created_by_cashier_id)
+        for user_id in (
+            order.server_id,
+            order.cashier_id,
+            order.created_by_cashier_id,
+            order.assigned_cashier_id,
+        )
         if user_id
     }
     table_ids = {order.table_id for order in orders if order.table_id}
@@ -1208,7 +1240,8 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
     for order in orders:
         server = users.get(order.server_id)
         cashier = users.get(order.cashier_id)
-        created_by = users.get(order.created_by_cashier_id or order.cashier_id)
+        created_by = users.get(order.created_by_cashier_id) or users.get(order.cashier_id)
+        assigned_cashier = users.get(order.assigned_cashier_id)
         table = tables.get(order.table_id)
         area = areas.get(order.delivery_area_id)
         if order.cashier_id and order.fulfillment_type == "Livraison" and not order.table_id:
@@ -1220,6 +1253,14 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
         order.server_name = f"{server.first_name} {server.last_name}" if server else None
         order.cashier_name = f"{cashier.first_name} {cashier.last_name}" if cashier else None
         order.created_by_cashier_name = f"{created_by.first_name} {created_by.last_name}" if created_by else None
+        order.assigned_cashier_name = (
+            f"{assigned_cashier.first_name} {assigned_cashier.last_name}" if assigned_cashier else None
+        )
+        if order.fulfillment_type == "Livraison" or (not order.table_id and order.fulfillment_type != "Sur place"):
+            taker = created_by or cashier or assigned_cashier
+            order.order_taker_name = f"{taker.first_name} {taker.last_name}" if taker else None
+        else:
+            order.order_taker_name = order.server_name
         order.table_name = table.number if table else None
         order.table_room = table.room if table else None
         order.delivery_area_name = area.name if area else None

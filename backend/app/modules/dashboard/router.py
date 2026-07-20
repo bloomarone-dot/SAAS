@@ -1,5 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 import calendar
+from zoneinfo import ZoneInfo
+
 from app.modules.shared.models import utcnow
 
 from sqlalchemy import MetaData, Table, func, inspect, select
@@ -961,67 +963,146 @@ def stock_low_stock_columns_available(db: Session) -> bool:
     return {"minimum_stock", "updated_at"}.issubset(existing) and "stock_movements" in inspector.get_table_names()
 
 
+_WEEKDAYS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+_MONTHS_FR = (
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+)
+
+
+def _resolve_restaurant_tz(name: str | None):
+    """Résout le fuseau restaurant ; repli UTC+1 (Douala) si tzdata indisponible."""
+    key = (name or "Africa/Douala").strip() or "Africa/Douala"
+    try:
+        return ZoneInfo(key)
+    except Exception:
+        try:
+            return ZoneInfo("UTC")
+        except Exception:
+            # Windows / Python sans paquet tzdata : Douala ≈ UTC+1 toute l'année.
+            return dt_timezone(timedelta(hours=1))
+
+
+def _as_utc_naive(value: datetime) -> datetime:
+    """Convertit un datetime aware (fuseau restaurant) en UTC naïf pour les requêtes DB."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(dt_timezone.utc).replace(tzinfo=None)
+
+
+def _insights_local_now(tz) -> datetime:
+    """Horloge locale courante — recalculée à chaque requête (jamais figée)."""
+    return datetime.now(tz)
+
+
 @router.get("/home-insights")
 def home_insights(
     branch_id: str | None = Query(default=None),
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    """Insights comparatifs pour le carrousel d'accueil admin (même heure)."""
+    """Insights comparatifs admin — fenêtres cumulées à l'heure locale courante.
+
+    L'horloge n'est pas figée : chaque appel recalcule « maintenant » dans le
+    fuseau du restaurant (défaut Africa/Douala).
+
+    - Jour : aujourd'hui 00h→maintenant vs hier 00h→même heure
+    - Semaine : lundi→maintenant vs lundi→même jour/heure semaine dernière
+    - Mois : 1→aujourd'hui vs 1→même jour du mois précédent
+    """
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
     restaurant_id = current_user.restaurant_id
-    now = utcnow()
-    today_start = datetime.combine(now.date(), datetime.min.time())
-    cutoff = now
+    restaurant = db.get(Restaurant, restaurant_id) if restaurant_id else None
+    tz = _resolve_restaurant_tz(getattr(restaurant, "timezone", None))
+    local_now = _insights_local_now(tz)
+    time_label = f"{local_now.hour:02d}h{local_now.minute:02d}"
 
-    today_revenue = _revenue_until(db, restaurant_id, today_start, cutoff, branch_id)
+    def revenue(start_local: datetime, end_local: datetime) -> float:
+        return _revenue_until(
+            db,
+            restaurant_id,
+            _as_utc_naive(start_local),
+            _as_utc_naive(end_local),
+            branch_id,
+        )
 
-    yesterday_cutoff = cutoff - timedelta(days=1)
-    yesterday_start = datetime.combine(yesterday_cutoff.date(), datetime.min.time())
-    yesterday_revenue = _revenue_until(db, restaurant_id, yesterday_start, yesterday_cutoff, branch_id)
+    # --- Jour : 00h00 → maintenant vs hier 00h00 → même heure ---
+    today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_revenue = revenue(today_start, local_now)
+    yesterday_cutoff = local_now - timedelta(days=1)
+    yesterday_start = yesterday_cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_revenue = revenue(yesterday_start, yesterday_cutoff)
 
-    last_week_cutoff = cutoff - timedelta(days=7)
-    last_week_start = datetime.combine(last_week_cutoff.date(), datetime.min.time())
-    last_week_revenue = _revenue_until(db, restaurant_id, last_week_start, last_week_cutoff, branch_id)
+    # --- Semaine : lundi → maintenant vs lundi → même jour/heure semaine dernière ---
+    week_start = today_start - timedelta(days=today_start.weekday())
+    week_revenue = revenue(week_start, local_now)
+    last_week_cutoff = local_now - timedelta(days=7)
+    last_week_start = week_start - timedelta(days=7)
+    last_week_revenue = revenue(last_week_start, last_week_cutoff)
+    weekday_fr = _WEEKDAYS_FR[local_now.weekday()]
 
-    prev_month_cutoff = _same_week_prev_month(cutoff)
-    prev_month_start = datetime.combine(prev_month_cutoff.date(), datetime.min.time())
-    prev_month_revenue = _revenue_until(db, restaurant_id, prev_month_start, prev_month_cutoff, branch_id)
+    # --- Mois : 1 → aujourd'hui vs 1 → même jour du mois précédent (même heure) ---
+    month_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_revenue = revenue(month_start, local_now)
+    prev_month_start_naive, prev_month_cutoff_naive = _month_to_date_reference(
+        local_now.replace(tzinfo=None)
+    )
+    prev_month_start = prev_month_start_naive.replace(tzinfo=tz)
+    prev_month_cutoff = prev_month_cutoff_naive.replace(tzinfo=tz)
+    prev_month_revenue = revenue(prev_month_start, prev_month_cutoff)
+    current_month_fr = _MONTHS_FR[local_now.month - 1]
+    prev_month_fr = _MONTHS_FR[prev_month_start.month - 1]
 
     target_samples = []
     for offset in range(1, 8):
-        day = now.date() - timedelta(days=offset)
-        day_start = datetime.combine(day, datetime.min.time())
-        day_end = datetime.combine(day, datetime.max.time())
-        target_samples.append(_revenue_until(db, restaurant_id, day_start, day_end, branch_id))
+        day_local = today_start - timedelta(days=offset)
+        day_end_local = day_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+        target_samples.append(revenue(day_local, day_end_local))
     daily_target = round(sum(target_samples) / len(target_samples), 2) if target_samples else 0
     progress_pct = round(today_revenue / daily_target * 100, 1) if daily_target else 0
     remaining = round(max(0, daily_target - today_revenue), 2)
 
-    trend_message, trend_tone, trend_series = _compute_recent_trend(db, restaurant_id, cutoff, branch_id)
+    trend_message, trend_tone, trend_series = _compute_recent_trend_local(
+        db, restaurant_id, local_now, branch_id
+    )
 
-    time_label = now.strftime("%H:%M")
     cards = [
         _insight_card(
-            "today_vs_yesterday",
-            "Aujourd'hui vs hier",
-            f"Comparaison à {time_label} (même heure)",
-            today_revenue,
-            yesterday_revenue,
+            key="today_vs_yesterday",
+            title="Chiffre d'affaires — par jour",
+            subtitle=f"Aujourd'hui, il est {time_label}.",
+            current=today_revenue,
+            comparison=yesterday_revenue,
+            current_period_label=f"Aujourd'hui (00h00 → {time_label})",
+            comparison_period_label=f"Hier (00h00 → {time_label})",
         ),
         _insight_card(
-            "today_vs_last_week",
-            "Aujourd'hui vs semaine dernière",
-            f"Même jour de la semaine à {time_label}",
-            today_revenue,
-            last_week_revenue,
+            key="today_vs_last_week",
+            title="Chiffre d'affaires — par semaine",
+            subtitle=f"Nous sommes {weekday_fr} à {time_label}.",
+            current=week_revenue,
+            comparison=last_week_revenue,
+            current_period_label=f"Cette semaine (lundi → {weekday_fr} {time_label})",
+            comparison_period_label=f"Semaine dernière (lundi → {weekday_fr} {time_label})",
         ),
         _insight_card(
-            "today_vs_prev_month_week",
-            "Aujourd'hui vs mois précédent",
-            f"Même semaine du mois précédent à {time_label}",
-            today_revenue,
-            prev_month_revenue,
+            key="today_vs_prev_month_week",
+            title="Chiffre d'affaires — par mois",
+            subtitle=f"Nous sommes le {local_now.day} {current_month_fr}.",
+            current=month_revenue,
+            comparison=prev_month_revenue,
+            current_period_label=f"1 au {local_now.day} {current_month_fr}",
+            comparison_period_label=f"1 au {prev_month_cutoff.day} {prev_month_fr}",
         ),
         {
             "key": "daily_goal",
@@ -1034,17 +1115,24 @@ def home_insights(
             "goal_amount": daily_target,
             "remaining_amount": remaining,
             "progress_pct": progress_pct,
+            "current_period_label": f"Aujourd'hui (00h00 → {time_label})",
+            "comparison_period_label": "Objectif estimé (moyenne 7 jours)",
         },
         {
             "key": "recent_trend",
             "title": "Tendance récente",
-            "subtitle": "Évolution du CA à la même heure sur 5 jours",
+            "subtitle": f"Évolution du CA à {time_label} sur 5 jours",
             "message": trend_message,
             "tone": trend_tone,
             "series": trend_series,
         },
     ]
-    return {"as_of": now.isoformat(), "time_label": time_label, "cards": cards}
+    return {
+        "as_of": local_now.isoformat(),
+        "time_label": time_label,
+        "timezone": str(tz),
+        "cards": cards,
+    }
 
 
 def _revenue_until(
@@ -1058,7 +1146,16 @@ def _revenue_until(
     return round(sum(float(order.total_amount or 0) for order in orders), 2)
 
 
-def _insight_card(key: str, title: str, subtitle: str, current: float, comparison: float) -> dict:
+def _insight_card(
+    key: str,
+    title: str,
+    subtitle: str,
+    current: float,
+    comparison: float,
+    *,
+    current_period_label: str | None = None,
+    comparison_period_label: str | None = None,
+) -> dict:
     variation = _variation(current, comparison)
     tone = "neutral"
     if variation is not None:
@@ -1071,21 +1168,22 @@ def _insight_card(key: str, title: str, subtitle: str, current: float, compariso
         "comparison_value": comparison,
         "variation_pct": variation,
         "tone": tone,
+        "current_period_label": current_period_label,
+        "comparison_period_label": comparison_period_label,
     }
 
 
-def _same_week_prev_month(reference: datetime) -> datetime:
-    week_in_month = (reference.day - 1) // 7
+def _month_to_date_reference(reference: datetime) -> tuple[datetime, datetime]:
+    """Retourne (début mois précédent, cutoff même jour/heure du mois précédent)."""
     if reference.month == 1:
         year, month = reference.year - 1, 12
     else:
         year, month = reference.year, reference.month - 1
-    first_day = datetime(year, month, 1)
-    days_until_weekday = (reference.weekday() - first_day.weekday()) % 7
-    candidate_day = 1 + days_until_weekday + week_in_month * 7
+    start = datetime(year, month, 1)
     max_day = calendar.monthrange(year, month)[1]
-    day = min(candidate_day, max_day)
-    return reference.replace(year=year, month=month, day=day)
+    day = min(reference.day, max_day)
+    cutoff = reference.replace(year=year, month=month, day=day)
+    return start, cutoff
 
 
 def _compute_recent_trend(
@@ -1101,6 +1199,33 @@ def _compute_recent_trend(
         start = datetime.combine(end.date(), datetime.min.time())
         series.append(_revenue_until(db, restaurant_id, start, end, branch_id))
 
+    return _trend_from_series(series)
+
+
+def _compute_recent_trend_local(
+    db: Session,
+    restaurant_id: str,
+    local_now: datetime,
+    branch_id: str | None = None,
+    days: int = 5,
+) -> tuple[str, str, list[float]]:
+    series = []
+    for offset in range(days - 1, -1, -1):
+        end_local = local_now - timedelta(days=offset)
+        start_local = end_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        series.append(
+            _revenue_until(
+                db,
+                restaurant_id,
+                _as_utc_naive(start_local),
+                _as_utc_naive(end_local),
+                branch_id,
+            )
+        )
+    return _trend_from_series(series)
+
+
+def _trend_from_series(series: list[float]) -> tuple[str, str, list[float]]:
     consecutive_up = 0
     consecutive_down = 0
     for index in range(1, len(series)):

@@ -211,9 +211,11 @@ export const APP_MENUS = {
       key: "cashier",
       label: "Caisse",
       icon: "CreditCard",
+      defaultView: "cashier",
       children: [
         { key: "cashier", label: "Encaissements", icon: "CreditCard" },
-        { key: "payments", label: "Paiements", icon: "Wallet" },
+        // Ne pas utiliser la clé "payments" : elle ouvre la compta (paiements fournisseurs).
+        { key: "completed-payments", label: "Paiements", icon: "Wallet" },
       ],
     },
     {
@@ -232,20 +234,7 @@ export const APP_MENUS = {
       key: "comptabilite",
       label: "Comptabilité",
       icon: "Calculator",
-      children: [
-        {
-          key: "comptabilite",
-          label: "Tableau de bord",
-          icon: "LayoutDashboard",
-        },
-        { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
-        { key: "journals", label: "Journaux", icon: "ReceiptText" },
-        { key: "entries", label: "Écritures", icon: "Calculator" },
-        { key: "expenses", label: "Dépenses", icon: "TrendingDown" },
-        { key: "encaissements", label: "Encaissements", icon: "Wallet" },
-        { key: "revenues", label: "Recettes manuelles", icon: "Wallet" },
-        { key: "statements", label: "États financiers", icon: "BarChart3" },
-      ],
+      defaultView: "comptabilite",
     },
     {
       key: "reports",
@@ -331,31 +320,16 @@ export const APP_MENUS = {
     { key: "outputs", label: "Sorties", icon: "Package" },
     { key: "reports", label: "Mouvements", icon: "BarChart3" },
     { key: "alerts", label: "Alertes stock faible", icon: "AlertTriangle" },
-    {
-      key: "comptabilite",
-      label: "Comptabilité",
-      icon: "Calculator",
-      defaultView: "accounts",
-      children: [
-        { key: "accounts", label: "Plan comptable", icon: "ClipboardList" },
-        { key: "journals", label: "Journaux", icon: "ReceiptText" },
-        { key: "accounting-entries", label: "Écritures", icon: "Calculator" },
-        { key: "accounting-expenses", label: "Dépenses", icon: "TrendingDown" },
-        { key: "accounting-revenues", label: "Recettes", icon: "Wallet" },
-        { key: "accounting-payments", label: "Paiements", icon: "CreditCard" },
-        { key: "cash", label: "Caisses", icon: "Wallet" },
-        { key: "banks", label: "Banques", icon: "Building2" },
-        { key: "statements", label: "États financiers", icon: "BarChart3" },
-      ],
-    },
+    { key: "comptabilite", label: "Comptabilité", icon: "Calculator", defaultView: "comptabilite" },
   ],
   COMPTABLE: [
-    { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
+    { key: "comptabilite", label: "Comptabilité", icon: "Calculator", defaultView: "comptabilite" },
   ],
   CAISSE: [
     { key: "dashboard", label: "Tableau de bord", icon: "LayoutDashboard" },
     { key: "deliveries", label: "Livraisons", icon: "Truck" },
-    { key: "payments", label: "Paiements", icon: "Wallet" },
+    { key: "cashier", label: "Encaissements", icon: "CreditCard" },
+    { key: "completed-payments", label: "Paiements", icon: "Wallet" },
   ],
 };
 

@@ -15,7 +15,9 @@ from app.modules.menu.services import MenuService
 from app.modules.permissions.models import Permission
 from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import User
+from app.rate_limits import public_menu_rate_limit
 from app.security import detect_image_extension
+from app.tenancy import tenant_find, tenant_get_or_404
 
 router = APIRouter(prefix="/menu", tags=["menu"])
 MENU_UPLOAD_DIR = Path(os.getenv("UPLOADS_DIR", "uploads")) / "menu"
@@ -73,7 +75,8 @@ async def upload_menu_image(
 
 
 @router.get("/public/{slug}", response_model=PublicRestaurantMenu)
-def get_public_menu(slug: str, db: Session = Depends(get_db)):
+@public_menu_rate_limit
+def get_public_menu(slug: str, request: Request, db: Session = Depends(get_db)):
     tenant_key = slug.strip().lower()
     restaurant = (
         db.query(Restaurant)
@@ -180,8 +183,14 @@ def delete_category(
     db: Session = Depends(get_db),
 ):
     assert_menu_update_allowed(current_user)
-    category = db.get(CategoryModel, category_id)
-    category_name = category.name if category else None
+    category = tenant_get_or_404(
+        db,
+        CategoryModel,
+        category_id,
+        current_user.restaurant_id,
+        detail="Categorie non trouvee",
+    )
+    category_name = category.name
     success = MenuService.delete_category(
         db=db,
         restaurant_id=current_user.restaurant_id,
@@ -310,8 +319,14 @@ def delete_dish(
     db: Session = Depends(get_db),
 ):
     assert_menu_update_allowed(current_user)
-    dish = db.get(DishModel, dish_id)
-    dish_name = dish.name if dish else None
+    dish = tenant_get_or_404(
+        db,
+        DishModel,
+        dish_id,
+        current_user.restaurant_id,
+        detail="Plat introuvable",
+    )
+    dish_name = dish.name
     success = MenuService.delete_dish(
         db=db,
         restaurant_id=current_user.restaurant_id,

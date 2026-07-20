@@ -6,6 +6,7 @@ import { DashboardSection, FilterBar, PageContainer, SecondaryAction, StatCard }
 import { DailyReportModal } from "@/modules/admin/components/DailyReportModal";
 import { InsightsCarousel } from "@/modules/admin/components/InsightsCarousel";
 import { getTimeGreeting } from "@/utils/greeting";
+import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
@@ -70,11 +71,12 @@ export function AdminDashboard({ overrides = {} }) {
   const [category, setCategory] = useState("all");
   const [branchId, setBranchId] = useState("");
   const [data, setData] = useState(null);
-  const [insights, setInsights] = useState(null);
-  const [insightsLoading, setInsightsLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [ordersModal, setOrdersModal] = useState(null);
   const [showDailyReport, setShowDailyReport] = useState(false);
+  const [insightCards, setInsightCards] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [insightTimeLabel, setInsightTimeLabel] = useState("");
 
   const load = useCallback(async () => {
     if (!apiBaseUrl) return;
@@ -94,18 +96,25 @@ export function AdminDashboard({ overrides = {} }) {
     }
   }, [apiBaseUrl, period, category, branchId]);
 
-  const loadInsights = useCallback(async () => {
+  const loadInsights = useCallback(async ({ silent = false } = {}) => {
     if (!apiBaseUrl) return;
-    setInsightsLoading(true);
+    if (!silent) setInsightsLoading(true);
     try {
-      const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : "";
-      setInsights(await apiFetch(`/api/v1/dashboard/home-insights${query}`, {
-        fallback: "Impossible de charger les insights.",
-      }));
+      const query = new URLSearchParams();
+      if (branchId) query.set("branch_id", branchId);
+      const suffix = query.toString() ? `?${query}` : "";
+      const payload = await apiFetch(`/api/v1/dashboard/home-insights${suffix}`, {
+        fallback: "Impossible de charger les comparaisons du tableau de bord.",
+      });
+      setInsightCards(Array.isArray(payload?.cards) ? payload.cards : []);
+      setInsightTimeLabel(payload?.time_label || "");
     } catch {
-      setInsights(null);
+      if (!silent) {
+        setInsightCards([]);
+        setInsightTimeLabel("");
+      }
     } finally {
-      setInsightsLoading(false);
+      if (!silent) setInsightsLoading(false);
     }
   }, [apiBaseUrl, branchId]);
 
@@ -114,8 +123,11 @@ export function AdminDashboard({ overrides = {} }) {
   }, [load]);
 
   useEffect(() => {
-    loadInsights();
+    loadInsights({ silent: false });
   }, [loadInsights]);
+
+  // Recalcule l'heure courante et les fenêtres de comparaison (pas figé).
+  useAutoRefresh(() => loadInsights({ silent: true }), 30_000, [loadInsights]);
 
   const kpi = data?.kpis ?? {};
   const realtime = data?.realtime_orders ?? {};
@@ -138,10 +150,12 @@ export function AdminDashboard({ overrides = {} }) {
   return (
     <PageContainer className="space-y-5">
       <InsightsCarousel
-        cards={insights?.cards ?? []}
-        loading={insightsLoading}
+        variant="dark"
         greeting={greetingTitle}
         dateLabel={dateLabel}
+        timeLabel={insightTimeLabel}
+        loading={insightsLoading}
+        cards={insightCards}
         action={
           <>
             <SecondaryAction icon="FileText" onClick={() => setShowDailyReport(true)}>

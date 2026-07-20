@@ -6,6 +6,7 @@ const KitchenPage = lazy(() => import('./modules/menu/pages/KitchenPage'));
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
+import { ViewErrorBoundary } from "@/components/ViewErrorBoundary";
 import { PasswordRecovery } from "@/features/auth/components/PasswordRecovery";
 import { AccessPortalPage, SuperAdminLoginPage, RestaurantLandingPage, RestaurantLoginPage, TenantPublicRouter } from "@/features/auth/PublicAuthPages";
 const SuperadminRestaurants = lazy(() =>
@@ -52,7 +53,7 @@ const AccountingOperations = lazyNamed(
 );
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
-import { flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
+import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
 import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { getApiBaseUrl } from "@/config/api";
 import { apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/config/http";
@@ -106,6 +107,8 @@ const routeAliases = {
   "menu-categories": "menu-catalog",
   "menu-dishes": "menu-catalog",
   availability: "menu-catalog",
+  // /caisse (menu service) → espace encaissements
+  caisse: "cashier",
 };
 
 const viewPathSegments = {
@@ -533,15 +536,17 @@ export default function App() {
         queueCount={offlineQueueCount}
         onMessage={setMessage}
       />
-      <Suspense
-        fallback={
-          <div className="flex items-center justify-center py-16 text-sm font-semibold text-slate-400">
-            Chargement…
-          </div>
-        }
-      >
-        {renderContent()}
-      </Suspense>
+      <ViewErrorBoundary key={activeView}>
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center py-16 text-sm font-semibold text-slate-400">
+              Chargement…
+            </div>
+          }
+        >
+          {renderContent()}
+        </Suspense>
+      </ViewErrorBoundary>
 
       {message && (
         <div className="mt-8 flex max-w-3xl items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
@@ -580,6 +585,7 @@ export default function App() {
           <AccountingOperations
             apiBaseUrl={apiBaseUrl}
             mode={activeView}
+            role={session.role}
             onMessage={setMessage}
             onNavigate={(view) => {
               setActiveView(view);
@@ -589,13 +595,73 @@ export default function App() {
         );
       }
 
+      // Codes promo admin : avant la caisse (view "discounts" partagée).
+      if (["discounts", "promotions"].includes(activeView) && session.role === "ADMIN") {
+        return <PromotionsAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
+      }
+
+      // Caisse AVANT compta : évite que "payments"/"cash" du menu Caisse ouvrent la compta.
+      const caisseOperatorViews = [
+        "cashier",
+        "deliveries",
+        "delivery-create",
+        "delivery-orders",
+        "payments",
+        "completed-payments",
+        "unpaid-orders",
+        "cash-order-detail",
+        "discounts",
+        "payment-method",
+        "cash",
+        "mobile",
+        "card",
+        "payment-validation",
+        "receipts",
+        "print-receipt",
+        "cancel-payment",
+        "closing",
+        "cash-closing",
+        "cash-report",
+        "payment-totals",
+        "payment-history",
+      ];
+      // Clés réservées à la compta admin (ne pas les router vers CaisseDashboard).
+      const accountingOwnedViews = new Set(["payments", "cash"]);
+      const caisseAdminReviewViews = caisseOperatorViews.filter(
+        (view) => view !== "discounts" && !accountingOwnedViews.has(view),
+      );
+
+      if (caisseOperatorViews.includes(activeView) && session.role === "CAISSE") {
+        return (
+          <RoleDashboard
+            role="CAISSE"
+            overrides={{ ...overrides, __activeView: activeView, __currentUser: session }}
+          />
+        );
+      }
+
+      if (caisseAdminReviewViews.includes(activeView) && session.role === "ADMIN") {
+        return (
+          <RoleDashboard
+            role="CAISSE"
+            overrides={{
+              ...overrides,
+              __activeView: activeView,
+              __currentUser: session,
+              __adminReviewOnly: true,
+            }}
+          />
+        );
+      }
+
       // Accès comptabilité (vues dédiées sans collision avec le stock).
-      const accountingViews = ["comptabilite", "accounts", "journals", "entries", "expenses", "encaissements", "revenues", "cash", "banks", "statements"];
+      const accountingViews = ["comptabilite", "accounts", "journals", "entries", "expenses", "expense-analytics", "encaissements", "revenues", "payments", "cash", "statements", "food-cost", "echeancier", "rapprochement"];
       if (accountingViews.includes(activeView) && session.role === "ADMIN") {
         return (
           <AccountingOperations
             apiBaseUrl={apiBaseUrl}
             mode={activeView}
+            role={session.role}
             onMessage={setMessage}
             onNavigate={(view) => {
               setActiveView(view);
@@ -605,11 +671,33 @@ export default function App() {
         );
       }
       if (activeView === "comptabilite" && session.role === "STOCK") {
-        return <RoleDashboard role={session.role} overrides={overrides} onNavigate={navigateFromDashboard} />;
+        return (
+          <AccountingOperations
+            apiBaseUrl={apiBaseUrl}
+            mode="dashboard"
+            role={session.role}
+            onMessage={setMessage}
+            onNavigate={(view) => {
+              setActiveView(view);
+              pushAppRoute(session, view);
+            }}
+          />
+        );
       }
-      const stockAccountingViews = ["accounts", "journals", "accounting-entries", "accounting-expenses", "accounting-revenues", "accounting-payments", "cash", "banks", "statements"];
+      const stockAccountingViews = ["accounts", "journals", "accounting-entries", "accounting-expenses", "expense-analytics", "accounting-revenues", "accounting-payments", "cash", "statements", "encaissements", "food-cost", "echeancier", "rapprochement"];
       if (stockAccountingViews.includes(activeView) && session.role === "STOCK") {
-        return <AccountingOperations apiBaseUrl={apiBaseUrl} mode={activeView} onMessage={setMessage} />;
+        return (
+          <AccountingOperations
+            apiBaseUrl={apiBaseUrl}
+            mode={activeView}
+            role={session.role}
+            onMessage={setMessage}
+            onNavigate={(view) => {
+              setActiveView(view);
+              pushAppRoute(session, view);
+            }}
+          />
+        );
       }
 
       if (activeView === "alerts" && session.role === "MANAGER") {
@@ -700,14 +788,6 @@ export default function App() {
 
       if (activeView === "products" && session.role === "ADMIN") {
         return <CatalogAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
-      }
-
-      if (["cashier", "deliveries", "delivery-create", "delivery-orders", "payments", "completed-payments", "unpaid-orders", "cash-order-detail", "discounts", "payment-method", "cash", "mobile", "card", "payment-validation", "receipts", "print-receipt", "cancel-payment", "closing", "cash-closing", "cash-report", "payment-totals", "payment-history"].includes(activeView) && ["ADMIN", "CAISSE"].includes(session.role)) {
-        return <RoleDashboard role="CAISSE" overrides={{ ...overrides, __activeView: activeView, __currentUser: session, __adminReviewOnly: session.role === "ADMIN" }} />;
-      }
-
-      if (["discounts", "promotions"].includes(activeView) && session.role === "ADMIN") {
-        return <PromotionsAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} />;
       }
 
       if (activeView === "settings" && session.role === "ADMIN") {
