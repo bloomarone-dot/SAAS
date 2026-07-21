@@ -452,8 +452,11 @@ export default function App() {
       const initialSection = restaurantPath === "/commande" ? "commande" : restaurantPath === "/contact" ? "infos" : restaurantPath === "/menu" ? "menu" : null;
       return <RestaurantLandingPage apiBaseUrl={apiBaseUrl} slug={slug} initialSection={initialSection} />;
     }
+    // Le site SaaS possède sa propre connexion plateforme. Les comptes des
+    // restaurants passent exclusivement par leur sous-domaine (ou /r/:slug en
+    // développement), pour ne pas mélanger les deux espaces publics.
     if (publicHostKind === "saas" && (publicPath === "/login" || publicPath === "/admin")) {
-      return <AccessPortalPage apiBaseUrl={apiBaseUrl} message={message} onForgotPassword={() => setRecoveryMode(true)} />;
+      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
     }
     if (publicHostKind === "saas") {
       return <LandingPage apiBaseUrl={apiBaseUrl} />;
