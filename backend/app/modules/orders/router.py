@@ -4,7 +4,7 @@ from datetime import time
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
@@ -40,9 +40,18 @@ CASHIER_PENDING_STATUSES = PAYABLE_STATUSES | {"PENDING_PAYMENT"}
 @router.post("/public/{slug}", response_model=OrderPublic, status_code=status.HTTP_201_CREATED)
 @public_order_rate_limit
 def create_public_order(slug: str, payload: PublicOrderCreateIn, request: Request, db: Session = Depends(get_db)):
+    # Aligné sur le menu public / résolution tenant (slug, subdomain, slug sans tirets).
+    tenant_key = slug.strip().lower()
     restaurant = (
         db.query(Restaurant)
-        .filter(Restaurant.slug == slug, Restaurant.is_active.is_(True))
+        .filter(
+            Restaurant.is_active.is_(True),
+            or_(
+                func.lower(Restaurant.slug) == tenant_key,
+                func.lower(Restaurant.subdomain) == tenant_key,
+                func.replace(func.lower(Restaurant.slug), "-", "") == tenant_key,
+            ),
+        )
         .one_or_none()
     )
     if not restaurant:

@@ -144,19 +144,16 @@ function viewFromPath(user, path = window.location.pathname) {
 
 function pushAppRoute(user, view, replace = false) {
   const path = pathForView(user, view);
-  if (window.location.pathname === path) return;
-  window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+  if (window.location.pathname !== path) {
+    window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+  }
+  return path;
 }
 
 // Sans session : /login affiche le login générique (repli). Les espaces /superadmin* et
 // /r/:slug* sont interceptés en amont par les pages publiques dédiées.
 function shouldShowLoginForPath(path = window.location.pathname) {
   return path.split("/").filter(Boolean)[0] === "login";
-}
-
-function isRestaurantPublicPath(path = window.location.pathname) {
-  const cleanPath = path.replace(/\/+$/, "") || "/";
-  return ["/", "/menu", "/commande", "/contact"].includes(cleanPath);
 }
 
 export default function App() {
@@ -192,7 +189,8 @@ export default function App() {
         const routeView = viewFromPath(user);
         setSession(user);
         setActiveView(routeView);
-        pushAppRoute(user, routeView, true);
+        const nextPath = pushAppRoute(user, routeView, true);
+        setCurrentPath(nextPath);
         if (user.role === "SUPERADMIN") fetchRestaurants();
         if (user.role === "ADMIN") fetchAdminSummary();
         if (user.restaurant_id) fetchRestaurantTheme();
@@ -244,8 +242,8 @@ export default function App() {
       if (session) {
         const prefix = routePrefix(session);
         if (prefix && !nextPath.startsWith(prefix)) {
-          pushAppRoute(session, "dashboard", true);
-          setCurrentPath(window.location.pathname);
+          const dashPath = pushAppRoute(session, "dashboard", true);
+          setCurrentPath(dashPath);
           setActiveView("dashboard");
           return;
         }
@@ -320,7 +318,8 @@ export default function App() {
     setActiveView("dashboard");
     setShowLogin(false);
     setRecoveryMode(false);
-    pushAppRoute(data.user, "dashboard", true);
+    const nextPath = pushAppRoute(data.user, "dashboard", true);
+    setCurrentPath(nextPath);
     if (data.user.role === "SUPERADMIN") fetchRestaurants();
     if (data.user.role === "ADMIN") fetchAdminSummary();
     if (data.restaurant_branding) {
@@ -412,19 +411,20 @@ export default function App() {
     );
   }
 
-  if (session && publicHostKind === "restaurant" && isRestaurantPublicPath(currentPath)) {
-    const publicPath = currentPath.replace(/\/+$/, "") || "/";
-    return (
-      <TenantPublicRouter
-        apiBaseUrl={apiBaseUrl}
-        currentPath={publicPath}
-        onAuthenticated={handleAuthenticated}
-      />
-    );
-  }
+  // Staff déjà connecté : ne jamais rester bloqué sur la vitrine publique du sous-domaine.
+  // La vitrine (/ , /menu, /commande, /contact) reste accessible uniquement hors session.
 
   if (!session) {
     const publicPath = currentPath.replace(/\/+$/, "") || "/";
+    if (recoveryMode) {
+      return (
+        <PasswordRecovery
+          apiBaseUrl={apiBaseUrl}
+          mode="forgot"
+          onBackToLogin={() => setRecoveryMode(false)}
+        />
+      );
+    }
     if (publicHostKind === "platform") {
       return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
     }
@@ -462,16 +462,6 @@ export default function App() {
 
   if (!session && !showLogin) {
     return <LandingPage apiBaseUrl={apiBaseUrl} />;
-  }
-
-  if (!session && recoveryMode) {
-    return (
-      <PasswordRecovery
-        apiBaseUrl={apiBaseUrl}
-        mode="forgot"
-        onBackToLogin={() => setRecoveryMode(false)}
-      />
-    );
   }
 
   if (!session) {
@@ -513,7 +503,8 @@ export default function App() {
       onNavigate={(view) => {
         setActiveView(view);
         setMessage("");
-        pushAppRoute(session, view);
+        const nextPath = pushAppRoute(session, view);
+        setCurrentPath(nextPath);
         if (view === "restaurants") {
           setShowRestaurantForm(false);
           fetchRestaurants();
@@ -567,7 +558,8 @@ export default function App() {
   function renderContent() {
     const navigateFromDashboard = (view) => {
       setActiveView(view);
-      pushAppRoute(session, view);
+      const nextPath = pushAppRoute(session, view);
+      setCurrentPath(nextPath);
     };
 
     if (session.role !== "SUPERADMIN") {
@@ -589,7 +581,8 @@ export default function App() {
             onMessage={setMessage}
             onNavigate={(view) => {
               setActiveView(view);
-              pushAppRoute(session, view);
+              const nextPath = pushAppRoute(session, view);
+              setCurrentPath(nextPath);
             }}
           />
         );
@@ -665,7 +658,8 @@ export default function App() {
             onMessage={setMessage}
             onNavigate={(view) => {
               setActiveView(view);
-              pushAppRoute(session, view);
+              const nextPath = pushAppRoute(session, view);
+              setCurrentPath(nextPath);
             }}
           />
         );
@@ -679,7 +673,8 @@ export default function App() {
             onMessage={setMessage}
             onNavigate={(view) => {
               setActiveView(view);
-              pushAppRoute(session, view);
+              const nextPath = pushAppRoute(session, view);
+              setCurrentPath(nextPath);
             }}
           />
         );
@@ -694,7 +689,8 @@ export default function App() {
             onMessage={setMessage}
             onNavigate={(view) => {
               setActiveView(view);
-              pushAppRoute(session, view);
+              const nextPath = pushAppRoute(session, view);
+              setCurrentPath(nextPath);
             }}
           />
         );
@@ -776,7 +772,8 @@ export default function App() {
           <DailyReportPage
             onClose={() => {
               setActiveView("dashboard");
-              pushAppRoute(session, "dashboard");
+              const nextPath = pushAppRoute(session, "dashboard");
+              setCurrentPath(nextPath);
             }}
           />
         );
@@ -812,7 +809,8 @@ export default function App() {
             onMessage={setMessage}
             onNavigate={(view) => {
               setActiveView(view);
-              pushAppRoute(session, view);
+              const nextPath = pushAppRoute(session, view);
+              setCurrentPath(nextPath);
             }}
           />
         );
@@ -828,7 +826,8 @@ export default function App() {
       if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
         return <StockDashboard variant="stock" overrides={overrides} onNavigate={(view) => {
           setActiveView(view);
-          pushAppRoute(session, view);
+          const nextPath = pushAppRoute(session, view);
+          setCurrentPath(nextPath);
         }} />;
       }
 
@@ -889,7 +888,8 @@ export default function App() {
           onToggleForm={() => {
             if (activeView === "create-restaurant") {
               setActiveView("restaurants");
-              pushAppRoute(session, "restaurants");
+              const nextPath = pushAppRoute(session, "restaurants");
+              setCurrentPath(nextPath);
               setShowRestaurantForm(false);
               return;
             }
@@ -898,7 +898,8 @@ export default function App() {
           onViewRestaurant={(restaurant) => {
             setSelectedRestaurantId(restaurant.id);
             setActiveView("restaurant-detail");
-            pushAppRoute(session, "restaurant-detail");
+            const nextPath = pushAppRoute(session, "restaurant-detail");
+            setCurrentPath(nextPath);
           }}
         />
       );
