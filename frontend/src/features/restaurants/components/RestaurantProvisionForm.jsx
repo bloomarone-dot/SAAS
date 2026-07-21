@@ -1,10 +1,13 @@
+import { useEffect, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { validationFor } from "@/utils/validation";
+
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const LOGO_ACCEPT = "image/png,image/jpeg,image/webp";
 
 const restaurantFields = [
   ["name", "Nom du restaurant", "text", "Mon Restaurant"],
   ["subdomain", "Sous-domaine", "text", "mon-restaurant"],
-  ["logo_url", "URL du logo", "url", "https://..."],
   ["cover_image_url", "Image de couverture", "url", "https://..."],
 ];
 
@@ -27,9 +30,24 @@ const ownerFields = [
   ["owner_password", "Mot de passe", "password", "8 caractères avec majuscule, chiffre et symbole"],
 ];
 
-const optionalFields = new Set(["subdomain", "logo_url", "cover_image_url", "owner_email", "owner_alt_phone"]);
+const optionalFields = new Set([
+  "subdomain",
+  "cover_image_url",
+  "owner_first_name",
+  "owner_email",
+  "owner_alt_phone",
+]);
 
-export function RestaurantProvisionForm({ value, onChange, onSubmit, isLoading }) {
+export function RestaurantProvisionForm({
+  value,
+  onChange,
+  onSubmit,
+  isLoading,
+  logoFile = null,
+  logoPreviewUrl = "",
+  onLogoFileChange,
+  logoError = "",
+}) {
   return (
     <form onSubmit={onSubmit} className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_16px_50px_rgba(15,23,42,0.05)] lg:p-6">
       <div className="border-b border-slate-100 pb-5">
@@ -49,6 +67,12 @@ export function RestaurantProvisionForm({ value, onChange, onSubmit, isLoading }
           {restaurantFields.map((field) => (
             <ProvisionField key={field[0]} field={field} value={value} onChange={onChange} wide />
           ))}
+          <LogoFileField
+            file={logoFile}
+            previewUrl={logoPreviewUrl}
+            onChange={onLogoFileChange}
+            error={logoError}
+          />
           <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
             {colorFields.map(([name, label]) => (
               <ProvisionColorField
@@ -93,6 +117,39 @@ export function RestaurantProvisionForm({ value, onChange, onSubmit, isLoading }
         </button>
       </div>
     </form>
+  );
+}
+
+function LogoFileField({ file, previewUrl, onChange, error }) {
+  return (
+    <div className="md:col-span-2">
+      <span className="mb-2 flex items-center gap-1 text-sm font-black text-slate-900">
+        Logo du restaurant
+        <span className="text-xs font-bold text-slate-400">(optionnel)</span>
+      </span>
+      <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center">
+        <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+          {previewUrl ? (
+            <img src={previewUrl} alt="Aperçu logo" className="h-full w-full object-cover" />
+          ) : (
+            <DashboardIcon name="Store" size={22} className="text-slate-300" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <input
+            type="file"
+            accept={LOGO_ACCEPT}
+            onChange={onChange}
+            className="w-full text-sm font-semibold text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-black file:text-emerald-700"
+          />
+          <p className="mt-2 text-xs font-semibold text-slate-500">
+            PNG, JPG ou WEBP — max 2 Mo
+            {file ? ` · ${file.name}` : ""}
+          </p>
+          {error && <p className="mt-1 text-xs font-bold text-red-600">{error}</p>}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -154,7 +211,7 @@ function ProvisionField({ field, value, onChange, wide = false }) {
         value={value[name] ?? ""}
         onChange={onChange}
         placeholder={placeholder}
-        {...validationFor(name)}
+        {...(validationFor(name) || {})}
         autoComplete={isPassword ? "new-password" : "off"}
         autoCorrect="off"
         autoCapitalize="none"
@@ -167,4 +224,32 @@ function ProvisionField({ field, value, onChange, wide = false }) {
       />
     </label>
   );
+}
+
+/** Valide un fichier logo côté client. Retourne un message d'erreur ou "". */
+export function validateLogoFile(file) {
+  if (!file) return "";
+  const allowed = new Set(["image/png", "image/jpeg", "image/webp"]);
+  if (!allowed.has(file.type)) {
+    return "Format invalide. Utilisez PNG, JPG ou WEBP.";
+  }
+  if (file.size > LOGO_MAX_BYTES) {
+    return "Logo trop volumineux (max 2 Mo).";
+  }
+  return "";
+}
+
+/** Hook léger pour aperçu logo (révocation URL). */
+export function useLogoPreview(file) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return previewUrl;
 }

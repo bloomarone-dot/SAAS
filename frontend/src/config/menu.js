@@ -31,28 +31,28 @@ export const MENU_ITEMS = [
   {
     key: "superadmin.dashboard",
     label: "Vue d'ensemble",
-    path: "/superadmin",
+    path: "/app/dashboard",
     icon: "LayoutDashboard",
     roles: [ROLES.SUPERADMIN],
   },
   {
     key: "superadmin.restaurants",
     label: "Restaurants",
-    path: "/superadmin/restaurants",
+    path: "/app/restaurants",
     icon: "Building2",
     roles: [ROLES.SUPERADMIN],
   },
   {
     key: "admin.dashboard",
     label: "Tableau de bord",
-    path: "/admin",
+    path: "/app/dashboard",
     icon: "LayoutDashboard",
     roles: [ROLES.ADMIN, ROLES.MANAGER],
   },
   {
     key: "restaurant.settings",
     label: "Configuration",
-    path: "/admin/settings",
+    path: "/app/settings",
     icon: "Settings",
     roles: [ROLES.ADMIN],
     ownerOnly: true,
@@ -61,7 +61,7 @@ export const MENU_ITEMS = [
   {
     key: "restaurant.branches",
     label: "Branches",
-    path: "/admin/branches",
+    path: "/app/branches",
     icon: "MapPin",
     roles: [ROLES.ADMIN, ROLES.MANAGER],
     permissions: [PERMISSIONS.BRANCH_READ],
@@ -69,7 +69,7 @@ export const MENU_ITEMS = [
   {
     key: "restaurant.users",
     label: "Personnel",
-    path: "/admin/users",
+    path: "/app/users",
     icon: "Users",
     roles: [ROLES.ADMIN, ROLES.MANAGER],
     permissions: [PERMISSIONS.USER_READ],
@@ -77,7 +77,7 @@ export const MENU_ITEMS = [
   {
     key: "service.floor",
     label: "Service en salle",
-    path: "/serveur",
+    path: "/app/dashboard",
     icon: "Utensils",
     roles: [ROLES.SERVEUR, ROLES.ADMIN, ROLES.MANAGER],
     permissions: [PERMISSIONS.SERVICE_READ],
@@ -85,7 +85,7 @@ export const MENU_ITEMS = [
   {
     key: "service.kitchen",
     label: "Cuisine",
-    path: "/cuisine",
+    path: "/app/dashboard",
     icon: "ChefHat",
     roles: [ROLES.CUISINE, ROLES.ADMIN, ROLES.MANAGER],
     permissions: [PERMISSIONS.KITCHEN_READ],
@@ -93,7 +93,7 @@ export const MENU_ITEMS = [
   {
     key: "service.cashier",
     label: "Caisse",
-    path: "/caisse",
+    path: "/app/cashier",
     icon: "CreditCard",
     roles: [ROLES.CAISSE, ROLES.ADMIN, ROLES.MANAGER],
     permissions: [PERMISSIONS.CASHIER_READ],
@@ -101,7 +101,7 @@ export const MENU_ITEMS = [
   {
     key: "operations.stock",
     label: "Stocks",
-    path: "/stock",
+    path: "/app/stock",
     icon: "Package",
     roles: [ROLES.STOCK, ROLES.ADMIN, ROLES.MANAGER],
     permissions: [PERMISSIONS.STOCK_READ],
@@ -109,7 +109,7 @@ export const MENU_ITEMS = [
   {
     key: "finance.accounting",
     label: "Comptabilite",
-    path: "/comptable",
+    path: "/app/finance",
     icon: "Calculator",
     roles: [ROLES.COMPTABLE, ROLES.ADMIN],
     permissions: [PERMISSIONS.ACCOUNTING_READ],

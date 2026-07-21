@@ -67,7 +67,7 @@ export default defineConfig({
   ],
   server: {
     host: "0.0.0.0",
-    port: 5173,
+    port: 5178,
     allowedHosts: devAllowedHosts.includes('all') ? true : devAllowedHosts,
     proxy: {
       "/api": {

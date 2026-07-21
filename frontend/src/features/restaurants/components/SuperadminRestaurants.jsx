@@ -14,6 +14,10 @@ export function SuperadminRestaurants({
   showForm,
   onToggleForm,
   onViewRestaurant,
+  logoFile = null,
+  logoPreviewUrl = "",
+  onLogoFileChange,
+  logoError = "",
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -104,6 +108,10 @@ export function SuperadminRestaurants({
           onChange={onChange}
           onSubmit={onSubmit}
           isLoading={isLoading}
+          logoFile={logoFile}
+          logoPreviewUrl={logoPreviewUrl}
+          onLogoFileChange={onLogoFileChange}
+          logoError={logoError}
         />
       ) : (
         <RestaurantTable

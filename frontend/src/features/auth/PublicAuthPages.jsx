@@ -121,7 +121,7 @@ export function AccessPortalPage({ apiBaseUrl, message, onForgotPassword }) {
         fallback:
           "Restaurant introuvable. Utilisez le slug exact (ex. leboncoin, le-bon-coin ou main), pas le nom d'utilisateur.",
       });
-      navigate(`/r/${normalized}/login`);
+      navigate(`/restaurant/${normalized}/login`);
     } catch (err) {
       setError(err.message || "Restaurant introuvable.");
     } finally {
@@ -233,7 +233,11 @@ export function RestaurantLoginPage({ apiBaseUrl, slug, onAuthenticated }) {
     );
   }
 
-  const backPath = window.location.pathname.startsWith("/r/") ? `/r/${slug}` : "/";
+  const backPath = window.location.pathname.startsWith("/restaurant/")
+    ? `/restaurant/${slug}`
+    : window.location.pathname.startsWith("/r/")
+      ? `/restaurant/${slug}`
+      : "/";
   return (
     <TenantThemeProvider restaurant={restaurant}>
     <LoginCard
@@ -295,7 +299,7 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
     return <RestaurantLoginPage apiBaseUrl={apiBaseUrl} slug={slug} onAuthenticated={onAuthenticated} />;
   }
   const initialSection =
-    cleanPath === "/commande"
+    cleanPath === "/commande" || cleanPath === "/order"
       ? "commande"
       : cleanPath === "/contact"
         ? "infos"
@@ -307,7 +311,7 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
       apiBaseUrl={apiBaseUrl}
       slug={slug}
       initialData={tenant}
-      loginPath="/login"
+      loginPath={`/restaurant/${slug}/login`}
       initialSection={initialSection}
     />
   );
@@ -400,7 +404,7 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
   const accent = "var(--tenant-primary)";
   const buttonColor = "var(--tenant-button)";
   const accentSoft = "var(--tenant-primary-soft)";
-  const resolvedLoginPath = loginPath || `/r/${slug}/login`;
+  const resolvedLoginPath = loginPath || `/restaurant/${slug}/login`;
   const location = [restaurant.address, restaurant.city].filter(Boolean).join(" · ");
   const currency = restaurant.currency || "FCFA";
   const cartLines = Object.values(cart);

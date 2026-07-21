@@ -21,6 +21,7 @@ import {
   Zap,
 } from "lucide-react";
 import InstanceRequestForm from "@/features/instances/InstanceRequestForm";
+import { navigate } from "@/core/routing/navigate";
 
 export default function LandingPage({ apiBaseUrl }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -33,16 +34,24 @@ export default function LandingPage({ apiBaseUrl }) {
   }
 
   function goToLogin() {
-    window.history.pushState({}, "", "/login");
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    navigate("/login");
   }
 
   function goToRegister() {
-    scrollTo("request-instance");
+    navigate("/contact");
   }
 
   function goToSuperadmin() {
     goToLogin();
+  }
+
+  function goToSection(path, sectionId) {
+    setMobileMenuOpen(false);
+    if (window.location.pathname === path) {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    navigate(path);
   }
 
   function handleNotify(e) {
@@ -56,7 +65,14 @@ export default function LandingPage({ apiBaseUrl }) {
       {/* ── NAV ── */}
       <header className="sticky top-0 z-50 border-b border-slate-100 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-5 py-4 md:px-8">
-          <a href="/" className="flex items-center gap-2.5">
+          <a
+            href="/"
+            onClick={(event) => {
+              event.preventDefault();
+              navigate("/");
+            }}
+            className="flex items-center gap-2.5"
+          >
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600">
               <Utensils size={18} className="text-white" />
             </div>
@@ -66,13 +82,14 @@ export default function LandingPage({ apiBaseUrl }) {
           </a>
 
           <nav className="hidden items-center gap-8 text-sm font-semibold text-slate-600 lg:flex">
-            <button onClick={() => scrollTo("features")} className="hover:text-emerald-600 transition">Fonctionnalités</button>
-            <button onClick={() => scrollTo("pricing")} className="hover:text-emerald-600 transition">Tarifs</button>
-            <button onClick={() => scrollTo("testimonials")} className="hover:text-emerald-600 transition">Témoignages</button>
+            <button type="button" onClick={() => goToSection("/features", "features")} className="hover:text-emerald-600 transition">Fonctionnalités</button>
+            <button type="button" onClick={() => goToSection("/pricing", "pricing")} className="hover:text-emerald-600 transition">Tarifs</button>
+            <button type="button" onClick={() => goToSection("/contact", "request-instance")} className="hover:text-emerald-600 transition">Contact</button>
           </nav>
 
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={goToLogin}
               className="hidden text-sm font-bold text-slate-700 hover:text-emerald-600 transition sm:block"
             >
@@ -97,10 +114,10 @@ export default function LandingPage({ apiBaseUrl }) {
         {mobileMenuOpen && (
           <div className="border-t border-slate-100 bg-white px-5 py-4 lg:hidden">
             <nav className="flex flex-col gap-4 text-sm font-semibold text-slate-700">
-              <button onClick={() => scrollTo("features")} className="text-left hover:text-emerald-600">Fonctionnalités</button>
-              <button onClick={() => scrollTo("pricing")} className="text-left hover:text-emerald-600">Tarifs</button>
-              <button onClick={() => scrollTo("testimonials")} className="text-left hover:text-emerald-600">Témoignages</button>
-              <button onClick={goToLogin} className="text-left hover:text-emerald-600">Se connecter</button>
+              <button type="button" onClick={() => goToSection("/features", "features")} className="text-left hover:text-emerald-600">Fonctionnalités</button>
+              <button type="button" onClick={() => goToSection("/pricing", "pricing")} className="text-left hover:text-emerald-600">Tarifs</button>
+              <button type="button" onClick={() => goToSection("/contact", "request-instance")} className="text-left hover:text-emerald-600">Contact</button>
+              <button type="button" onClick={goToLogin} className="text-left hover:text-emerald-600">Se connecter</button>
             </nav>
           </div>
         )}
@@ -434,10 +451,10 @@ export default function LandingPage({ apiBaseUrl }) {
             <div>
               <p className="text-sm font-black uppercase tracking-wider text-white">Liens</p>
               <div className="mt-4 flex flex-col gap-3 text-sm">
-                <button onClick={() => scrollTo("features")} className="text-left hover:text-emerald-400 transition">Fonctionnalités</button>
-                <button onClick={() => scrollTo("pricing")} className="text-left hover:text-emerald-400 transition">Tarifs</button>
-                <button onClick={() => scrollTo("testimonials")} className="text-left hover:text-emerald-400 transition">Témoignages</button>
-                <button onClick={goToLogin} className="text-left hover:text-emerald-400 transition">Se Connecter</button>
+                <button type="button" onClick={() => goToSection("/features", "features")} className="text-left hover:text-emerald-400 transition">Fonctionnalités</button>
+                <button type="button" onClick={() => goToSection("/pricing", "pricing")} className="text-left hover:text-emerald-400 transition">Tarifs</button>
+                <button type="button" onClick={() => goToSection("/contact", "request-instance")} className="text-left hover:text-emerald-400 transition">Contact</button>
+                <button type="button" onClick={goToLogin} className="text-left hover:text-emerald-400 transition">Se Connecter</button>
                 <button onClick={goToRegister} className="text-left hover:text-emerald-400 transition">Créer un compte</button>
                 <button onClick={goToSuperadmin} className="text-left text-slate-500 hover:text-emerald-400 transition">Administration</button>
               </div>

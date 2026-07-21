@@ -233,7 +233,7 @@ def provision_restaurant(
         email=email,
         username=username,
         password_hash=hash_password(payload.owner_password),
-        first_name=payload.owner_first_name,
+        first_name=(payload.owner_first_name or "").strip(),
         last_name=payload.owner_last_name,
         phone=payload.owner_phone,
         role=Role.ADMIN,
@@ -250,6 +250,23 @@ def provision_restaurant(
     db.refresh(owner)
 
     return RestaurantProvisionOut(restaurant=restaurant, owner=owner)
+
+
+def _store_restaurant_logo(request: Request, restaurant: Restaurant, file: UploadFile, content: bytes) -> str:
+    """Enregistre un logo sur disque et retourne l'URL publique."""
+    if (file.content_type or "") not in ALLOWED_LOGO_TYPES:
+        raise HTTPException(status_code=400, detail="Format logo invalide. Utilisez PNG, JPG ou WEBP.")
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Logo trop volumineux. Taille maximale: 2 Mo.")
+    extension = detect_image_extension(content)
+    if not extension:
+        raise HTTPException(status_code=400, detail="Fichier logo invalide ou corrompu.")
+
+    LOGO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{restaurant.id}-{uuid4().hex}{extension}"
+    destination = LOGO_UPLOAD_DIR / filename
+    destination.write_bytes(content)
+    return str(request.url_for("uploads", path=f"logos/{filename}"))
 
 
 @router.get("/public/tenant/resolve", response_model=TenantResolveOut)
@@ -506,26 +523,39 @@ async def upload_my_restaurant_logo(
     if not current_user.is_owner:
         raise HTTPException(status_code=403, detail="Seul le proprietaire peut configurer le restaurant")
 
-    if (file.content_type or "") not in ALLOWED_LOGO_TYPES:
-        raise HTTPException(status_code=400, detail="Format logo invalide. Utilisez PNG, JPG ou WEBP.")
-
-    content = await file.read()
-    if len(content) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Logo trop volumineux. Taille maximale: 2 Mo.")
-    extension = detect_image_extension(content)
-    if not extension:
-        raise HTTPException(status_code=400, detail="Fichier logo invalide ou corrompu.")
-
     restaurant = db.get(Restaurant, current_user.restaurant_id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurant introuvable")
 
-    LOGO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    filename = f"{restaurant.id}-{uuid4().hex}{extension}"
-    destination = LOGO_UPLOAD_DIR / filename
-    destination.write_bytes(content)
+    content = await file.read()
+    restaurant.logo_url = _store_restaurant_logo(request, restaurant, file, content)
+    db.commit()
+    db.refresh(restaurant)
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
+    return restaurant
 
-    restaurant.logo_url = str(request.url_for("uploads", path=f"logos/{filename}"))
+
+@router.post("/{restaurant_id}/logo", response_model=RestaurantPublic)
+async def upload_restaurant_logo_as_superadmin(
+    restaurant_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """SUPERADMIN : importe le logo d'un restaurant (création / back-office plateforme)."""
+    if current_user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Seul un super administrateur peut importer ce logo")
+
+    restaurant = db.get(Restaurant, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    content = await file.read()
+    restaurant.logo_url = _store_restaurant_logo(request, restaurant, file, content)
     db.commit()
     db.refresh(restaurant)
     restaurant.branches_count = max(

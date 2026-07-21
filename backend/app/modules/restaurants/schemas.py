@@ -88,10 +88,18 @@ class RestaurantProvisionIn(BaseModel):
     owner_email: Optional[str] = Field(default=None, max_length=191)
     owner_username: str = Field(min_length=3, max_length=50, pattern=USERNAME_PATTERN)
     owner_password: str = Field(min_length=8, max_length=128)
-    owner_first_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
+    owner_first_name: Optional[str] = Field(default=None, max_length=80, pattern=PERSON_NAME_PATTERN)
     owner_last_name: str = Field(min_length=2, max_length=80, pattern=PERSON_NAME_PATTERN)
     owner_phone: str = Field(min_length=5, max_length=30, pattern=PHONE_PATTERN)
     owner_alt_phone: Optional[str] = Field(default=None, max_length=30, pattern=PHONE_PATTERN)
+
+    @validator("owner_first_name", pre=True)
+    def empty_first_name_as_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @validator("owner_password")
     def owner_password_is_strong(cls, value: str) -> str:

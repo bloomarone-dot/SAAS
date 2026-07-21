@@ -7,14 +7,23 @@ import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
 import { ViewErrorBoundary } from "@/components/ViewErrorBoundary";
-import { PasswordRecovery } from "@/features/auth/components/PasswordRecovery";
-import { AccessPortalPage, SuperAdminLoginPage, RestaurantLandingPage, RestaurantLoginPage, TenantPublicRouter } from "@/features/auth/PublicAuthPages";
+import { PasswordRecovery, SuperAdminLoginPage } from "@/core/auth";
+import { MarketingRoutes, isMarketingPath } from "@/apps/marketing/routes";
+import {
+  RestaurantPublicRoutes,
+  matchRestaurantPublicPath,
+} from "@/apps/restaurant-public/routes";
+import {
+  pushAppRoute,
+  viewFromPath,
+  isAuthenticatedAppPath,
+} from "@/apps/dashboard/routing";
+import { applyLegacyRedirect } from "@/core/routing/legacyRedirects";
 const SuperadminRestaurants = lazy(() =>
   import("@/features/restaurants/components/SuperadminRestaurants").then((m) => ({
     default: m.SuperadminRestaurants,
   })),
 );
-import LandingPage from "@/LandingPage";
 import { BranchesAdmin } from "@/modules/admin/components/BranchesAdmin";
 import { AuditLogsAdmin } from "@/modules/admin/components/AuditLogsAdmin";
 import { AdminReports } from "@/modules/admin/components/AdminReports";
@@ -29,6 +38,7 @@ import MenuCatalogAdmin from "@/modules/menu/pages/MenuCatalogAdmin";
 import { ServerClients, ServerFreeTables, ServerHistory, ServerInvoices, ServerOpenTables, ServerOrderWorkspace } from "@/modules/menu/components/ServerClientSections";
 import { OrdersAdmin } from "@/modules/orders/components/OrdersAdmin";
 import { StockDashboard } from "@/components/dashboard/roles/StockDashboard";
+import { validateLogoFile, useLogoPreview } from "@/features/restaurants/components/RestaurantProvisionForm";
 
 // Sections superadmin et operations stock: chunks volumineux charges a la demande.
 const loadSuperadminSections = () => import("@/modules/platform/components/SuperadminSections");
@@ -54,10 +64,8 @@ const AccountingOperations = lazyNamed(
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
-import { buildRestaurantTheme } from "@/utils/restaurantTheme";
-import { getApiBaseUrl } from "@/config/api";
-import { apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/config/http";
-import { getPublicHostKind, shouldResolveTenantFromHost } from "@/tenancy/tenantResolver";
+import { getApiBaseUrl, apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/core/api";
+import { getPublicHostKind, shouldResolveTenantFromHost, buildRestaurantTheme } from "@/core/tenant";
 
 const initialRestaurant = {
   name: "",
@@ -83,75 +91,13 @@ const optionalRestaurantFields = new Set([
   "subdomain",
   "logo_url",
   "cover_image_url",
+  "owner_first_name",
   "owner_email",
   "owner_alt_phone",
 ]);
 
-const rolePaths = {
-  SUPERADMIN: "superadmin",
-  ADMIN: "admin",
-  MANAGER: "manager",
-  SERVEUR: "serveur",
-  CUISINE: "cuisine",
-  CAISSE: "caisse",
-  STOCK: "stock",
-  COMPTABLE: "comptable",
-};
-
-const routeAliases = {
-  users: "staff",
-  personnel: "staff",
-  restaurants: "restaurants",
-  categories: "menu-catalog",
-  dishes: "menu-catalog",
-  "menu-categories": "menu-catalog",
-  "menu-dishes": "menu-catalog",
-  availability: "menu-catalog",
-  // /caisse (menu service) → espace encaissements
-  caisse: "cashier",
-};
-
-const viewPathSegments = {
-  staff: "users",
-  "menu-catalog": "catalog",
-};
-
-// Préfixe d'URL du tenant : /superadmin pour la plateforme, /admin sur sous-domaine restaurant,
-// /r/:slug seulement en développement local ou en fallback sans sous-domaine.
-function routePrefix(user) {
-  if (!user) return "";
-  if (user.role === "SUPERADMIN") return "/superadmin";
-  if (getPublicHostKind() === "restaurant") return "/admin";
-  if (user.restaurant_slug) return `/r/${user.restaurant_slug}`;
-  return `/${rolePaths[user.role] ?? "app"}`;
-}
-
-function pathForView(user, view) {
-  const prefix = routePrefix(user);
-  const segment = viewPathSegments[view] ?? view;
-  return view === "dashboard" ? prefix || "/" : `${prefix}/${segment}`;
-}
-
-function viewFromPath(user, path = window.location.pathname) {
-  const prefix = routePrefix(user);
-  if (!prefix) return "dashboard";
-  const cleanPath = path.replace(/\/+$/, "") || "/";
-  if (cleanPath === prefix) return "dashboard";
-  if (!cleanPath.startsWith(`${prefix}/`)) return "dashboard";
-  const view = cleanPath.slice(prefix.length + 1).split("/")[0];
-  return routeAliases[view] ?? view ?? "dashboard";
-}
-
-function pushAppRoute(user, view, replace = false) {
-  const path = pathForView(user, view);
-  if (window.location.pathname !== path) {
-    window.history[replace ? "replaceState" : "pushState"]({}, "", path);
-  }
-  return path;
-}
-
-// Sans session : /login affiche le login générique (repli). Les espaces /superadmin* et
-// /r/:slug* sont interceptés en amont par les pages publiques dédiées.
+// Sans session : /login affiche le portail SaaS. Les espaces /superadmin*,
+// /restaurant/:slug* et /app/* sont routés par les apps dédiées.
 function shouldShowLoginForPath(path = window.location.pathname) {
   return path.split("/").filter(Boolean)[0] === "login";
 }
@@ -167,6 +113,9 @@ export default function App() {
   const [adminSummary, setAdminSummary] = useState(null);
   const [showRestaurantForm, setShowRestaurantForm] = useState(false);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoError, setLogoError] = useState("");
+  const logoPreviewUrl = useLogoPreview(logoFile);
   const [message, setMessage] = useState("");
   useAutoClearMessage(message, setMessage);
   const [isLoading, setIsLoading] = useState(false);
@@ -236,12 +185,22 @@ export default function App() {
   }, 15000, [session?.role, apiBaseUrl]);
 
   useEffect(() => {
+    // Migration progressive : anciennes URLs → schéma /restaurant /app /marketing
+    if (applyLegacyRedirect(window.location.pathname)) {
+      setCurrentPath(window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
     function handlePopState() {
+      if (!session && applyLegacyRedirect(window.location.pathname)) {
+        setCurrentPath(window.location.pathname);
+        return;
+      }
       const nextPath = window.location.pathname;
       setCurrentPath(nextPath);
       if (session) {
-        const prefix = routePrefix(session);
-        if (prefix && !nextPath.startsWith(prefix)) {
+        if (!isAuthenticatedAppPath(nextPath)) {
           const dashPath = pushAppRoute(session, "dashboard", true);
           setCurrentPath(dashPath);
           setActiveView("dashboard");
@@ -307,6 +266,16 @@ export default function App() {
     }));
   }
 
+  function handleLogoFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    const error = validateLogoFile(file);
+    setLogoError(error);
+    setLogoFile(error ? null : file);
+    if (error) {
+      event.target.value = "";
+    }
+  }
+
   function handleAuthenticated(data) {
     // Post-connexion commun aux pages publiques (superadmin / restaurant par slug).
     if (!isSessionAllowedOnCurrentHost(data.user)) {
@@ -348,6 +317,10 @@ export default function App() {
 
   async function submitRestaurant(event) {
     event.preventDefault();
+    if (logoError) {
+      setMessage(logoError);
+      return;
+    }
     setIsLoading(true);
     setMessage("");
 
@@ -357,13 +330,28 @@ export default function App() {
           .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
           .filter(([key, value]) => !(optionalRestaurantFields.has(key) && !value))
       );
+      // logo_url n'est plus saisi manuellement : upload après création si fichier présent.
+      delete payload.logo_url;
+
       const data = await apiFetch("/api/v1/restaurants", {
         method: "POST",
         body: payload,
         fallback: "Création du restaurant impossible.",
       });
 
+      if (logoFile && data?.restaurant?.id) {
+        const body = new FormData();
+        body.append("file", logoFile);
+        await apiFetch(`/api/v1/restaurants/${data.restaurant.id}/logo`, {
+          method: "POST",
+          body,
+          fallback: "Restaurant créé, mais l'import du logo a échoué.",
+        });
+      }
+
       setRestaurantForm(initialRestaurant);
+      setLogoFile(null);
+      setLogoError("");
       setShowRestaurantForm(false);
       await fetchRestaurants();
       setMessage(
@@ -387,6 +375,8 @@ export default function App() {
     if (expired) {
       setShowLogin(true);
       setMessage("Votre session a expiré, veuillez vous reconnecter.");
+      window.history.pushState({}, "", "/login");
+      setCurrentPath("/login");
     } else {
       setMessage("");
       setShowLogin(false);
@@ -411,64 +401,86 @@ export default function App() {
     );
   }
 
-  // Staff déjà connecté : ne jamais rester bloqué sur la vitrine publique du sous-domaine.
-  // La vitrine (/ , /menu, /commande, /contact) reste accessible uniquement hors session.
+  // Surfaces publiques (marketing / restaurant) : uniquement hors session.
+  // Les clients publics n'accèdent jamais au dashboard (/app).
 
   if (!session) {
     const publicPath = currentPath.replace(/\/+$/, "") || "/";
-    if (recoveryMode) {
-      return (
-        <PasswordRecovery
-          apiBaseUrl={apiBaseUrl}
-          mode="forgot"
-          onBackToLogin={() => setRecoveryMode(false)}
-        />
-      );
-    }
+
     if (publicHostKind === "platform") {
       return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
     }
+
+    // Sous-domaine restaurant : vitrine tenant (host resolve).
     if (shouldResolveTenantFromHost()) {
       return (
-        <TenantPublicRouter
+        <RestaurantPublicRoutes
+          path={publicPath}
           apiBaseUrl={apiBaseUrl}
-          currentPath={publicPath}
+          onAuthenticated={handleAuthenticated}
+          hostMode
+        />
+      );
+    }
+
+    if (publicPath === "/superadmin" || publicPath.startsWith("/superadmin/")) {
+      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
+    }
+
+    // Accès /app sans session → login plateforme (jamais de dashboard public).
+    if (isAuthenticatedAppPath(publicPath)) {
+      return (
+        <MarketingRoutes
+          path="/login"
+          apiBaseUrl={apiBaseUrl}
+          message={message || "Connectez-vous pour accéder à l'application."}
+          recoveryMode={recoveryMode}
+          onAuthenticated={handleAuthenticated}
+          onForgotPassword={() => setRecoveryMode(true)}
+          onBackFromRecovery={() => setRecoveryMode(false)}
+        />
+      );
+    }
+
+    // /restaurant/:slug[/menu|/order|/contact|/login]
+    if (matchRestaurantPublicPath(publicPath)) {
+      return (
+        <RestaurantPublicRoutes
+          path={publicPath}
+          apiBaseUrl={apiBaseUrl}
           onAuthenticated={handleAuthenticated}
         />
       );
     }
-    // Toute URL de l'espace plateforme sans session -> page de connexion superadmin.
-    if (publicPath === "/superadmin" || publicPath.startsWith("/superadmin/")) {
-      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
-    }
-    // /r/:slug -> landing du restaurant ; /r/:slug/* -> page de connexion du restaurant.
-    const restaurantMatch = publicPath.match(/^\/r\/([^/]+)(\/.*)?$/);
-    if (restaurantMatch) {
-      const slug = restaurantMatch[1];
-      const restaurantPath = restaurantMatch[2] || "";
-      if (["/login", "/admin"].includes(restaurantPath)) {
-        return <RestaurantLoginPage apiBaseUrl={apiBaseUrl} slug={slug} onAuthenticated={handleAuthenticated} />;
-      }
-      const initialSection = restaurantPath === "/commande" ? "commande" : restaurantPath === "/contact" ? "infos" : restaurantPath === "/menu" ? "menu" : null;
-      return <RestaurantLandingPage apiBaseUrl={apiBaseUrl} slug={slug} initialSection={initialSection} />;
-    }
-    // Le site SaaS possède sa propre connexion plateforme. Les comptes des
-    // restaurants passent exclusivement par leur sous-domaine (ou /r/:slug en
-    // développement), pour ne pas mélanger les deux espaces publics.
-    if (publicHostKind === "saas" && (publicPath === "/login" || publicPath === "/admin")) {
-      return <SuperAdminLoginPage apiBaseUrl={apiBaseUrl} onAuthenticated={handleAuthenticated} />;
-    }
-    if (publicHostKind === "saas") {
-      return <LandingPage apiBaseUrl={apiBaseUrl} />;
-    }
-  }
 
-  if (!session && !showLogin) {
-    return <LandingPage apiBaseUrl={apiBaseUrl} />;
-  }
+    // Site SaaS global : / · /features · /pricing · /contact · /login
+    // /login = connexion plateforme (SUPERADMIN). Les comptes restaurant
+    // passent par leur sous-domaine ou /restaurant/:slug/login.
+    if (publicHostKind === "saas" || isMarketingPath(publicPath) || showLogin) {
+      return (
+        <MarketingRoutes
+          path={showLogin && !isMarketingPath(publicPath) ? "/login" : publicPath}
+          apiBaseUrl={apiBaseUrl}
+          message={message}
+          recoveryMode={recoveryMode}
+          onAuthenticated={handleAuthenticated}
+          onForgotPassword={() => setRecoveryMode(true)}
+          onBackFromRecovery={() => setRecoveryMode(false)}
+        />
+      );
+    }
 
-  if (!session) {
-    return <AccessPortalPage apiBaseUrl={apiBaseUrl} message={message} onForgotPassword={() => setRecoveryMode(true)} />;
+    return (
+      <MarketingRoutes
+        path="/"
+        apiBaseUrl={apiBaseUrl}
+        message={message}
+        recoveryMode={recoveryMode}
+        onAuthenticated={handleAuthenticated}
+        onForgotPassword={() => setRecoveryMode(true)}
+        onBackFromRecovery={() => setRecoveryMode(false)}
+      />
+    );
   }
 
   const overrides =
@@ -888,6 +900,10 @@ export default function App() {
           onSubmit={submitRestaurant}
           isLoading={isLoading}
           showForm={activeView === "create-restaurant" || showRestaurantForm}
+          logoFile={logoFile}
+          logoPreviewUrl={logoPreviewUrl}
+          onLogoFileChange={handleLogoFileChange}
+          logoError={logoError}
           onToggleForm={() => {
             if (activeView === "create-restaurant") {
               setActiveView("restaurants");
