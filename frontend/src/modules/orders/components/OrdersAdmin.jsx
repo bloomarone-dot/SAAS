@@ -6,6 +6,7 @@ import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { apiFetch } from "@/config/http";
 import { orderTakerDisplay, orderTakerRole, isDeliveryOrder } from "@/modules/orders/utils/orderLabels";
 import { OrangeMoneyPayment } from "./OrangeMoneyPayment";
+import { formatMinutes, orderKitchenTimingDetails, orderKitchenTimingLabel } from "@/modules/menu/utils/kitchenTiming";
 
 const statuses = ["Toutes", "Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
 const nextStatuses = ["Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée", "Payée", "Annulée"];
@@ -401,7 +402,12 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onDetail, onEdit, on
                 </p>
               </td>
               <td className="py-3 font-black text-slate-900">{money(order.total_amount)}</td>
-              <td className="py-3"><StatusBadge status={order.status} /></td>
+              <td className="py-3">
+                <StatusBadge status={order.status} />
+                {orderKitchenTimingLabel(order) && (
+                  <p className="mt-1 text-[11px] font-bold text-slate-500">{orderKitchenTimingLabel(order)}</p>
+                )}
+              </td>
               <td className="py-3 font-semibold text-slate-500">{new Date(order.created_at).toLocaleDateString("fr-FR")}</td>
               <td className="py-3 text-right">
                 <div className="flex justify-end gap-2">
@@ -461,6 +467,16 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
           {order.order_source || order.fulfillment_type} · {order.table_id ? `${order.table_room || "Salle"} / Table ${order.table_name || order.table_id}` : "Commande client"} · {orderTakerRole(order)} : {orderTakerDisplay(order)}
         </p>
         <div className="mt-2"><StatusBadge status={order.status} /></div>
+        {orderKitchenTimingDetails(order).length > 0 && (
+          <div className="mt-3 grid gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2">
+            {orderKitchenTimingDetails(order).map((row) => (
+              <div key={row.label} className="flex items-center justify-between gap-2 text-xs font-bold text-slate-600">
+                <span>{row.label}</span>
+                <span className="text-slate-900">{formatMinutes(row.minutes)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-100 p-3 text-center">
         <Metric label="Articles" value={visibleItems.length} />

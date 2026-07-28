@@ -12,6 +12,7 @@ import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnap
 import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
+import { formatMinutes, orderKitchenTimingDetails, orderKitchenTimingLabel } from "../utils/kitchenTiming";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 const PAID_STATUSES = ["Payée", "Payee", "Annulée", "Annulee"];
@@ -557,7 +558,19 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
           )}
           {waitingKitchen && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-              Commande en cuisine — vous serez notifiée dès que les plats seront prêts.
+              <p>Commande en cuisine — vous serez notifiée dès que les plats seront prêts.</p>
+              {orderKitchenTimingLabel(order) && (
+                <p className="mt-1 text-xs font-black text-amber-900">{orderKitchenTimingLabel(order)}</p>
+              )}
+              {orderKitchenTimingDetails(order).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {orderKitchenTimingDetails(order).map((row) => (
+                    <span key={row.label} className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                      {row.label} · {formatMinutes(row.minutes)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {message && (
@@ -814,9 +827,12 @@ function OrderPanel({
       </div>
 
       {waitingKitchen && (
-        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-          En attente de la cuisine…
-        </p>
+        <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+          <p>En attente de la cuisine…</p>
+          {orderKitchenTimingLabel(order) && (
+            <p className="mt-1 font-black text-amber-950">{orderKitchenTimingLabel(order)}</p>
+          )}
+        </div>
       )}
 
       {(isReady || isServed) && canRequestPayment && (

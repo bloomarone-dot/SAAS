@@ -20,6 +20,9 @@ class KitchenTicketResponse(KitchenTicketBase):
     id: int
     status: KitchenStatus
     created_at: datetime
+    started_at: Optional[datetime] = None
+    ready_at: Optional[datetime] = None
+    served_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

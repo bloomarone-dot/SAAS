@@ -138,6 +138,15 @@ class OrderPublic(OrmModel):
     delete_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    # Suivi cuisine (agrege depuis les tickets) — visible serveur / caisse / admin.
+    kitchen_sent_at: Optional[datetime] = None
+    kitchen_started_at: Optional[datetime] = None
+    kitchen_ready_at: Optional[datetime] = None
+    kitchen_served_at: Optional[datetime] = None
+    kitchen_wait_minutes: Optional[int] = None
+    kitchen_prep_minutes: Optional[int] = None
+    kitchen_ready_wait_minutes: Optional[int] = None
+    kitchen_total_minutes: Optional[int] = None
     items: list[OrderItemPublic] = Field(default_factory=list)
 
 

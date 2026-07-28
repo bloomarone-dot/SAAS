@@ -865,6 +865,14 @@ def ensure_french_status_values() -> None:
                         "NOT NULL DEFAULT 'En attente'"
                     )
                 )
+            kitchen_columns = {column["name"] for column in inspector.get_columns("kitchen_tickets")}
+            for name, definition in {
+                "started_at": "DATETIME NULL",
+                "ready_at": "DATETIME NULL",
+                "served_at": "DATETIME NULL",
+            }.items():
+                if name not in kitchen_columns:
+                    connection.execute(text(f"ALTER TABLE kitchen_tickets ADD COLUMN {name} {definition}"))
 
 
 def read_mysql_column_type(connection, table_name: str, column_name: str) -> str:

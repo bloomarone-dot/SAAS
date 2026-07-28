@@ -6,6 +6,7 @@ import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import CategoriesPage from "../pages/CategoriesPage";
 import DishesPage from "../pages/DishesPage";
 import { kitchenApi } from "../services/kitchenApi";
+import { formatMinutes, ticketCurrentStageMinutes, ticketStageLines } from "../utils/kitchenTiming";
 
 const COLUMNS = [
   {
@@ -210,8 +211,12 @@ function TabButton({ active, onClick, icon, children }) {
 }
 
 function KitchenTicket({ ticket, action, isBusy, onAdvance }) {
+  const stageMinutes = ticketCurrentStageMinutes(ticket);
+  const stageLines = ticketStageLines(ticket);
+  const urgent = stageMinutes >= 20;
+
   return (
-    <article className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition hover:border-slate-300 hover:bg-white">
+    <article className={`rounded-lg border p-3 transition hover:bg-white ${urgent ? "border-red-200 bg-red-50/60" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-bold text-slate-500">Table {ticket.table_number}</p>
@@ -219,10 +224,24 @@ function KitchenTicket({ ticket, action, isBusy, onAdvance }) {
             {ticket.quantity}x {ticket.item_name}
           </p>
         </div>
-        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-black text-slate-500">
-          #{String(ticket.id).slice(0, 6)}
+        <span className={`rounded-full px-2 py-1 text-[11px] font-black ${urgent ? "bg-red-100 text-red-700" : "bg-white text-slate-600"}`}>
+          {formatMinutes(stageMinutes)}
         </span>
       </div>
+      {stageLines.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {stageLines.map((line) => (
+            <span
+              key={line.key}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                line.active ? "bg-slate-900 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200"
+              }`}
+            >
+              {line.label} · {formatMinutes(line.minutes)}
+            </span>
+          ))}
+        </div>
+      )}
       {ticket.notes && (
         <p className="mt-3 rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800">
           {ticket.notes}

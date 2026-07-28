@@ -1234,6 +1234,7 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
     }
     table_ids = {order.table_id for order in orders if order.table_id}
     area_ids = {order.delivery_area_id for order in orders if order.delivery_area_id}
+    order_ids = [order.id for order in orders]
     users = {
         user.id: user
         for user in db.query(User).filter(User.id.in_(user_ids)).all()
@@ -1246,6 +1247,10 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
         area.id: area
         for area in db.query(DeliveryArea).filter(DeliveryArea.id.in_(area_ids)).all()
     } if area_ids else {}
+    tickets_by_order: dict[str, list] = {order_id: [] for order_id in order_ids}
+    if order_ids:
+        for ticket in db.query(KitchenTicketModel).filter(KitchenTicketModel.order_id.in_(order_ids)).all():
+            tickets_by_order.setdefault(ticket.order_id, []).append(ticket)
     for order in orders:
         server = users.get(order.server_id)
         cashier = users.get(order.cashier_id)
@@ -1273,6 +1278,79 @@ def enrich_orders(db: Session, orders: list[CustomerOrder]) -> None:
         order.table_name = table.number if table else None
         order.table_room = table.room if table else None
         order.delivery_area_name = area.name if area else None
+        attach_kitchen_timing(order, tickets_by_order.get(order.id, []))
+
+
+def _minutes_between(start, end) -> int | None:
+    if not start or not end:
+        return None
+    try:
+        delta = end - start
+        return max(0, int(delta.total_seconds() // 60))
+    except TypeError:
+        # naive vs aware
+        return None
+
+
+def attach_kitchen_timing(order: CustomerOrder, tickets: list) -> None:
+    """Agrege les horodatages cuisine sur la commande pour tous les roles."""
+    if not tickets:
+        order.kitchen_sent_at = None
+        order.kitchen_started_at = None
+        order.kitchen_ready_at = None
+        order.kitchen_served_at = None
+        order.kitchen_wait_minutes = None
+        order.kitchen_prep_minutes = None
+        order.kitchen_ready_wait_minutes = None
+        order.kitchen_total_minutes = None
+        return
+
+    now = utcnow()
+    sent_times = [t.created_at for t in tickets if t.created_at]
+    started_times = [t.started_at for t in tickets if t.started_at]
+    ready_times = [t.ready_at for t in tickets if t.ready_at]
+    served_times = [t.served_at for t in tickets if t.served_at]
+
+    order.kitchen_sent_at = min(sent_times) if sent_times else None
+    order.kitchen_started_at = min(started_times) if started_times else None
+
+    tickets_ready = all(
+        t.ready_at is not None or t.status in {KitchenStatus.PRETE, KitchenStatus.SERVIE}
+        for t in tickets
+    )
+    order.kitchen_ready_at = max(ready_times) if tickets_ready and ready_times else None
+
+    all_served = all(t.status == KitchenStatus.SERVIE for t in tickets)
+    order.kitchen_served_at = max(served_times) if all_served and served_times else None
+
+    sent = order.kitchen_sent_at
+    started = order.kitchen_started_at
+    ready = order.kitchen_ready_at
+    served = order.kitchen_served_at
+
+    if sent and started:
+        order.kitchen_wait_minutes = _minutes_between(sent, started)
+    elif sent:
+        order.kitchen_wait_minutes = _minutes_between(sent, now)
+    else:
+        order.kitchen_wait_minutes = None
+
+    if started and ready:
+        order.kitchen_prep_minutes = _minutes_between(started, ready)
+    elif started:
+        order.kitchen_prep_minutes = _minutes_between(started, now)
+    else:
+        order.kitchen_prep_minutes = None
+
+    if ready and served:
+        order.kitchen_ready_wait_minutes = _minutes_between(ready, served)
+    elif ready:
+        order.kitchen_ready_wait_minutes = _minutes_between(ready, now)
+    else:
+        order.kitchen_ready_wait_minutes = None
+
+    end = served or ready or started or now
+    order.kitchen_total_minutes = _minutes_between(sent, end) if sent else None
 
 
 def sync_table_status(db: Session, order: CustomerOrder) -> None:

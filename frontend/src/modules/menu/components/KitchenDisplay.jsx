@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardIcon } from '@/components/dashboard/icons';
 import { DashboardSection, PageHeader, StatCard } from '@/modules/admin/components/AdminUi';
 import { kitchenApi } from '../services/kitchenApi';
+import { formatMinutes, ticketCurrentStageMinutes, ticketStageLines } from '../utils/kitchenTiming';
 
 const columns = [
   { key: 'En attente', title: 'En attente', tone: 'orange', action: 'Lancer la préparation' },
@@ -63,7 +64,7 @@ export default function KitchenDisplay({ filter = 'orders' }) {
     EN_ATTENTE: tickets.filter((ticket) => ticket.status === 'En attente').length,
     EN_PREPARATION: tickets.filter((ticket) => ticket.status === 'En préparation').length,
     PRETE: tickets.filter((ticket) => ticket.status === 'Prête').length,
-    URGENT: tickets.filter((ticket) => minutesSince(ticket.created_at) >= 20).length,
+    URGENT: tickets.filter((ticket) => ticketCurrentStageMinutes(ticket) >= 20).length,
   }), [tickets]);
 
   async function advance(ticket) {
@@ -103,7 +104,7 @@ export default function KitchenDisplay({ filter = 'orders' }) {
           {visibleColumns.map((column) => {
             const items = tickets.filter((ticket) => {
               const matchesColumn = ticket.status === column.key;
-              const matchesUrgent = filter !== 'urgent' || minutesSince(ticket.created_at) >= 20;
+              const matchesUrgent = filter !== 'urgent' || ticketCurrentStageMinutes(ticket) >= 20;
               const matchesNotes = filter !== 'notes' || Boolean(ticket.notes);
               return matchesColumn && matchesUrgent && matchesNotes;
             });
@@ -126,11 +127,11 @@ export default function KitchenDisplay({ filter = 'orders' }) {
 
         <aside className="space-y-4">
           <Panel title="Commandes urgentes">
-            {tickets.filter((ticket) => minutesSince(ticket.created_at) >= 20).slice(0, 4).map((ticket) => (
+            {tickets.filter((ticket) => ticketCurrentStageMinutes(ticket) >= 20).slice(0, 4).map((ticket) => (
               <div key={ticket.id} className="border-b border-slate-100 py-3 last:border-0">
                 <p className="font-black text-[#070528]">#{ticket.order_id}</p>
                 <p className="mt-1 text-xs font-semibold text-slate-500">Table {ticket.table_number} - {ticket.quantity}x {ticket.item_name}</p>
-                <p className="mt-2 text-xs font-black text-red-500">{minutesSince(ticket.created_at)} min</p>
+                <p className="mt-2 text-xs font-black text-red-500">{formatMinutes(ticketCurrentStageMinutes(ticket))} sur cette étape</p>
               </div>
             ))}
           </Panel>
@@ -154,17 +155,38 @@ function Metric({ icon, label, value, tone }) {
 }
 
 function TicketCard({ ticket, action, onAdvance }) {
+  const stageMinutes = ticketCurrentStageMinutes(ticket);
+  const stageLines = ticketStageLines(ticket);
+  const urgent = stageMinutes >= 20;
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className={`rounded-lg border bg-white p-4 shadow-sm ${urgent ? "border-red-200" : "border-slate-200"}`}>
       <div className="flex items-start justify-between gap-3">
         <p className="font-black text-[#070528]">#{ticket.order_id}</p>
-        <span className="text-xs font-black text-orange-500">{formatTime(ticket.created_at)}</span>
+        <span className={`text-xs font-black ${urgent ? "text-red-600" : "text-orange-500"}`}>
+          {formatTime(ticket.created_at)}
+        </span>
       </div>
       <p className="mt-2 text-xs font-semibold text-slate-500">Table {ticket.table_number}</p>
       <p className="mt-3 text-sm font-bold text-slate-700">{ticket.quantity}x {ticket.item_name}</p>
       {ticket.notes && <p className="mt-3 rounded bg-slate-50 p-2 text-xs font-semibold text-slate-500">{ticket.notes}</p>}
+      {stageLines.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {stageLines.map((line) => (
+            <span
+              key={line.key}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                line.active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {line.label} · {formatMinutes(line.minutes)}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="mt-4 flex items-center justify-between gap-3">
-        <span className="text-xs font-black text-slate-500">{minutesSince(ticket.created_at)} min</span>
+        <span className={`text-xs font-black ${urgent ? "text-red-600" : "text-slate-500"}`}>
+          Étape · {formatMinutes(stageMinutes)}
+        </span>
         <button type="button" onClick={onAdvance} className="lte-btn lte-btn-primary lte-btn-sm">
           {action}
         </button>
@@ -180,12 +202,6 @@ function Panel({ title, children }) {
       {children}
     </div>
   );
-}
-
-function minutesSince(value) {
-  const created = new Date(value).getTime();
-  if (Number.isNaN(created)) return 0;
-  return Math.max(0, Math.round((Date.now() - created) / 60000));
 }
 
 function formatTime(value) {

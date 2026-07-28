@@ -79,6 +79,7 @@ def update_ticket_status(
     if not db_ticket:
         raise HTTPException(status_code=404, detail="Ticket de cuisine introuvable.")
 
+    apply_kitchen_status_timestamps(db_ticket, obj_in.status)
     db_ticket.status = obj_in.status
     sync_order_status_from_tickets(db, db_ticket.order_id)
     db.commit()
@@ -155,6 +156,25 @@ def assert_kitchen_create_allowed(user: User) -> None:
     raise HTTPException(status_code=403, detail="Permission cuisine ou service requise")
 
 
+def apply_kitchen_status_timestamps(ticket: KitchenTicketModel, new_status: KitchenStatus) -> None:
+    """Pose une seule fois les horodatages d'etape (idempotent)."""
+    now = utcnow()
+    if new_status == KitchenStatus.EN_PREPARATION and ticket.started_at is None:
+        ticket.started_at = now
+    elif new_status == KitchenStatus.PRETE:
+        if ticket.started_at is None:
+            ticket.started_at = now
+        if ticket.ready_at is None:
+            ticket.ready_at = now
+    elif new_status == KitchenStatus.SERVIE:
+        if ticket.started_at is None:
+            ticket.started_at = now
+        if ticket.ready_at is None:
+            ticket.ready_at = now
+        if ticket.served_at is None:
+            ticket.served_at = now
+
+
 def sync_order_status_from_tickets(db: Session, order_id: str) -> None:
     order = db.get(CustomerOrder, order_id)
     if not order or order.status in {"Payée", "Payee", "Annulée"}:
@@ -209,5 +229,6 @@ def mark_order_kitchen_tickets_served(db: Session, order_id: str) -> int:
         .all()
     )
     for ticket in tickets:
+        apply_kitchen_status_timestamps(ticket, KitchenStatus.SERVIE)
         ticket.status = KitchenStatus.SERVIE
     return len(tickets)
