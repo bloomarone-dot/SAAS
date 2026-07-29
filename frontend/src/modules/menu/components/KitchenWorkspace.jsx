@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { DashboardSection, ErrorState, LoadingState, PageContainer, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
+import { isNetworkError } from "@/utils/network";
+import { advanceLocalTicket, isLocalId, loadKitchenTicketsMerged, mirrorTicketsLocal } from "@/offline";
 import CategoriesPage from "../pages/CategoriesPage";
 import DishesPage from "../pages/DishesPage";
 import { kitchenApi } from "../services/kitchenApi";
@@ -39,17 +41,33 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [offlineHint, setOfflineHint] = useState("");
 
   const loadTickets = useCallback(async () => {
     try {
-      setTickets(await kitchenApi.getActiveTickets());
+      const remote = await kitchenApi.getActiveTickets();
+      if (restaurantId) {
+        mirrorTicketsLocal(remote, restaurantId).catch(() => {});
+      }
+      const merged = restaurantId
+        ? await loadKitchenTicketsMerged(restaurantId, remote)
+        : remote;
+      setTickets(merged.filter((ticket) => ticket.status !== "Servie"));
       setError("");
+      setOfflineHint("");
     } catch (err) {
-      setError(err.message || "Impossible de charger la cuisine.");
+      if (restaurantId && isNetworkError(err)) {
+        const local = await loadKitchenTicketsMerged(restaurantId, []);
+        setTickets(local.filter((ticket) => ticket.status !== "Servie"));
+        setOfflineHint("Mode hors ligne : tickets cuisine locaux.");
+        setError("");
+      } else {
+        setError(err.message || "Impossible de charger la cuisine.");
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [restaurantId]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -82,11 +100,42 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
   async function advanceTicket(ticket, nextStatus) {
     setBusyId(String(ticket.id));
     setError("");
+    if (isLocalId(ticket.id) || !navigator.onLine) {
+      try {
+        await advanceLocalTicket(ticket, nextStatus, restaurantId);
+        setTickets((current) =>
+          current
+            .map((item) => (item.id === ticket.id ? { ...item, status: nextStatus } : item))
+            .filter((item) => item.status !== "Servie"),
+        );
+        setOfflineHint("Avancement enregistré localement. Sync à la reconnexion.");
+      } catch (err) {
+        setError(err.message || "Mise à jour locale impossible.");
+      } finally {
+        setBusyId("");
+      }
+      return;
+    }
+
     try {
       await kitchenApi.updateTicketStatus(ticket.id, nextStatus);
       await Promise.all([loadTickets(), loadStats()]);
     } catch (err) {
-      setError(err.message || "Mise à jour impossible.");
+      if (isNetworkError(err)) {
+        try {
+          await advanceLocalTicket(ticket, nextStatus, restaurantId);
+          setTickets((current) =>
+            current
+              .map((item) => (item.id === ticket.id ? { ...item, status: nextStatus } : item))
+              .filter((item) => item.status !== "Servie"),
+          );
+          setOfflineHint("Avancement enregistré localement. Sync à la reconnexion.");
+        } catch (localErr) {
+          setError(localErr.message || "Mise à jour locale impossible.");
+        }
+      } else {
+        setError(err.message || "Mise à jour impossible.");
+      }
     } finally {
       setBusyId("");
     }
@@ -120,6 +169,11 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
         ]}
       />
 
+      {offlineHint && (
+        <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+          {offlineHint}
+        </div>
+      )}
       {error && <ErrorState title="Cuisine indisponible" text={error} />}
 
       {screen === "catalog" ? (

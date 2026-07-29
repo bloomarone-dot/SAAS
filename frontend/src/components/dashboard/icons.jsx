@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   BarChart3,
   BadgePercent,
   Bell,
@@ -62,6 +63,7 @@ import {
 export const ICONS = {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   BarChart3,
   BadgePercent,
   Bell,

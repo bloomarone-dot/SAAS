@@ -42,7 +42,15 @@ import { validateLogoFile, useLogoPreview } from "@/features/restaurants/compone
 
 // Sections superadmin et operations stock: chunks volumineux charges a la demande.
 const loadSuperadminSections = () => import("@/modules/platform/components/SuperadminSections");
-const lazyNamed = (loader, name) => lazy(() => loader().then((m) => ({ default: m[name] })));
+const lazyNamed = (loader, name) =>
+  lazy(() =>
+    loader().then((module) => {
+      if (!module?.[name]) {
+        throw new Error(`Impossible de charger l'écran « ${name} ».`);
+      }
+      return { default: module[name] };
+    }),
+  );
 const SuperadminActivation = lazyNamed(loadSuperadminSections, "SuperadminActivation");
 const SuperadminGlobalStats = lazyNamed(loadSuperadminSections, "SuperadminGlobalStats");
 const SuperadminOwners = lazyNamed(loadSuperadminSections, "SuperadminOwners");
@@ -63,7 +71,8 @@ const AccountingOperations = lazyNamed(
 );
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
-import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, readOfflineQueue } from "@/utils/network";
+import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, getOfflineQueueStats, discardFailedOfflineActions, retryFailedOfflineActions } from "@/utils/network";
+import { initOfflineFoundation } from "@/offline";
 import { getApiBaseUrl, apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/core/api";
 import { getPublicHostKind, shouldResolveTenantFromHost, buildRestaurantTheme } from "@/core/tenant";
 
@@ -122,8 +131,25 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
   const [showLogin, setShowLogin] = useState(() => shouldShowLoginForPath());
   const [recoveryMode, setRecoveryMode] = useState(false);
-  const [offlineQueueCount, setOfflineQueueCount] = useState(() => readOfflineQueue().length);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(() => getOfflineQueueStats().total);
+  const [offlineFailedCount, setOfflineFailedCount] = useState(() => getOfflineQueueStats().failed);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [viewHistory, setViewHistory] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    initOfflineFoundation().then((result) => {
+      if (cancelled) return;
+      setOfflineReady(Boolean(result?.ready));
+      const stats = getOfflineQueueStats();
+      setOfflineQueueCount(stats.total);
+      setOfflineFailedCount(stats.failed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -151,20 +177,27 @@ export default function App() {
   }, [apiBaseUrl]);
 
   useEffect(() => {
-    function refreshQueueState() {
-      setOfflineQueueCount(readOfflineQueue().length);
-    }
-
     async function handleOnline() {
       setIsOnline(true);
       const result = await flushOfflineQueue(apiBaseUrl);
       refreshQueueState();
-      if (result.synced > 0) setMessage(`${result.synced} action(s) synchronisée(s).`);
+      if (result.synced > 0) {
+        const conflictNote = result.conflicts ? ` (${result.conflicts} déjà à jour)` : "";
+        setMessage(`${result.synced} action(s) synchronisée(s)${conflictNote}.`);
+      } else if (result.failed > 0) {
+        setMessage(`${result.failed} action(s) en échec — réessayez ou ignorez-les.`);
+      }
       if (session?.role === "ADMIN") fetchAdminSummary();
     }
 
     function handleOffline() {
       setIsOnline(false);
+    }
+
+    function refreshQueueState() {
+      const stats = getOfflineQueueStats();
+      setOfflineQueueCount(stats.total);
+      setOfflineFailedCount(stats.failed);
     }
 
     window.addEventListener("online", handleOnline);
@@ -243,6 +276,44 @@ export default function App() {
     }
   }
 
+  function navigateToView(view, { trackHistory = true } = {}) {
+    if (!session || !view) return;
+    setActiveView((current) => {
+      if (trackHistory && current && current !== view) {
+        setViewHistory((history) => [...history.filter((entry) => entry !== view).slice(-19), current]);
+      }
+      return view;
+    });
+    setMessage("");
+    const nextPath = pushAppRoute(session, view);
+    setCurrentPath(nextPath);
+    if (view === "restaurants") {
+      setShowRestaurantForm(false);
+      fetchRestaurants();
+    }
+    if (view === "create-restaurant") {
+      setShowRestaurantForm(true);
+    }
+    if (view === "restaurant-detail") {
+      setSelectedRestaurantId(null);
+    }
+    if (view === "dashboard" && session.role === "ADMIN") {
+      fetchAdminSummary();
+    }
+  }
+
+  function goBackView() {
+    if (!session) return;
+    setViewHistory((history) => {
+      const nextHistory = [...history];
+      const previous = nextHistory.pop() || "dashboard";
+      setActiveView(previous);
+      setCurrentPath(pushAppRoute(session, previous));
+      setMessage("");
+      return nextHistory;
+    });
+  }
+
   async function fetchRestaurantTheme() {
     try {
       const restaurant = await apiFetch("/api/v1/restaurants/me/branding", {
@@ -285,6 +356,7 @@ export default function App() {
     setToken(data.access_token);
     setSession(data.user);
     setActiveView("dashboard");
+    setViewHistory([]);
     setShowLogin(false);
     setRecoveryMode(false);
     const nextPath = pushAppRoute(data.user, "dashboard", true);
@@ -371,6 +443,7 @@ export default function App() {
     setRestaurantTheme(null);
     setAdminSummary(null);
     setActiveView("dashboard");
+    setViewHistory([]);
     setShowRestaurantForm(false);
     if (expired) {
       setShowLogin(true);
@@ -515,34 +588,28 @@ export default function App() {
       activeView={activeView}
       theme={restaurantTheme}
       apiBaseUrl={apiBaseUrl}
-      onNavigate={(view) => {
-        setActiveView(view);
-        setMessage("");
-        const nextPath = pushAppRoute(session, view);
-        setCurrentPath(nextPath);
-        if (view === "restaurants") {
-          setShowRestaurantForm(false);
-          fetchRestaurants();
-        }
-        if (view === "create-restaurant") {
-          setShowRestaurantForm(true);
-        }
-        if (view === "restaurant-detail") {
-          setSelectedRestaurantId(null);
-        }
-        if (view === "dashboard" && session.role === "ADMIN") {
-          fetchAdminSummary();
-        }
-      }}
+      canGoBack={viewHistory.length > 0 || activeView !== "dashboard"}
+      onBack={goBackView}
+      onNavigate={navigateToView}
       onLogout={logout}
     >
       <SyncStatus
         apiBaseUrl={apiBaseUrl}
         isOnline={isOnline}
         queueCount={offlineQueueCount}
+        failedCount={offlineFailedCount}
+        offlineReady={offlineReady}
         onMessage={setMessage}
+        onQueueChange={() => {
+          const stats = getOfflineQueueStats();
+          setOfflineQueueCount(stats.total);
+          setOfflineFailedCount(stats.failed);
+        }}
       />
-      <ViewErrorBoundary key={activeView}>
+      <ViewErrorBoundary
+        key={activeView}
+        onBack={goBackView}
+      >
         <Suspense
           fallback={
             <div className="flex items-center justify-center py-16 text-sm font-semibold text-slate-400">
@@ -550,7 +617,22 @@ export default function App() {
             </div>
           }
         >
-          {renderContent()}
+          {renderContent() ?? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-900">
+              <p className="text-sm font-black uppercase tracking-wide text-amber-700">Page indisponible</p>
+              <h2 className="mt-2 text-xl font-black">Cet écran n’a pas pu être chargé</h2>
+              <p className="mt-2 text-sm font-semibold">
+                Revenez au tableau de bord ou choisissez une autre rubrique dans le menu.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigateToView("dashboard", { trackHistory: false })}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-amber-800 px-4 py-2 text-sm font-bold text-white"
+              >
+                Retour tableau de bord
+              </button>
+            </div>
+          )}
         </Suspense>
       </ViewErrorBoundary>
 
@@ -571,11 +653,7 @@ export default function App() {
   );
 
   function renderContent() {
-    const navigateFromDashboard = (view) => {
-      setActiveView(view);
-      const nextPath = pushAppRoute(session, view);
-      setCurrentPath(nextPath);
-    };
+    const navigateFromDashboard = (view) => navigateToView(view);
 
     if (session.role !== "SUPERADMIN") {
       if (session.role === "SERVEUR" && activeView === "dashboard") {
@@ -594,11 +672,7 @@ export default function App() {
             mode={activeView}
             role={session.role}
             onMessage={setMessage}
-            onNavigate={(view) => {
-              setActiveView(view);
-              const nextPath = pushAppRoute(session, view);
-              setCurrentPath(nextPath);
-            }}
+            onNavigate={navigateFromDashboard}
           />
         );
       }
@@ -671,11 +745,7 @@ export default function App() {
             mode={activeView}
             role={session.role}
             onMessage={setMessage}
-            onNavigate={(view) => {
-              setActiveView(view);
-              const nextPath = pushAppRoute(session, view);
-              setCurrentPath(nextPath);
-            }}
+            onNavigate={navigateFromDashboard}
           />
         );
       }
@@ -686,11 +756,7 @@ export default function App() {
             mode="dashboard"
             role={session.role}
             onMessage={setMessage}
-            onNavigate={(view) => {
-              setActiveView(view);
-              const nextPath = pushAppRoute(session, view);
-              setCurrentPath(nextPath);
-            }}
+            onNavigate={navigateFromDashboard}
           />
         );
       }
@@ -702,11 +768,7 @@ export default function App() {
             mode={activeView}
             role={session.role}
             onMessage={setMessage}
-            onNavigate={(view) => {
-              setActiveView(view);
-              const nextPath = pushAppRoute(session, view);
-              setCurrentPath(nextPath);
-            }}
+            onNavigate={navigateFromDashboard}
           />
         );
       }
@@ -770,7 +832,7 @@ export default function App() {
               : activeView === "notes"
                 ? "notes"
             : "orders";
-        return <KitchenPage filter={filter} />;
+        return <KitchenPage filter={filter} restaurantId={session.restaurant_id} />;
       }
 
       if (["orders", "order-detail", "edit-order", "service-followup", "kitchen-followup"].includes(activeView) && ["ADMIN", "MANAGER"].includes(session.role)) {
@@ -785,11 +847,7 @@ export default function App() {
       if (activeView === "daily-report" && ["ADMIN", "MANAGER"].includes(session.role)) {
         return (
           <DailyReportPage
-            onClose={() => {
-              setActiveView("dashboard");
-              const nextPath = pushAppRoute(session, "dashboard");
-              setCurrentPath(nextPath);
-            }}
+            onClose={() => navigateToView("dashboard", { trackHistory: false })}
           />
         );
       }
@@ -822,11 +880,7 @@ export default function App() {
           <AdminReports
             initialView={activeView}
             onMessage={setMessage}
-            onNavigate={(view) => {
-              setActiveView(view);
-              const nextPath = pushAppRoute(session, view);
-              setCurrentPath(nextPath);
-            }}
+            onNavigate={navigateFromDashboard}
           />
         );
       }
@@ -839,11 +893,7 @@ export default function App() {
       }
 
       if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
-        return <StockDashboard variant="stock" overrides={overrides} onNavigate={(view) => {
-          setActiveView(view);
-          const nextPath = pushAppRoute(session, view);
-          setCurrentPath(nextPath);
-        }} />;
+        return <StockDashboard variant="stock" overrides={overrides} onNavigate={navigateFromDashboard} />;
       }
 
       if (activeView === "damages" && session.role === "CUISINE") {
@@ -906,9 +956,7 @@ export default function App() {
           logoError={logoError}
           onToggleForm={() => {
             if (activeView === "create-restaurant") {
-              setActiveView("restaurants");
-              const nextPath = pushAppRoute(session, "restaurants");
-              setCurrentPath(nextPath);
+              navigateToView("restaurants");
               setShowRestaurantForm(false);
               return;
             }
@@ -916,9 +964,7 @@ export default function App() {
           }}
           onViewRestaurant={(restaurant) => {
             setSelectedRestaurantId(restaurant.id);
-            setActiveView("restaurant-detail");
-            const nextPath = pushAppRoute(session, "restaurant-detail");
-            setCurrentPath(nextPath);
+            navigateToView("restaurant-detail");
           }}
         />
       );
@@ -1018,33 +1064,94 @@ export default function App() {
   }
 }
 
-function SyncStatus({ apiBaseUrl, isOnline, queueCount, onMessage }) {
+function SyncStatus({
+  apiBaseUrl,
+  isOnline,
+  queueCount,
+  failedCount = 0,
+  offlineReady = false,
+  onMessage,
+  onQueueChange,
+}) {
+  const [syncing, setSyncing] = useState(false);
+  const pendingCount = Math.max(0, queueCount - failedCount);
+
+  // En ligne sans file : pas de bandeau permanent (évite le bruit UI).
   if (isOnline && queueCount === 0) return null;
+
   async function syncNow() {
-    const result = await flushOfflineQueue(apiBaseUrl);
-    onMessage(result.synced > 0 ? `${result.synced} action(s) synchronisée(s).` : "Aucune action synchronisée pour le moment.");
+    setSyncing(true);
+    try {
+      const result = await flushOfflineQueue(apiBaseUrl);
+      onQueueChange?.();
+      if (result.synced > 0) {
+        const conflictNote = result.conflicts ? ` (${result.conflicts} déjà à jour)` : "";
+        onMessage(`${result.synced} action(s) synchronisée(s)${conflictNote}.`);
+      } else if (result.failed > 0) {
+        onMessage(`${result.failed} action(s) en échec après plusieurs tentatives.`);
+      } else {
+        onMessage("Aucune action synchronisée pour le moment.");
+      }
+    } finally {
+      setSyncing(false);
+    }
   }
 
   function clearQueue() {
     if (!window.confirm("Vider les actions en attente de synchronisation ?")) return;
     clearOfflineQueue();
+    onQueueChange?.();
     onMessage("File de synchronisation vidée.");
+  }
+
+  function retryFailed() {
+    retryFailedOfflineActions();
+    onQueueChange?.();
+    onMessage("Actions en échec remises en file. Lancez une synchronisation.");
+  }
+
+  function discardFailed() {
+    if (!window.confirm("Ignorer définitivement les actions en échec ?")) return;
+    discardFailedOfflineActions();
+    onQueueChange?.();
+    onMessage("Actions en échec ignorées.");
   }
 
   return (
     <div className={`mb-4 flex flex-col gap-3 rounded-lg border p-3 text-sm font-bold md:flex-row md:items-center md:justify-between ${
-      isOnline ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-700"
+      !isOnline
+        ? "border-red-200 bg-red-50 text-red-700"
+        : failedCount > 0
+          ? "border-orange-200 bg-orange-50 text-orange-800"
+          : "border-amber-200 bg-amber-50 text-amber-800"
     }`}>
       <span>
-        {isOnline
-          ? `${queueCount} action(s) en attente de synchronisation.`
-          : `Mode hors connexion actif${queueCount ? ` · ${queueCount} action(s) en attente` : ""}.`}
+        {!isOnline
+          ? `Mode hors connexion actif${queueCount ? ` · ${queueCount} action(s) en attente` : ""}${offlineReady ? " · stockage local OK" : ""}.`
+          : failedCount > 0
+            ? `${pendingCount} en attente · ${failedCount} en échec.`
+            : `${queueCount} action(s) en attente de synchronisation.`}
       </span>
       {queueCount > 0 && (
         <span className="flex flex-wrap gap-2">
-          <button type="button" onClick={syncNow} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-800 shadow-sm">
-            Synchroniser
+          <button
+            type="button"
+            disabled={syncing || !isOnline}
+            onClick={syncNow}
+            className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-800 shadow-sm disabled:opacity-50"
+          >
+            {syncing ? "Sync…" : "Synchroniser"}
           </button>
+          {failedCount > 0 && (
+            <>
+              <button type="button" onClick={retryFailed} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-emerald-700 shadow-sm">
+                Réessayer échecs
+              </button>
+              <button type="button" onClick={discardFailed} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-600 shadow-sm">
+                Ignorer échecs
+              </button>
+            </>
+          )}
           <button type="button" onClick={clearQueue} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-red-600 shadow-sm">
             Vider
           </button>

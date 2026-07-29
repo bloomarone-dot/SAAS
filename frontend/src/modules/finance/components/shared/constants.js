@@ -61,7 +61,7 @@ export function resolveAccountingTab(mode) {
     revenue: "revenues",
     "received-payments": "payments",
     "cash-collections": "encaissements",
-    banks: "banks",
+    banks: "cash",
     "stock-valuation": "statements",
     "financial-report": "statements",
     income: "statements",

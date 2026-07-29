@@ -11,11 +11,17 @@ import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
 import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
 import { getApiBaseUrl } from "@/config/api";
 import { apiFetch } from "@/config/http";
-import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
+import { isNetworkError } from "@/utils/network";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFilterBar";
 import { orderTakerDisplay, orderTakerGroupKey, orderTakerRole, isDeliveryOrder } from "@/modules/orders/utils/orderLabels";
+import {
+  loadCashierReportMerged,
+  mirrorCashierReport,
+  OFFLINE_CASH_METHODS,
+  payLocalCashOrder,
+} from "@/offline";
 
 const paymentMethods = [
   { label: "Espèces", icon: "Wallet" },
@@ -25,6 +31,10 @@ const paymentMethods = [
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+}
+
+function isPaidStatus(status) {
+  return ["Payée", "Payee"].includes(String(status || "").trim());
 }
 
 function orderCustomerLabel(order) {
@@ -116,6 +126,11 @@ export function CaisseDashboard({ overrides = {} }) {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportPeriod, setReportPeriod] = useState("today");
   const [reportCustomPeriod, setReportCustomPeriod] = useState({ start: "", end: "" });
+  const [offlineHint, setOfflineHint] = useState("");
+  const [activePaymentRequest, setActivePaymentRequest] = useState(null);
+  const [methodChosen, setMethodChosen] = useState(false);
+  const [lastPaidOrder, setLastPaidOrder] = useState(null);
+  const restaurantId = currentUser?.restaurant_id;
 
   useEffect(() => {
     setActiveTab(resolveCashierTab(activeView));
@@ -146,7 +161,10 @@ export function CaisseDashboard({ overrides = {} }) {
       mobile: "Mobile Money",
       card: "Carte",
     };
-    if (methodByView[activeView]) setPaymentMethod(methodByView[activeView]);
+    if (methodByView[activeView]) {
+      setPaymentMethod(methodByView[activeView]);
+      setMethodChosen(true);
+    }
   }, [activeView]);
 
   useAutoRefresh(() => loadCashierReport({ silent: true }), 10000, [reportPeriod, reportCustomPeriod]);
@@ -161,8 +179,23 @@ export function CaisseDashboard({ overrides = {} }) {
       setReport(data);
       setSelectedOrderId((current) => current || data.pending_orders?.[0]?.id || "");
       setSelectedReceiptId((current) => current || data.receipts?.[0]?.id || "");
+      setOfflineHint("");
+      if (restaurantId) mirrorCashierReport(data, restaurantId).catch(() => {});
     } catch (error) {
-      if (!silent) setMessage(error.message || "Impossible de charger la caisse.");
+      if (isNetworkError(error) && restaurantId) {
+        try {
+          const local = await loadCashierReportMerged(restaurantId, null);
+          setReport(local);
+          setSelectedOrderId((current) => current || local.pending_orders?.[0]?.id || "");
+          setSelectedReceiptId((current) => current || local.receipts?.[0]?.id || "");
+          setOfflineHint("Mode hors ligne : caisse locale (espèces / carte uniquement).");
+          if (!silent) setMessage("");
+        } catch {
+          if (!silent) setMessage(error.message || "Impossible de charger la caisse.");
+        }
+      } else if (!silent) {
+        setMessage(error.message || "Impossible de charger la caisse.");
+      }
     } finally {
       if (!silent) setIsLoading(false);
     }
@@ -247,20 +280,117 @@ export function CaisseDashboard({ overrides = {} }) {
     { label: "Reçus imprimables", value: report.receipts_count ?? receipts.length, trend: "Commandes payées", icon: "ReceiptText", tone: "default" },
   ];
 
-  function openPaymentModal(order) {
+  function mapRequestMethodToUi(method) {
+    if (method === "CASH") return "Espèces";
+    if (method === "ORANGE" || method === "MTN") return "Mobile Money";
+    return "";
+  }
+
+  function mapOrderMethodToUi(method) {
+    const value = String(method || "");
+    if (/espèce|espece|cash/i.test(value)) return "Espèces";
+    if (/orange|mtn|mobile/i.test(value)) return "Mobile Money";
+    if (/carte|card/i.test(value)) return "Carte";
+    return "";
+  }
+
+  function openPaymentModal(order, request = null) {
     setSelectedOrderId(order.id);
     setDiscount(order.discount_amount ? String(order.discount_amount) : "");
+    setActivePaymentRequest(request);
+    const suggested = request
+      ? mapRequestMethodToUi(request.method)
+      : mapOrderMethodToUi(order.payment_method);
+    setPaymentMethod(suggested);
+    setMethodChosen(Boolean(suggested));
+    if (request?.method === "ORANGE" || request?.method === "MTN") {
+      setMobileOperator(request.method === "ORANGE" ? "ORANGE" : "MTN");
+    }
     setShowPaymentModal(true);
+    setLastPaidOrder(null);
+  }
+
+  async function openPaymentRequest(req) {
+    setRequestActionId(req.id);
+    setMessage("");
+    try {
+      const order = await orderApi.get(req.order_id);
+      openPaymentModal(order, req);
+    } catch (error) {
+      setMessage(error.message || "Impossible d'ouvrir la facture de cette demande.");
+    } finally {
+      setRequestActionId("");
+    }
   }
 
   async function validatePayment() {
     if (!selectedOrder) return;
+    if (!methodChosen || !paymentMethod) {
+      setMessage("Sélectionnez d'abord le mode de paiement (Espèces, Mobile Money ou Carte).");
+      return;
+    }
     setIsLoading(true);
     setMessage("");
     const discountAmount = Number(discount || selectedOrder.discount_amount || 0);
     const payload = { payment_method: paymentMethod, discount_amount: discountAmount };
     const isMobileMoney = paymentMethod === "Mobile Money";
+
+    async function settleOffline() {
+      if (!OFFLINE_CASH_METHODS.has(paymentMethod)) {
+        throw new Error("Le Mobile Money nécessite une connexion réseau.");
+      }
+      const result = await payLocalCashOrder(selectedOrder, {
+        payment_method: paymentMethod,
+        discount_amount: discountAmount,
+        restaurantId,
+        cashier: currentUser,
+      });
+      setReport(result.report);
+      setDiscount("");
+      setSelectedOrderId("");
+      setSelectedReceiptId(result.order.id);
+      setActivePaymentRequest(null);
+      setLastPaidOrder(result.order);
+      setOfflineHint("Paiement enregistré localement. Sync à la reconnexion.");
+      setMessage(`Paiement local validé pour ${result.order.order_number}. Consultez l'historique ou imprimez le reçu.`);
+      setShowPaymentModal(false);
+      setActiveTab("receipts");
+    }
+
+    if (isMobileMoney && (!navigator.onLine || isLocalIdSafe(selectedOrder.id))) {
+      setMessage("Le Mobile Money nécessite une connexion réseau.");
+      setIsLoading(false);
+      return;
+    }
+
+    if (!navigator.onLine || isLocalIdSafe(selectedOrder.id)) {
+      try {
+        await settleOffline();
+      } catch (error) {
+        setMessage(error.message || "Paiement local impossible.");
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     try {
+      // Demande serveur Mobile Money : lancer le push via l'API demandes.
+      if (
+        isMobileMoney
+        && activePaymentRequest
+        && (activePaymentRequest.method === "ORANGE" || activePaymentRequest.method === "MTN")
+      ) {
+        setMobileOperator(activePaymentRequest.method === "ORANGE" ? "ORANGE" : "MTN");
+        const result = await paymentApi.validateRequest(activePaymentRequest.id);
+        setMessage(result.message || "Push Mobile Money envoyé au client.");
+        await Promise.all([loadPaymentRequests(), loadCashierReport({ silent: true })]);
+        setShowPaymentModal(false);
+        setActivePaymentRequest(null);
+        setIsLoading(false);
+        return;
+      }
+
       if (isMobileMoney) {
         const prepared = await orderApi.update(selectedOrder.id, {
           payment_method: mobileOperator === "ORANGE" ? "Orange Money" : "MTN Mobile Money",
@@ -270,34 +400,35 @@ export function CaisseDashboard({ overrides = {} }) {
         setIsLoading(false);
         return;
       }
+
+      // Espèces / Carte : toujours via /payment pour tracer le mode choisi.
       const paid = await orderApi.validatePayment(selectedOrder.id, payload);
       setDiscount("");
       setSelectedOrderId("");
       setSelectedReceiptId(paid.id);
-      setMessage(`Paiement validé pour ${paid.order_number}.`);
-      await loadCashierReport();
+      setActivePaymentRequest(null);
+      setLastPaidOrder(paid);
+      setMessage(`Paiement validé pour ${paid.order_number} · ${paid.payment_method || paymentMethod}. Trace enregistrée.`);
+      await Promise.all([loadPaymentRequests(), loadCashierReport()]);
       setShowPaymentModal(false);
-      printReceipt(paid);
+      setActiveTab("receipts");
     } catch (error) {
       if (!isMobileMoney && isNetworkError(error)) {
-        enqueueOfflineAction({
-          label: `Paiement ${selectedOrder.order_number}`,
-          requests: [{
-            path: `/api/v1/orders/${selectedOrder.id}/payment`,
-            method: "POST",
-            requiresAuth: true,
-            body: payload,
-          }],
-        });
-        setDiscount("");
-        setSelectedOrderId("");
-        setMessage("Connexion indisponible. Le paiement est mis en attente et sera synchronisé automatiquement.");
+        try {
+          await settleOffline();
+        } catch (localErr) {
+          setMessage(localErr.message || "Validation du paiement impossible.");
+        }
       } else {
         setMessage(error.message || "Validation du paiement impossible.");
       }
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function isLocalIdSafe(id) {
+    return String(id || "").startsWith("local_");
   }
 
   async function applyPromo() {
@@ -370,6 +501,12 @@ export function CaisseDashboard({ overrides = {} }) {
         ]}
       />
 
+      {offlineHint && (
+        <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+          {offlineHint}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
         {CASHIER_TABS.map((tab) => (
           <button
@@ -424,7 +561,7 @@ export function CaisseDashboard({ overrides = {} }) {
               <PaymentRequestsList
                 requests={paymentRequests}
                 actionId={requestActionId}
-                onValidate={validatePaymentRequest}
+                onValidate={openPaymentRequest}
                 onReject={rejectPaymentRequest}
               />
             </DashboardSection>
@@ -463,6 +600,20 @@ export function CaisseDashboard({ overrides = {} }) {
 
       {activeTab === "receipts" && (
         <>
+          {lastPaidOrder && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900">
+              <span>
+                Transaction enregistrée · {lastPaidOrder.order_number} · {lastPaidOrder.payment_method || "—"} · {money(lastPaidOrder.total_amount)}
+              </span>
+              <button
+                type="button"
+                onClick={() => printReceipt(lastPaidOrder)}
+                className="lte-btn lte-btn-primary lte-btn-sm"
+              >
+                Imprimer le reçu
+              </button>
+            </div>
+          )}
           <FilterBar className="mb-4">
             <PeriodFilterBar
               period={reportPeriod}
@@ -472,6 +623,7 @@ export function CaisseDashboard({ overrides = {} }) {
             />
           </FilterBar>
           <InvoiceHistoryPanel
+            key={`${reportPeriod}-${lastPaidOrder?.id || "none"}-${report.paid_orders_count || 0}`}
             allowRefund={!adminReviewOnly}
             adminReviewOnly={adminReviewOnly}
             onMessage={setMessage}
@@ -513,23 +665,37 @@ export function CaisseDashboard({ overrides = {} }) {
 
       <AdminFormModal
         open={showPaymentModal && Boolean(selectedOrder)}
-        onClose={() => setShowPaymentModal(false)}
-        title={selectedOrder ? `Encaisser · ${selectedOrder.order_number}` : ""}
+        onClose={() => {
+          setShowPaymentModal(false);
+          setActivePaymentRequest(null);
+        }}
+        title={selectedOrder ? `Facture · ${selectedOrder.order_number}` : ""}
         description={selectedOrder ? `${orderCustomerLabel(selectedOrder)}${orderTakerDisplay(selectedOrder, "") ? ` · ${orderTakerRole(selectedOrder)} ${orderTakerDisplay(selectedOrder)}` : ""}` : ""}
         size="xl"
         footer={
           <>
-            <button type="button" onClick={() => setShowPaymentModal(false)} className="lte-btn lte-btn-default">
+            <button
+              type="button"
+              onClick={() => {
+                setShowPaymentModal(false);
+                setActivePaymentRequest(null);
+              }}
+              className="lte-btn lte-btn-default"
+            >
               Fermer
             </button>
             {!adminReviewOnly && (
               <button
                 type="button"
-                disabled={isLoading || selectedOrder?.payment_locked}
+                disabled={isLoading || selectedOrder?.payment_locked || !methodChosen}
                 onClick={validatePayment}
                 className="lte-btn lte-btn-primary"
               >
-                {selectedOrder?.payment_locked ? "Paiement en attente" : paymentMethod === "Mobile Money" ? "Envoyer le Push USSD" : "Valider paiement"}
+                {selectedOrder?.payment_locked
+                  ? "Paiement en attente"
+                  : paymentMethod === "Mobile Money"
+                    ? "Envoyer le Push USSD"
+                    : "Valider le paiement"}
               </button>
             )}
           </>
@@ -537,28 +703,41 @@ export function CaisseDashboard({ overrides = {} }) {
       >
         {selectedOrder && (
           <div className="space-y-5">
-            <OrderDetail order={selectedOrder} discountPreview={discount} />
+            <OrderDetail order={selectedOrder} discountPreview={discount} paymentRequest={activePaymentRequest} />
             {!adminReviewOnly && (
               <>
                 <div>
                   <p className="text-sm font-black text-slate-950">Mode de paiement</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    Vérifiez puis sélectionnez le mode avant de valider. L&apos;impression se fait après validation.
+                  </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                    {paymentMethods.map((method) => (
+                    {paymentMethods.map((method) => {
+                      const mobileBlocked = method.label === "Mobile Money" && (!navigator.onLine || Boolean(offlineHint));
+                      return (
                       <button
                         key={method.label}
                         type="button"
-                        onClick={() => setPaymentMethod(method.label)}
+                        disabled={mobileBlocked}
+                        onClick={() => {
+                          setPaymentMethod(method.label);
+                          setMethodChosen(true);
+                        }}
                         className={`flex h-12 items-center justify-center gap-2 rounded-lg border text-sm font-black ${
-                          paymentMethod === method.label
+                          methodChosen && paymentMethod === method.label
                             ? "border-emerald-600 bg-emerald-50 text-emerald-800"
                             : "border-slate-200 text-slate-700"
-                        }`}
+                        } ${mobileBlocked ? "cursor-not-allowed opacity-50" : ""}`}
                       >
                         <DashboardIcon name={method.icon} size={18} />
                         {method.label}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
+                  {!methodChosen && (
+                    <p className="mt-2 text-xs font-bold text-amber-700">Sélectionnez un mode de paiement pour activer la validation.</p>
+                  )}
                 </div>
                 {paymentMethod === "Mobile Money" && (
                   <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
@@ -598,8 +777,13 @@ export function CaisseDashboard({ overrides = {} }) {
                     </button>
                   </div>
                 </div>
-                <button type="button" onClick={() => printReceipt(selectedOrder)} className="h-11 w-full rounded-lg border border-emerald-200 font-black text-emerald-700">
-                  Consulter / imprimer l'aperçu
+                <button
+                  type="button"
+                  onClick={() => printReceipt(selectedOrder)}
+                  disabled={!isPaidStatus(selectedOrder.status)}
+                  className="h-11 w-full rounded-lg border border-emerald-200 font-black text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isPaidStatus(selectedOrder.status) ? "Imprimer le reçu" : "Imprimer après validation du paiement"}
                 </button>
               </>
             )}
@@ -652,7 +836,9 @@ export function CaisseDashboard({ overrides = {} }) {
                 order={mobilePaymentOrder}
                 onSuccess={async () => {
                   setMessage(`Paiement confirmé pour ${mobilePaymentOrder.order_number}.`);
-                  await loadCashierReport();
+                  setLastPaidOrder(mobilePaymentOrder);
+                  setActiveTab("receipts");
+                  await Promise.all([loadCashierReport(), loadPaymentRequests()]);
                 }}
                 onClose={() => setMobilePaymentOrder(null)}
               />
@@ -662,7 +848,9 @@ export function CaisseDashboard({ overrides = {} }) {
                 order={mobilePaymentOrder}
                 onSuccess={async () => {
                   setMessage(`Paiement confirmé pour ${mobilePaymentOrder.order_number}.`);
-                  await loadCashierReport();
+                  setLastPaidOrder(mobilePaymentOrder);
+                  setActiveTab("receipts");
+                  await Promise.all([loadCashierReport(), loadPaymentRequests()]);
                 }}
                 onClose={() => setMobilePaymentOrder(null)}
               />
@@ -713,7 +901,7 @@ function PendingOrdersByStaff({ groups, onSelect, compact = false }) {
                         className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 px-3 text-xs font-black text-emerald-700 hover:bg-emerald-50"
                       >
                         <DashboardIcon name="Wallet" size={14} />
-                        Encaisser
+                        Ouvrir la facture
                       </button>
                     </td>
                   </tr>
@@ -815,7 +1003,7 @@ function PaymentRequestsList({ requests, actionId, onValidate, onReject }) {
                 className="lte-btn lte-btn-primary lte-btn-sm"
               >
                 <DashboardIcon name="CheckCircle2" size={15} />
-                {busy ? "..." : req.method === "CASH" ? "Encaisser" : "Valider & lancer"}
+                {busy ? "..." : "Ouvrir la facture"}
               </button>
               <button
                 type="button"
@@ -868,14 +1056,30 @@ function ReceiptsTable({ receipts, selectedReceiptId, onSelect, onPrint, onCance
   );
 }
 
-function OrderDetail({ order, discountPreview }) {
+function OrderDetail({ order, discountPreview, paymentRequest = null }) {
   const visibleItems = (order.items ?? []).filter((item) => item.sale_channel !== "EMBALLAGE");
   const subtotal = orderSubtotal(order);
   const discount = Number(discountPreview || order.discount_amount || 0);
   const total = Math.max(0, subtotal + Number(order.delivery_fee || 0) - discount);
+  const suggestedMethod = paymentRequest
+    ? (REQUEST_METHOD_LABELS[paymentRequest.method] || paymentRequest.method)
+    : order.payment_method;
 
   return (
     <div>
+      <div className="mb-4 grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600 sm:grid-cols-2">
+        <p><span className="font-black text-slate-800">Statut :</span> {order.status}</p>
+        <p><span className="font-black text-slate-800">Mode suggéré :</span> {suggestedMethod || "À choisir"}</p>
+        {paymentRequest?.payer_msisdn && (
+          <p><span className="font-black text-slate-800">N° Mobile Money :</span> {paymentRequest.payer_msisdn}</p>
+        )}
+        {paymentRequest?.requested_by_name && (
+          <p><span className="font-black text-slate-800">Demandé par :</span> {paymentRequest.requested_by_name}</p>
+        )}
+        {order.notes && (
+          <p className="sm:col-span-2"><span className="font-black text-slate-800">Commentaire :</span> {order.notes}</p>
+        )}
+      </div>
       <div className="overflow-x-auto">
         <table className="lte-table min-w-[520px]">
           <thead>

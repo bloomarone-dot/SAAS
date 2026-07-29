@@ -1,34 +1,58 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { DashboardIcon } from '@/components/dashboard/icons';
-import { DashboardSection, PageHeader, StatCard } from '@/modules/admin/components/AdminUi';
-import { kitchenApi } from '../services/kitchenApi';
-import { formatMinutes, ticketCurrentStageMinutes, ticketStageLines } from '../utils/kitchenTiming';
+import React, { useEffect, useMemo, useState } from "react";
+import { DashboardIcon } from "@/components/dashboard/icons";
+import { DashboardSection, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
+import { isNetworkError } from "@/utils/network";
+import { advanceLocalTicket, isLocalId, loadKitchenTicketsMerged, mirrorTicketsLocal } from "@/offline";
+import { kitchenApi } from "../services/kitchenApi";
+import { formatMinutes, ticketCurrentStageMinutes, ticketStageLines } from "../utils/kitchenTiming";
 
 const columns = [
-  { key: 'En attente', title: 'En attente', tone: 'orange', action: 'Lancer la préparation' },
-  { key: 'En préparation', title: 'En préparation', tone: 'blue', action: 'Marquer prête' },
-  { key: 'Prête', title: 'Prêtes', tone: 'green', action: 'Marquer servie' },
+  { key: "En attente", title: "En attente", tone: "orange", action: "Lancer la préparation" },
+  { key: "En préparation", title: "En préparation", tone: "blue", action: "Marquer prête" },
+  { key: "Prête", title: "Prêtes", tone: "green", action: "Marquer servie" },
 ];
 
-const nextStatus = { 'En attente': 'En préparation', 'En préparation': 'Prête', Prête: 'Servie' };
+const nextStatus = { "En attente": "En préparation", "En préparation": "Prête", Prête: "Servie" };
 
-export default function KitchenDisplay({ filter = 'orders' }) {
+export default function KitchenDisplay({ filter = "orders", restaurantId = null }) {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
+  const [offlineHint, setOfflineHint] = useState("");
 
   useEffect(() => {
     let mounted = true;
     async function loadTickets() {
-      if (document.hidden || !navigator.onLine) return;
+      if (document.hidden) return;
       try {
+        if (!navigator.onLine && restaurantId) {
+          const local = await loadKitchenTicketsMerged(restaurantId, []);
+          if (mounted) {
+            setTickets(local.filter((ticket) => ticket.status !== "Servie"));
+            setOfflineHint("Mode hors ligne : tickets cuisine locaux.");
+            setError("");
+          }
+          return;
+        }
         const data = await kitchenApi.getActiveTickets();
+        if (restaurantId) mirrorTicketsLocal(data, restaurantId).catch(() => {});
+        const merged = restaurantId ? await loadKitchenTicketsMerged(restaurantId, data) : data;
         if (mounted) {
-          setTickets(data);
-          setError('');
+          setTickets(merged.filter((ticket) => ticket.status !== "Servie"));
+          setError("");
+          setOfflineHint("");
         }
       } catch (err) {
-        if (mounted) setError('Impossible de charger les commandes en cuisine.');
+        if (restaurantId && isNetworkError(err)) {
+          const local = await loadKitchenTicketsMerged(restaurantId, []);
+          if (mounted) {
+            setTickets(local.filter((ticket) => ticket.status !== "Servie"));
+            setOfflineHint("Mode hors ligne : tickets cuisine locaux.");
+            setError("");
+          }
+        } else if (mounted) {
+          setError("Impossible de charger les commandes en cuisine.");
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -36,47 +60,71 @@ export default function KitchenDisplay({ filter = 'orders' }) {
 
     loadTickets();
     const interval = window.setInterval(loadTickets, 5000);
-    window.addEventListener('focus', loadTickets);
-    document.addEventListener('visibilitychange', loadTickets);
+    window.addEventListener("focus", loadTickets);
+    document.addEventListener("visibilitychange", loadTickets);
     return () => {
       mounted = false;
       window.clearInterval(interval);
-      window.removeEventListener('focus', loadTickets);
-      document.removeEventListener('visibilitychange', loadTickets);
+      window.removeEventListener("focus", loadTickets);
+      document.removeEventListener("visibilitychange", loadTickets);
     };
-  }, []);
+  }, [restaurantId]);
 
   const visibleColumns = useMemo(() => {
-    if (filter === 'preparation') return columns.filter((column) => column.key === 'En préparation');
-    if (filter === 'ready') return columns.filter((column) => column.key === 'Prête');
+    if (filter === "preparation") return columns.filter((column) => column.key === "En préparation");
+    if (filter === "ready") return columns.filter((column) => column.key === "Prête");
     return columns;
   }, [filter]);
 
   const pageCopy = useMemo(() => {
-    if (filter === 'preparation') return ['Commandes en préparation', "Suivez les plats déjà lancés en cuisine."];
-    if (filter === 'ready') return ['Commandes prêtes', "Validez les tickets prêts à partir en salle."];
-    if (filter === 'urgent') return ['Commandes urgentes', "Priorisez les tickets qui dépassent le délai de préparation."];
-    if (filter === 'notes') return ['Notes spéciales', "Consultez les consignes client et remarques de préparation."];
-    return ['Commandes cuisine', "Gérez les commandes en temps réel et suivez l'avancement en cuisine."];
+    if (filter === "preparation") return ["Commandes en préparation", "Suivez les plats déjà lancés en cuisine."];
+    if (filter === "ready") return ["Commandes prêtes", "Validez les tickets prêts à partir en salle."];
+    if (filter === "urgent") return ["Commandes urgentes", "Priorisez les tickets qui dépassent le délai de préparation."];
+    if (filter === "notes") return ["Notes spéciales", "Consultez les consignes client et remarques de préparation."];
+    return ["Commandes cuisine", "Gérez les commandes en temps réel et suivez l'avancement en cuisine."];
   }, [filter]);
 
   const stats = useMemo(() => ({
-    EN_ATTENTE: tickets.filter((ticket) => ticket.status === 'En attente').length,
-    EN_PREPARATION: tickets.filter((ticket) => ticket.status === 'En préparation').length,
-    PRETE: tickets.filter((ticket) => ticket.status === 'Prête').length,
+    EN_ATTENTE: tickets.filter((ticket) => ticket.status === "En attente").length,
+    EN_PREPARATION: tickets.filter((ticket) => ticket.status === "En préparation").length,
+    PRETE: tickets.filter((ticket) => ticket.status === "Prête").length,
     URGENT: tickets.filter((ticket) => ticketCurrentStageMinutes(ticket) >= 20).length,
   }), [tickets]);
 
   async function advance(ticket) {
     const status = nextStatus[ticket.status];
     if (!status) return;
+    if (isLocalId(ticket.id) || !navigator.onLine) {
+      try {
+        await advanceLocalTicket(ticket, status, restaurantId);
+        setTickets((current) => current
+          .map((item) => (item.id === ticket.id ? { ...item, status } : item))
+          .filter((item) => item.status !== "Servie"));
+        setOfflineHint("Avancement enregistré localement.");
+      } catch {
+        setError("Mise a jour du ticket impossible.");
+      }
+      return;
+    }
     try {
       await kitchenApi.updateTicketStatus(ticket.id, status);
       setTickets((current) => current
         .map((item) => (item.id === ticket.id ? { ...item, status } : item))
-        .filter((item) => item.status !== 'Servie'));
-    } catch {
-      setError('Mise a jour du ticket impossible.');
+        .filter((item) => item.status !== "Servie"));
+    } catch (err) {
+      if (isNetworkError(err)) {
+        try {
+          await advanceLocalTicket(ticket, status, restaurantId);
+          setTickets((current) => current
+            .map((item) => (item.id === ticket.id ? { ...item, status } : item))
+            .filter((item) => item.status !== "Servie"));
+          setOfflineHint("Avancement enregistré localement.");
+        } catch {
+          setError("Mise a jour du ticket impossible.");
+        }
+      } else {
+        setError("Mise a jour du ticket impossible.");
+      }
     }
   }
 
@@ -84,28 +132,24 @@ export default function KitchenDisplay({ filter = 'orders' }) {
 
   return (
     <section className="space-y-6">
-      <PageHeader
-        eyebrow="Cuisine"
-        title={pageCopy[0]}
-        subtitle={pageCopy[1]}
-      />
-
+      <PageHeader eyebrow="Cuisine" title={pageCopy[0]} subtitle={pageCopy[1]} />
+      {offlineHint && (
+        <div className="rounded-lg border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-800">{offlineHint}</div>
+      )}
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-600">{error}</div>}
-
       <div className="grid gap-4 md:grid-cols-4">
         <Metric icon="Clock3" label="Commandes en attente" value={stats.EN_ATTENTE} tone="orange" />
         <Metric icon="ChefHat" label="En préparation" value={stats.EN_PREPARATION} tone="blue" />
         <Metric icon="CheckCircle2" label="Prêtes" value={stats.PRETE} tone="green" />
         <Metric icon="AlertTriangle" label="Commandes urgentes" value={stats.URGENT} tone="red" />
       </div>
-
       <div className="grid gap-5 xl:grid-cols-[1fr_280px]">
         <div className="grid gap-5 lg:grid-cols-3">
           {visibleColumns.map((column) => {
             const items = tickets.filter((ticket) => {
               const matchesColumn = ticket.status === column.key;
-              const matchesUrgent = filter !== 'urgent' || ticketCurrentStageMinutes(ticket) >= 20;
-              const matchesNotes = filter !== 'notes' || Boolean(ticket.notes);
+              const matchesUrgent = filter !== "urgent" || ticketCurrentStageMinutes(ticket) >= 20;
+              const matchesNotes = filter !== "notes" || Boolean(ticket.notes);
               return matchesColumn && matchesUrgent && matchesNotes;
             });
             return (
@@ -124,7 +168,6 @@ export default function KitchenDisplay({ filter = 'orders' }) {
             );
           })}
         </div>
-
         <aside className="space-y-4">
           <Panel title="Commandes urgentes">
             {tickets.filter((ticket) => ticketCurrentStageMinutes(ticket) >= 20).slice(0, 4).map((ticket) => (
@@ -136,7 +179,7 @@ export default function KitchenDisplay({ filter = 'orders' }) {
             ))}
           </Panel>
           <Panel title="Avaries enregistrees">
-            {['Four principal', 'Friteuse', 'Refrigerateur 2'].map((item) => (
+            {["Four principal", "Friteuse", "Refrigerateur 2"].map((item) => (
               <div key={item} className="flex items-center gap-2 py-2 text-sm font-semibold text-slate-600">
                 <DashboardIcon name="AlertTriangle" size={15} className="text-red-500" />
                 {item}
@@ -150,8 +193,8 @@ export default function KitchenDisplay({ filter = 'orders' }) {
 }
 
 function Metric({ icon, label, value, tone }) {
-  const tones = { orange: 'warning', blue: 'info', green: 'success', red: 'danger' };
-  return <StatCard icon={icon} label={label} value={value} tone={tones[tone] ?? 'default'} />;
+  const tones = { orange: "warning", blue: "info", green: "success", red: "danger" };
+  return <StatCard icon={icon} label={label} value={value} tone={tones[tone] ?? "default"} />;
 }
 
 function TicketCard({ ticket, action, onAdvance }) {
@@ -206,6 +249,6 @@ function Panel({ title, children }) {
 
 function formatTime(value) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '--:--';
-  return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  if (Number.isNaN(date.getTime())) return "--:--";
+  return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }

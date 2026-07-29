@@ -1,0 +1,453 @@
+/**
+ * Sync intelligente — Phase 4/5.
+ * Ordonnancement, déduplication, retries, conflits idempotents + garde-fous.
+ */
+
+import { persistSyncQueue, initOfflineFoundation } from "@/offline/store";
+import { idbGet, idbPut, STORES } from "@/offline/db";
+import {
+  MAX_ATTEMPTS,
+  MAX_QUEUE_SIZE,
+  KITCHEN_STATUS_RANK,
+  dedupeQueue as dedupeQueuePure,
+  sortQueueForFlush as sortQueueForFlushPure,
+  isLocalId as isLocalIdPure,
+  isConflictResolved,
+  isDeferError,
+} from "@/offline/syncHelpers";
+
+const OFFLINE_QUEUE_KEY = "offline_action_queue";
+const ID_MAP_META_KEY = "offline_id_map";
+
+let flushInFlight = null;
+
+export const isLocalId = isLocalIdPure;
+export const dedupeQueue = dedupeQueuePure;
+export const sortQueueForFlush = sortQueueForFlushPure;
+
+export function readOfflineQueue() {
+  try {
+    const value = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+export function clearOfflineQueue() {
+  persistSyncQueue([]);
+}
+
+export function enqueueOfflineAction(action) {
+  const queue = readOfflineQueue();
+  const pendingCount = queue.filter((item) => item.status !== "failed").length;
+  if (pendingCount >= MAX_QUEUE_SIZE) {
+    const err = new Error(
+      `File offline saturée (${MAX_QUEUE_SIZE}). Synchronisez ou videz la file avant de continuer.`,
+    );
+    emitSyncEvent("offline-queue-overflow", { max: MAX_QUEUE_SIZE, pendingCount });
+    throw err;
+  }
+
+  // Champs de contrôle APRÈS le spread : on ne laisse pas l'appelant forcer status/attempts.
+  const entry = {
+    ...action,
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    created_at: new Date().toISOString(),
+    attempts: 0,
+    status: "pending",
+  };
+  const next = dedupeQueue([...queue, entry]);
+  persistSyncQueue(next);
+  emitSyncEvent("offline-queue-changed", { count: next.length });
+  return entry;
+}
+
+function emitSyncEvent(name, detail = {}) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(name, { detail }));
+  }
+}
+
+function hasAuthToken() {
+  try {
+    return Boolean(localStorage.getItem("access_token"));
+  } catch {
+    return false;
+  }
+}
+
+async function loadIdMap() {
+  try {
+    await initOfflineFoundation();
+    const row = await idbGet(STORES.meta, ID_MAP_META_KEY);
+    return row?.map && typeof row.map === "object" ? { ...row.map } : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveIdMap(idMap) {
+  try {
+    await initOfflineFoundation();
+    await idbPut(STORES.meta, {
+      key: ID_MAP_META_KEY,
+      map: idMap,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch {
+    // best effort
+  }
+}
+
+function rewritePath(path, idMap) {
+  let next = String(path || "");
+  for (const [localId, serverId] of Object.entries(idMap)) {
+    next = next.split(localId).join(String(serverId));
+  }
+  return next;
+}
+
+function rewriteActionIds(action, idMap) {
+  const next = { ...action };
+  if (next.localOrderId && idMap[next.localOrderId]) next.localOrderId = idMap[next.localOrderId];
+  if (next.orderId && idMap[next.orderId]) next.orderId = idMap[next.orderId];
+  if (Array.isArray(next.requests)) {
+    next.requests = next.requests.map((request) => ({
+      ...request,
+      path: rewritePath(request.path, idMap),
+    }));
+  }
+  return next;
+}
+
+function resolveOrderId(action, idMap) {
+  const raw = action.localOrderId || action.orderId;
+  if (!raw) return null;
+  if (idMap[raw]) return idMap[raw];
+  if (!isLocalId(raw)) return raw;
+  return null;
+}
+
+export function isNetworkError(error) {
+  const message = String(error?.message || error || "");
+  return !navigator.onLine || message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("Connexion indisponible");
+}
+
+async function matchAndApplyKitchenStatus(apiFetch, action, orderId) {
+  const remoteTickets = await apiFetch("/kitchen/tickets/active", {
+    method: "GET",
+    fallback: "Tickets cuisine indisponibles.",
+  });
+  const ticket = (remoteTickets || []).find(
+    (item) =>
+      String(item.order_id) === String(orderId)
+      && String(item.item_name) === String(action.itemName)
+      && Number(item.quantity || 0) === Number(action.quantity || 0)
+      && item.status !== "Servie",
+  );
+  if (!ticket) {
+    const err = new Error("Ticket serveur pas encore disponible");
+    err.defer = true;
+    throw err;
+  }
+  const currentRank = KITCHEN_STATUS_RANK[ticket.status] || 0;
+  const targetRank = KITCHEN_STATUS_RANK[action.status] || 0;
+  if (targetRank <= currentRank) return; // déjà au moins aussi avancé
+  await apiFetch(`/kitchen/ticket/${ticket.id}/status`, {
+    method: "PATCH",
+    body: { status: action.status },
+    fallback: "Mise à jour ticket impossible.",
+  });
+}
+
+async function runAction(action, { apiFetch, apiFetchPublic, idMap }) {
+  const type = action.type || "http";
+
+  if (type === "create_table_order") {
+    const result = await apiFetch(`/tables/${action.tableId}/orders`, {
+      method: "POST",
+      body: { party_size: action.party_size || 1 },
+      fallback: action.errorMessage || "Création de commande impossible.",
+    });
+    const serverOrderId = result?.order?.id;
+    if (!serverOrderId) throw new Error("Création de commande : id serveur manquant.");
+    idMap[action.localOrderId] = serverOrderId;
+    try {
+      const { remapLocalOrderId } = await import("@/offline/ops");
+      await remapLocalOrderId(action.localOrderId, serverOrderId, action.restaurantId);
+    } catch {
+      // best effort
+    }
+    return;
+  }
+
+  if (type === "update_order_items") {
+    const orderId = resolveOrderId(action, idMap);
+    if (!orderId) {
+      const err = new Error("Commande locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    await apiFetch(`/api/v1/orders/${orderId}`, {
+      method: "PATCH",
+      body: { items: action.items },
+      fallback: action.errorMessage || "Mise à jour commande impossible.",
+    });
+    return;
+  }
+
+  if (type === "send_to_kitchen" || type === "send_to_kitchen_after_create") {
+    const orderId = resolveOrderId(action, idMap);
+    if (!orderId) {
+      const err = new Error("Commande locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    await apiFetch(`/api/v1/orders/${orderId}/send-to-kitchen`, {
+      method: "POST",
+      fallback: action.errorMessage || "Envoi cuisine impossible.",
+    });
+    return;
+  }
+
+  if (type === "kitchen_status_local") {
+    const orderId = resolveOrderId({ localOrderId: action.orderId, orderId: action.orderId }, idMap)
+      || (idMap[action.orderId] ? idMap[action.orderId] : null)
+      || (!isLocalId(action.orderId) ? action.orderId : null);
+    if (!orderId) {
+      const err = new Error("Commande locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    await matchAndApplyKitchenStatus(apiFetch, action, orderId);
+    return;
+  }
+
+  if (type === "cash_payment") {
+    const orderId = resolveOrderId(action, idMap);
+    if (!orderId) {
+      const err = new Error("Commande locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    const payload = action.payload || action.requests?.[0]?.body || {
+      payment_method: "Espèces",
+      discount_amount: 0,
+    };
+    try {
+      await apiFetch(`/api/v1/orders/${orderId}/status`, {
+        method: "PATCH",
+        body: { status: "Livrée" },
+        fallback: "Statut commande impossible.",
+      });
+    } catch {
+      // déjà payable
+    }
+    await apiFetch(`/api/v1/orders/${orderId}/payment`, {
+      method: "POST",
+      body: payload,
+      fallback: action.errorMessage || "Paiement caisse impossible.",
+    });
+    return;
+  }
+
+  if (type === "order_status") {
+    const orderId = resolveOrderId(action, idMap);
+    if (!orderId) {
+      const err = new Error("Commande locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    const body = action.payload || action.requests?.[0]?.body || { status: "Livrée" };
+    await apiFetch(`/api/v1/orders/${orderId}/status`, {
+      method: "PATCH",
+      body,
+      fallback: action.errorMessage || "Mise à jour statut impossible.",
+    });
+    return;
+  }
+
+  for (const request of action.requests ?? []) {
+    const path = rewritePath(request.path, idMap);
+    if (path.includes("local_")) {
+      const err = new Error("Référence locale non résolue");
+      err.defer = true;
+      throw err;
+    }
+    const fallback = action.errorMessage ?? "Synchronisation impossible.";
+    const options = {
+      method: request.method ?? "POST",
+      body: request.body,
+      fallback,
+    };
+    if (request.requiresAuth) await apiFetch(path, options);
+    else await apiFetchPublic(path, options);
+  }
+}
+
+/**
+ * Flush intelligent de la file offline.
+ * @returns {{ synced: number, remaining: number, failed: number, conflicts: number, idMap: object }}
+ */
+export async function flushOfflineQueue(apiBaseUrl) {
+  if (!navigator.onLine || !apiBaseUrl) {
+    const queue = readOfflineQueue();
+    return {
+      synced: 0,
+      remaining: queue.filter((a) => a.status !== "failed").length,
+      failed: queue.filter((a) => a.status === "failed").length,
+      conflicts: 0,
+      idMap: {},
+      skipped: !navigator.onLine ? "offline" : "no_api",
+    };
+  }
+
+  // Sans JWT : ne pas brûler les tentatives (401 en boucle).
+  if (!hasAuthToken()) {
+    const queue = readOfflineQueue();
+    return {
+      synced: 0,
+      remaining: queue.filter((a) => a.status !== "failed").length,
+      failed: queue.filter((a) => a.status === "failed").length,
+      conflicts: 0,
+      idMap: {},
+      skipped: "no_auth",
+    };
+  }
+
+  if (flushInFlight) return flushInFlight;
+
+  flushInFlight = (async () => {
+    const rawQueue = readOfflineQueue();
+    if (!rawQueue.length) {
+      return { synced: 0, remaining: 0, failed: 0, conflicts: 0, idMap: {} };
+    }
+
+    const { apiFetch, apiFetchPublic } = await import("@/config/http");
+    const idMap = await loadIdMap();
+    const queue = dedupeQueue(rawQueue);
+    const remaining = [];
+    let synced = 0;
+    let conflicts = 0;
+    let failed = 0;
+
+    emitSyncEvent("offline-sync-started", { total: queue.length });
+
+    for (const action of queue) {
+      if (action.status === "failed") {
+        remaining.push(action);
+        failed += 1;
+        continue;
+      }
+
+      emitSyncEvent("offline-sync-progress", {
+        label: action.label || action.type || "action",
+        synced,
+        remaining: queue.length - synced - remaining.length,
+      });
+
+      try {
+        await runAction(action, { apiFetch, apiFetchPublic, idMap });
+        synced += 1;
+      } catch (error) {
+        if (isConflictResolved(error)) {
+          synced += 1;
+          conflicts += 1;
+          continue;
+        }
+
+        const rewritten = rewriteActionIds(action, idMap);
+
+        if (isDeferError(error)) {
+          remaining.push({
+            ...rewritten,
+            status: "pending",
+            last_error: String(error.message || error),
+          });
+          continue;
+        }
+
+        if (isNetworkError(error)) {
+          remaining.push({
+            ...rewritten,
+            status: "pending",
+            last_error: String(error.message || error),
+          });
+          const idx = queue.findIndex((item) => item.id === action.id);
+          for (let i = idx + 1; i < queue.length; i += 1) {
+            const next = rewriteActionIds(queue[i], idMap);
+            if (!remaining.some((item) => item.id === next.id)) remaining.push(next);
+          }
+          break;
+        }
+
+        const attempts = Number(action.attempts || 0) + 1;
+        if (attempts >= MAX_ATTEMPTS) {
+          remaining.push({
+            ...rewritten,
+            status: "failed",
+            attempts,
+            last_error: String(error.message || error),
+            failed_at: new Date().toISOString(),
+          });
+          failed += 1;
+        } else {
+          remaining.push({
+            ...rewritten,
+            status: "pending",
+            attempts,
+            last_error: String(error.message || error),
+          });
+        }
+      }
+    }
+
+    await saveIdMap(idMap);
+    persistSyncQueue(remaining);
+
+    const result = {
+      synced,
+      remaining: remaining.filter((a) => a.status !== "failed").length,
+      failed: remaining.filter((a) => a.status === "failed").length,
+      conflicts,
+      idMap,
+    };
+
+    emitSyncEvent("offline-sync-finished", result);
+    emitSyncEvent("offline-queue-changed", { count: remaining.length });
+    return result;
+  })().finally(() => {
+    flushInFlight = null;
+  });
+
+  return flushInFlight;
+}
+
+export function discardFailedOfflineActions() {
+  const queue = readOfflineQueue().filter((action) => action.status !== "failed");
+  persistSyncQueue(queue);
+  emitSyncEvent("offline-queue-changed", { count: queue.length });
+  return queue.length;
+}
+
+export function retryFailedOfflineActions() {
+  const queue = readOfflineQueue().map((action) => (
+    action.status === "failed"
+      ? { ...action, status: "pending", attempts: 0, last_error: null, failed_at: null }
+      : action
+  ));
+  persistSyncQueue(queue);
+  emitSyncEvent("offline-queue-changed", { count: queue.length });
+  return queue.length;
+}
+
+export function getOfflineQueueStats() {
+  const queue = readOfflineQueue();
+  return {
+    total: queue.length,
+    pending: queue.filter((a) => a.status !== "failed").length,
+    failed: queue.filter((a) => a.status === "failed").length,
+    labels: queue.slice(0, 8).map((a) => a.label || a.type || "action"),
+  };
+}

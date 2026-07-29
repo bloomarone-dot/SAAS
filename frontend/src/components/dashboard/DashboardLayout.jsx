@@ -12,6 +12,8 @@ export function DashboardLayout({
   activeView,
   theme,
   onNavigate,
+  onBack,
+  canGoBack = false,
   onLogout,
   apiBaseUrl,
   children,
@@ -489,30 +491,43 @@ export function DashboardLayout({
             backgroundColor: primary,
           }}
         >
-          <div className={`flex items-center gap-3 ${hideSidebar ? "" : "lg:hidden"}`}>
+          <div className="flex min-w-0 items-center gap-2 md:gap-3">
+            {canGoBack && (
+              <button
+                type="button"
+                onClick={() => (onBack ? onBack() : onNavigate("dashboard"))}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-white transition-colors hover:bg-black/10"
+                title="Retour"
+                aria-label="Retour"
+              >
+                <DashboardIcon name="ArrowLeft" size={20} />
+              </button>
+            )}
+            <div className={`flex items-center gap-3 ${hideSidebar ? "" : "lg:hidden"}`}>
+              {!hideSidebar && (
+              <button
+                type="button"
+                onClick={() => setIsMobileMenuOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-md text-white transition-colors hover:bg-black/10 lg:hidden"
+                title="Ouvrir le menu"
+              >
+                <DashboardIcon name="Menu" size={21} />
+              </button>
+              )}
+              <h1 className={`truncate text-base font-bold text-white ${hideSidebar ? "block" : "lg:hidden"}`}>{displayName}</h1>
+            </div>
+
             {!hideSidebar && (
             <button
               type="button"
-              onClick={() => setIsMobileMenuOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-md text-white transition-colors hover:bg-black/10 lg:hidden"
-              title="Ouvrir le menu"
+              onClick={() => setIsCollapsed((value) => !value)}
+              className="hidden h-10 rounded-md px-3 text-white/90 transition-colors hover:bg-black/10 lg:block"
+              title={isCollapsed ? "Déplier le menu" : "Réduire le menu"}
             >
-              <DashboardIcon name="Menu" size={21} />
+              <DashboardIcon name="Menu" size={20} />
             </button>
             )}
-            <h1 className={`text-base font-bold text-white ${hideSidebar ? "block" : "lg:hidden"}`}>{displayName}</h1>
           </div>
-
-          {!hideSidebar && (
-          <button
-            type="button"
-            onClick={() => setIsCollapsed((value) => !value)}
-            className="hidden h-10 rounded-md px-3 text-white/90 transition-colors hover:bg-black/10 lg:block"
-            title={isCollapsed ? "Déplier le menu" : "Réduire le menu"}
-          >
-            <DashboardIcon name="Menu" size={20} />
-          </button>
-          )}
 
           <div
             className="absolute left-1/2 hidden -translate-x-1/2 text-center text-sm font-bold uppercase tracking-wide text-white/95 xl:block"

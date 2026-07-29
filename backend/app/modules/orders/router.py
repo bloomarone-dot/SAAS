@@ -409,6 +409,18 @@ def validate_cashier_payment(
         payload.discount_amount,
         payload.cash_register_id,
     )
+    try:
+        from app.modules.payments.service import close_pending_payment_requests_for_order
+
+        close_pending_payment_requests_for_order(
+            db,
+            order,
+            current_user,
+            payment_method=payload.payment_method,
+        )
+    except Exception:
+        # L'encaissement prime : ne pas faire échouer le paiement si la clôture de demande échoue.
+        pass
     db.commit()
     db.refresh(order)
     return get_order_or_404(db, order.id, current_user.restaurant_id)

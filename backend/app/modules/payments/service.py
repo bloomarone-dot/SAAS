@@ -581,3 +581,38 @@ def reject_payment_request(db: Session, request: PaymentRequest, user, order_num
         f"La caisse a rejeté la demande de paiement de la commande {order_number}.",
     )
     db.commit()
+
+
+def close_pending_payment_requests_for_order(
+    db: Session,
+    order: CustomerOrder,
+    user,
+    *,
+    payment_method: str | None = None,
+) -> int:
+    """Ferme les demandes PENDING d'une commande après encaissement direct caisse.
+
+    Évite les demandes orphelines quand la caisse encaisse via /payment
+    (avec choix Espèces/Carte) au lieu du bouton validate de la demande.
+    """
+    pending = (
+        db.query(PaymentRequest)
+        .filter(
+            PaymentRequest.order_id == order.id,
+            PaymentRequest.restaurant_id == order.restaurant_id,
+            PaymentRequest.status == "PENDING",
+        )
+        .all()
+    )
+    method_label = (payment_method or order.payment_method or "Espèces").strip()
+    for request_obj in pending:
+        request_obj.status = "VALIDATED"
+        request_obj.validated_by_id = getattr(user, "id", None)
+        notify_request_owner(
+            db,
+            request_obj,
+            order.order_number,
+            "Paiement encaissé",
+            f"La caisse a encaissé la commande {order.order_number} ({method_label}).",
+        )
+    return len(pending)

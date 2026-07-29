@@ -40,7 +40,7 @@ export function InvoiceHistoryPanel({
   const [cashiers, setCashiers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState("");
-  const [period, setPeriod] = useState("month");
+  const [period, setPeriod] = useState("today");
   const [customPeriod, setCustomPeriod] = useState({ start: "", end: "" });
   const [cashierFilter, setCashierFilter] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("");

@@ -13,6 +13,14 @@ import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { formatMinutes, orderKitchenTimingDetails, orderKitchenTimingLabel } from "../utils/kitchenTiming";
+import {
+  getLocalOrder,
+  isLocalId,
+  markLocalOrderServed,
+  mirrorOrderLocal,
+  sendLocalOrderToKitchen,
+  updateLocalOrderItems,
+} from "@/offline";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 const PAID_STATUSES = ["Payée", "Payee", "Annulée", "Annulee"];
@@ -87,24 +95,37 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
   const loadOrder = useCallback(async (orderId) => {
     if (!orderId) return;
+    if (isLocalId(orderId)) {
+      const local = await getLocalOrder(orderId);
+      if (local) {
+        setOrder(local);
+        if (currentUser?.id) saveOrderSnapshot(currentUser.id, local);
+      } else {
+        setError("Commande locale introuvable.");
+      }
+      return;
+    }
     try {
       const data = await orderApi.get(orderId);
       setOrder(data);
       if (currentUser?.id) saveOrderSnapshot(currentUser.id, data);
+      if (restaurantId) mirrorOrderLocal(data, restaurantId).catch(() => {});
       const status = normalizeStatus(data.status);
       if (isReadyStatus(status) || (isServedStatus(status) && !isPaid(status) && !data.is_closed)) {
         setReadyAlert(true);
       }
     } catch (err) {
       const snapshot = currentUser?.id ? loadOrderSnapshot(currentUser.id, orderId) : null;
-      if (snapshot) {
-        setOrder(snapshot);
+      const local = await getLocalOrder(orderId);
+      const fallback = local || snapshot;
+      if (fallback) {
+        setOrder(fallback);
         setMessage("Connexion instable : affichage de la dernière commande enregistrée localement.");
       } else if (!isNetworkError(err)) {
         setError(err.message || "Impossible de charger la commande.");
       }
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, restaurantId]);
 
   const loadMenu = useCallback(async () => {
     if (!restaurantId) return;
@@ -154,6 +175,22 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     async function tryResumeSession() {
       const saved = loadServerSession(currentUser.id);
       if (saved?.orderId) {
+        if (isLocalId(saved.orderId)) {
+          const local = await getLocalOrder(saved.orderId);
+          if (local && !cancelled) {
+            setSession({
+              orderId: saved.orderId,
+              tableId: saved.tableId || local.table_id,
+              tableName: saved.tableName || local.table_name || "—",
+              tableRoom: saved.tableRoom || local.table_room || "Rez-de-chaussée",
+            });
+            setMenuMode(saved.menuMode !== false);
+            setOrder(local);
+            setMessage("Reprise hors ligne de votre commande locale.");
+            setResuming(false);
+            return;
+          }
+        }
         try {
           const data = await orderApi.get(saved.orderId);
           if (cancelled) return;
@@ -322,45 +359,73 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     setReadyAlert(false);
   }
 
-  function applyLocalOrderItems(items) {
-    const dishById = new Map(dishes.map((dish) => [dish.id, dish]));
-    const nextItems = items.map((item) => {
-      const dish = dishById.get(item.menu_item_id);
-      const unitPrice = Number(dish?.price || 0);
-      const quantity = Number(item.quantity || 0);
-      return {
-        menu_item_id: item.menu_item_id,
-        name: dish?.name || "Plat",
-        sale_channel: dish?.sale_channel || "REPAS",
-        quantity,
-        unit_price: unitPrice,
-        line_total: unitPrice * quantity,
-      };
-    });
-    const subtotal = nextItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
-    const nextOrder = {
-      ...(order || {}),
-      items: nextItems,
-      total_amount: Math.max(0, subtotal + Number(order?.delivery_fee || 0) - Number(order?.discount_amount || 0)),
-    };
-    setOrder(nextOrder);
-    if (currentUser?.id && nextOrder.id) saveOrderSnapshot(currentUser.id, nextOrder);
-    return nextOrder;
-  }
+  useEffect(() => {
+    function onRemap(event) {
+      const { localId, serverId } = event.detail || {};
+      if (!localId || !serverId) return;
+      setSession((current) => {
+        if (!current || current.orderId !== localId) return current;
+        const next = { ...current, orderId: serverId };
+        if (currentUser?.id) {
+          saveServerSession(currentUser.id, { ...next, menuMode });
+        }
+        return next;
+      });
+      setOrder((current) => (current?.id === localId ? { ...current, id: serverId, _local: false } : current));
+      setMessage("Commande synchronisée avec le serveur.");
+    }
+    window.addEventListener("offline-id-remapped", onRemap);
+    return () => window.removeEventListener("offline-id-remapped", onRemap);
+  }, [currentUser?.id, menuMode]);
 
   async function updateOrderItems(items) {
     if (!session?.orderId || !canEditOrder) return;
     setBusy("items");
     setError("");
+    const dishesById = Object.fromEntries(dishes.map((dish) => [dish.id, dish]));
+
+    if (isLocalId(session.orderId)) {
+      try {
+        const base = order || (await getLocalOrder(session.orderId));
+        const updated = await updateLocalOrderItems(base, items, dishesById);
+        setOrder(updated);
+        if (currentUser?.id) saveOrderSnapshot(currentUser.id, updated);
+        enqueueOfflineAction({
+          type: "update_order_items",
+          label: `Commande ${session.orderId}`,
+          localOrderId: session.orderId,
+          items,
+          requests: [],
+        });
+        setMessage("Articles enregistrés localement (hors ligne).");
+      } catch (err) {
+        setError(err.message || "Mise à jour locale impossible.");
+      } finally {
+        setBusy("");
+      }
+      return;
+    }
+
     try {
       const updated = await orderApi.update(session.orderId, { items });
       setOrder(updated);
       if (currentUser?.id) saveOrderSnapshot(currentUser.id, updated);
+      if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
     } catch (err) {
       if (isNetworkError(err)) {
-        applyLocalOrderItems(items);
+        const base = order || {};
+        const updated = await updateLocalOrderItems(
+          { ...base, id: session.orderId, restaurantId, restaurant_id: restaurantId },
+          items,
+          dishesById,
+        );
+        setOrder(updated);
+        if (currentUser?.id) saveOrderSnapshot(currentUser.id, updated);
         enqueueOfflineAction({
+          type: "update_order_items",
           label: `Commande ${session.orderId}`,
+          localOrderId: session.orderId,
+          items,
           requests: [{
             path: `/api/v1/orders/${session.orderId}`,
             method: "PATCH",
@@ -428,23 +493,49 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     if (!session?.orderId) return;
     setBusy("kitchen");
     setError("");
+    const dishesById = Object.fromEntries(dishes.map((dish) => [dish.id, dish]));
+
+    async function sendLocal() {
+      const base = order || (await getLocalOrder(session.orderId)) || { id: session.orderId };
+      const result = await sendLocalOrderToKitchen(
+        { ...base, restaurantId, restaurant_id: restaurantId },
+        restaurantId,
+        dishesById,
+      );
+      setOrder(result.order);
+      if (currentUser?.id) saveOrderSnapshot(currentUser.id, result.order);
+      setMenuMode(false);
+      setMessage(
+        isLocalId(session.orderId)
+          ? "Commande envoyée en cuisine locale. Sync à la reconnexion."
+          : "Connexion instable. L'envoi cuisine sera synchronisé automatiquement.",
+      );
+    }
+
+    if (isLocalId(session.orderId) || !navigator.onLine) {
+      try {
+        await sendLocal();
+      } catch (err) {
+        setError(err.message || "Envoi cuisine locale impossible.");
+      } finally {
+        setBusy("");
+      }
+      return;
+    }
+
     try {
       const updated = await orderApi.sendToKitchen(session.orderId);
       setOrder(updated);
+      if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
       setMenuMode(false);
       setMessage("Commande envoyée en cuisine. Attendez la notification « prête ».");
     } catch (err) {
       if (isNetworkError(err)) {
-        enqueueOfflineAction({
-          label: `Envoi cuisine ${session.orderId}`,
-          requests: [{
-            path: `/api/v1/orders/${session.orderId}/send-to-kitchen`,
-            method: "POST",
-            requiresAuth: true,
-          }],
-        });
-        setMenuMode(false);
-        setMessage("Connexion instable. L'envoi cuisine sera synchronisé automatiquement.");
+        try {
+          await sendLocal();
+        } catch (localErr) {
+          setError(localErr.message || "Envoi cuisine locale impossible.");
+        }
       } else {
         setError(err.message || "Envoi en cuisine impossible.");
       }
@@ -457,23 +548,37 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     if (!session?.orderId) return;
     setBusy("served");
     setError("");
+
+    if (isLocalId(session.orderId)) {
+      try {
+        const base = order || (await getLocalOrder(session.orderId));
+        const updated = await markLocalOrderServed(base, restaurantId);
+        setOrder(updated);
+        if (currentUser?.id) saveOrderSnapshot(currentUser.id, updated);
+        setReadyAlert(false);
+        setMessage("Commande marquée servie localement.");
+      } catch (err) {
+        setError(err.message || "Impossible de marquer comme servie.");
+      } finally {
+        setBusy("");
+      }
+      return;
+    }
+
     try {
       const updated = await orderApi.updateStatus(session.orderId, "Livrée");
       setOrder(updated);
+      if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
       setReadyAlert(false);
       setMessage("Commande servie au client.");
     } catch (err) {
       if (isNetworkError(err)) {
-        enqueueOfflineAction({
-          label: `Servie ${session.orderId}`,
-          requests: [{
-            path: `/api/v1/orders/${session.orderId}/status`,
-            method: "PATCH",
-            requiresAuth: true,
-            body: { status: "Livrée" },
-          }],
-        });
-        setOrder((current) => (current ? { ...current, status: "Livrée" } : current));
+        const base = order || { id: session.orderId };
+        const updated = await markLocalOrderServed(
+          { ...base, restaurantId, restaurant_id: restaurantId },
+          restaurantId,
+        );
+        setOrder(updated);
         setReadyAlert(false);
         setMessage("Connexion instable. La commande est marquée servie localement et sera synchronisée.");
       } else {
@@ -597,6 +702,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
             <TableSessionModal
               table={selectedTable}
               currentUser={currentUser}
+              restaurantId={restaurantId}
               onClose={() => setSelectedTable(null)}
               onOpenMenuForOrder={(orderId, tableName, tableRoom) =>
                 openOrder(orderId, tableName, tableRoom, selectedTable?.id)

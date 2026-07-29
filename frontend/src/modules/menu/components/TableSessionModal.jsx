@@ -1,22 +1,50 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { tableApi } from '../services/tableApi';
+import {
+  createLocalTableOrder,
+  isLocalId,
+  listLocalOrders,
+} from '@/offline';
+import { isNetworkError } from '@/utils/network';
 
-export default function TableSessionModal({ table, currentUser, onClose, onOpenMenuForOrder, primaryActionLabel = "Ouvrir une commande" }) {
+export default function TableSessionModal({
+  table,
+  currentUser,
+  restaurantId,
+  onClose,
+  onOpenMenuForOrder,
+  primaryActionLabel = "Ouvrir une commande",
+}) {
   const [activeOrders, setActiveOrders] = useState([]);
   const [partySize, setPartySize] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [offlineHint, setOfflineHint] = useState('');
 
   useEffect(() => {
     let mounted = true;
     async function loadActiveOrders() {
       setLoading(true);
       setError('');
+      setOfflineHint('');
       try {
         const data = await tableApi.getActiveOrders(table.id);
-        if (mounted) setActiveOrders(data);
+        if (!mounted) return;
+        setActiveOrders(data);
       } catch (err) {
-        if (mounted) setError(err.message || 'Impossible de charger les commandes actives.');
+        if (!mounted) return;
+        if (isNetworkError(err) && restaurantId) {
+          const local = await listLocalOrders(restaurantId);
+          const forTable = local.filter(
+            (order) =>
+              String(order.table_id) === String(table.id)
+              && !['Payée', 'Payee', 'Annulée', 'Annulee'].includes(String(order.status || '')),
+          );
+          setActiveOrders(forTable);
+          setOfflineHint('Mode hors ligne : commandes locales de cette table.');
+        } else {
+          setError(err.message || 'Impossible de charger les commandes actives.');
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -25,14 +53,14 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
     return () => {
       mounted = false;
     };
-  }, [table]);
+  }, [table, restaurantId]);
 
   const otherServerOrders = useMemo(
     () => activeOrders.filter((order) => order.server_id && order.server_id !== currentUser?.id),
     [activeOrders, currentUser?.id]
   );
   const currentServerOrders = useMemo(
-    () => activeOrders.filter((order) => order.server_id === currentUser?.id),
+    () => activeOrders.filter((order) => !order.server_id || order.server_id === currentUser?.id),
     [activeOrders, currentUser?.id]
   );
   const occupiedSeats = useMemo(
@@ -56,6 +84,22 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
       onOpenMenuForOrder(result.order.id, table.name || table.number, table.room);
       onClose();
     } catch (err) {
+      if (isNetworkError(err) && restaurantId) {
+        try {
+          const order = await createLocalTableOrder({
+            restaurantId,
+            table,
+            partySize: requestedSeats,
+            currentUser,
+          });
+          onOpenMenuForOrder(order.id, table.name || table.number, table.room);
+          onClose();
+          return;
+        } catch (localErr) {
+          setError(localErr.message || "Impossible d'ouvrir la commande hors ligne.");
+          return;
+        }
+      }
       setError(err.message || "Erreur lors de l'ouverture de la commande.");
     }
   }
@@ -82,6 +126,11 @@ export default function TableSessionModal({ table, currentUser, onClose, onOpenM
 
         <div className="space-y-5 p-6">
           {loading && <p className="text-sm font-semibold text-slate-500">Chargement des commandes actives...</p>}
+          {offlineHint && (
+            <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+              {offlineHint}
+            </div>
+          )}
           {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>}
 
           {!loading && otherServerOrders.length > 0 && (
@@ -170,8 +219,11 @@ function OrderRow({ order, onOpen, disabled = false }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
       <div>
-        <p className="text-sm font-black text-slate-900">Commande #{order.order_number}</p>
-        <p className="mt-1 text-xs font-semibold text-slate-500">Serveuse : {order.server_name}</p>
+        <p className="text-sm font-black text-slate-900">
+          Commande #{order.order_number}
+          {isLocalId(order.id) ? ' · local' : ''}
+        </p>
+        <p className="mt-1 text-xs font-semibold text-slate-500">Serveuse : {order.server_name || '—'}</p>
         <p className="mt-1 text-xs font-semibold text-slate-500">{Number(order.party_size || 1)} personne(s)</p>
         <p className="mt-1 text-xs font-black text-[#f04438]">{Number(order.total_amount || 0).toLocaleString('fr-FR')} FCFA</p>
       </div>

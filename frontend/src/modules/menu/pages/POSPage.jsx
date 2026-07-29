@@ -39,6 +39,7 @@ export default function POSPage({ restaurantId, role, currentUser }) {
             <TableSessionModal
               table={selectedTable}
               currentUser={currentUser}
+              restaurantId={currentRestaurantId}
               onClose={() => setSelectedTable(null)}
               onOpenMenuForOrder={handleOpenMenuForOrder}
             />

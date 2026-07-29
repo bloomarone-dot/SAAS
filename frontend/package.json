@@ -5,7 +5,8 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vite build"
+    "build": "vite build",
+    "test:offline": "node --test src/offline/syncHelpers.test.js"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

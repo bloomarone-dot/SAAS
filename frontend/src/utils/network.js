@@ -1,4 +1,20 @@
-const OFFLINE_QUEUE_KEY = "offline_action_queue";
+/**
+ * Helpers réseau + façade sync offline (Phase 4).
+ * La logique de flush intelligente vit dans offline/sync.js.
+ */
+
+export {
+  enqueueOfflineAction,
+  readOfflineQueue,
+  clearOfflineQueue,
+  flushOfflineQueue,
+  isNetworkError,
+  discardFailedOfflineActions,
+  retryFailedOfflineActions,
+  getOfflineQueueStats,
+  dedupeQueue,
+  sortQueueForFlush,
+} from "@/offline/sync";
 
 export function friendlyNetworkMessage(error, fallback = "Connexion indisponible. Réessayez dans quelques instants.") {
   const message = String(error?.message || error || "");
@@ -22,70 +38,4 @@ export function formatApiError(detail, fallback = "Action impossible: le serveur
       .join(" | ") || fallback;
   }
   return detail.message || detail.error || detail.detail || fallback;
-}
-
-export function isNetworkError(error) {
-  const message = String(error?.message || error || "");
-  return !navigator.onLine || message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("Connexion indisponible");
-}
-
-export function enqueueOfflineAction(action) {
-  const queue = readOfflineQueue();
-  const entry = {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    created_at: new Date().toISOString(),
-    ...action,
-  };
-  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify([...queue, entry]));
-  window.dispatchEvent(new CustomEvent("offline-queue-changed"));
-  return entry;
-}
-
-export function readOfflineQueue() {
-  try {
-    const value = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
-    return Array.isArray(value) ? value : [];
-  } catch {
-    return [];
-  }
-}
-
-export function clearOfflineQueue() {
-  localStorage.removeItem(OFFLINE_QUEUE_KEY);
-  window.dispatchEvent(new CustomEvent("offline-queue-changed"));
-}
-
-export async function flushOfflineQueue(apiBaseUrl) {
-  if (!navigator.onLine || !apiBaseUrl) return { synced: 0, remaining: readOfflineQueue().length };
-  const queue = readOfflineQueue();
-  if (!queue.length) return { synced: 0, remaining: 0 };
-
-  const { apiFetch, apiFetchPublic } = await import("@/config/http");
-  const remaining = [];
-  let synced = 0;
-  for (const action of queue) {
-    try {
-      for (const request of action.requests ?? []) {
-        const fallback = action.errorMessage ?? "Synchronisation impossible.";
-        const options = {
-          method: request.method ?? "POST",
-          body: request.body,
-          fallback,
-        };
-        if (request.requiresAuth) {
-          await apiFetch(request.path, options);
-        } else {
-          await apiFetchPublic(request.path, options);
-        }
-      }
-      synced += 1;
-    } catch (error) {
-      remaining.push(action);
-      if (isNetworkError(error)) break;
-    }
-  }
-
-  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
-  window.dispatchEvent(new CustomEvent("offline-queue-changed"));
-  return { synced, remaining: remaining.length };
 }

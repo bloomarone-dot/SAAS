@@ -334,7 +334,22 @@ export function AccountingOperations({ onMessage, mode, onNavigate, role }) {
       case "rapprochement":
         return <Rapprochement api={financeApi} accounts={accounts} onMessage={onMessage} />;
       default:
-        return null;
+        return (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-900">
+            <p className="text-sm font-black uppercase tracking-wide text-amber-700">Module indisponible</p>
+            <h2 className="mt-2 text-xl font-black">Cet écran comptable n’est pas disponible</h2>
+            <p className="mt-2 text-sm font-semibold">
+              Revenez au tableau de bord comptable ou choisissez une autre rubrique.
+            </p>
+            <button
+              type="button"
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-amber-800 px-4 py-2 text-sm font-bold text-white"
+              onClick={() => (onNavigate ? onNavigate("comptabilite") : setTab("dashboard"))}
+            >
+              Retour comptabilité
+            </button>
+          </div>
+        );
     }
   }
 
