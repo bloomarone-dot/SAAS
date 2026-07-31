@@ -10,7 +10,15 @@ from app.database import get_db
 from app.dependencies import assert_permission, has_permission, require_tenant_user
 from app.modules.audit.service import log_action
 from app.modules.menu.models import CategoryModel, DishModel
-from app.modules.menu.schemas import CategoryCreate, CategoryResponse, DishCreate, DishResponse, DishUpdate, PublicRestaurantMenu
+from app.modules.menu.schemas import (
+    CategoryCreate,
+    CategoryResponse,
+    CategoryUpdate,
+    DishCreate,
+    DishResponse,
+    DishUpdate,
+    PublicRestaurantMenu,
+)
 from app.modules.menu.services import MenuService
 from app.modules.permissions.models import Permission
 from app.modules.restaurants.models import Restaurant
@@ -174,6 +182,35 @@ def get_restaurant_categories(
     if restaurant_id != current_user.restaurant_id:
         raise HTTPException(status_code=403, detail="Restaurant non autorise")
     return MenuService.get_categories_by_restaurant(db=db, restaurant_id=current_user.restaurant_id)
+
+
+@router.put("/categories/{category_id}", response_model=CategoryResponse)
+def update_category_info(
+    category_id: str,
+    category_updates: CategoryUpdate,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_menu_update_allowed(current_user)
+    updated = MenuService.update_category(
+        db=db,
+        restaurant_id=current_user.restaurant_id,
+        category_id=category_id,
+        category_data=category_updates,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Catégorie introuvable")
+    log_action(
+        db,
+        current_user,
+        "menu.category_update",
+        "menu_category",
+        updated.id,
+        f"Modification catégorie carte {updated.name}",
+        {"fields": sorted(category_updates.dict(exclude_unset=True).keys())},
+    )
+    db.commit()
+    return updated
 
 
 @router.delete("/categories/{category_id}", status_code=status.HTTP_200_OK)

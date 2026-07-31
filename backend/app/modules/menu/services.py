@@ -30,6 +30,18 @@ class MenuService:
         )
 
     @staticmethod
+    def update_category(db: Session, restaurant_id: str, category_id: str, category_data):
+        category = tenant_find(db, CategoryModel, category_id, restaurant_id)
+        if not category:
+            return None
+        update_data = category_data.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(category, key, value)
+        db.commit()
+        db.refresh(category)
+        return category
+
+    @staticmethod
     def delete_category(db: Session, restaurant_id: str, category_id: str):
         category = tenant_find(db, CategoryModel, category_id, restaurant_id)
         if not category:
@@ -52,8 +64,8 @@ class MenuService:
             category_id=dish_data.category_id,
             name=dish_data.name,
             description=dish_data.description,
-            price=dish_data.price,
-            cost_per_dish=dish_data.cost_per_dish,
+            price=round(float(dish_data.price)),
+            cost_per_dish=round(float(dish_data.cost_per_dish or 0)),
             image_url=dish_data.image_url,
             is_available=dish_data.is_available,
         )
@@ -104,6 +116,8 @@ class MenuService:
             return None
 
         for key, value in update_data.items():
+            if key in {"price", "cost_per_dish"} and value is not None:
+                value = round(float(value))
             setattr(dish, key, value)
         category = tenant_find(db, CategoryModel, dish.category_id, restaurant_id)
         dish.sale_channel = classify_sale_channel(

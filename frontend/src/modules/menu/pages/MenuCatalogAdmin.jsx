@@ -23,7 +23,14 @@ const emptyDish = {
 };
 
 function money(value) {
-  return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+  return `${Math.round(Number(value || 0)).toLocaleString("fr-FR")} FCFA`;
+}
+
+function parseMoneyInput(value) {
+  const cleaned = String(value ?? "").replace(/\s/g, "").replace(",", ".");
+  const amount = Number(cleaned);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return Math.round(amount);
 }
 
 function isDrinkCategory(name = "") {
@@ -34,13 +41,14 @@ function isDrinkCategory(name = "") {
 function getCatalogTerms(categoryName = "") {
   const drink = isDrinkCategory(categoryName);
   return {
-    item: drink ? "produit" : "plat",
-    Item: drink ? "Produit" : "Plat",
-    items: drink ? "produits" : "plats",
-    Items: drink ? "Produits" : "Plats",
+    drink,
+    item: drink ? "boisson" : "plat",
+    Item: drink ? "Boisson" : "Plat",
+    items: drink ? "boissons" : "plats",
+    Items: drink ? "Boissons" : "Plats",
     costLabel: drink ? "Coût unitaire" : "Coût par plat",
-    imageLabel: drink ? "Image produit" : "Image plat",
-    icon: drink ? "Package" : "Utensils",
+    imageLabel: drink ? "Image boisson" : "Image plat",
+    icon: drink ? "GlassWater" : "Utensils",
     defaultRequiresKitchen: drink ? false : true,
   };
 }
@@ -54,11 +62,16 @@ function buildDishPayload(categoryId, dishForm, categoryName = "") {
     requiresKitchen = Boolean(requiresKitchen);
   }
 
+  const price = parseMoneyInput(dishForm.price);
+  if (price == null) {
+    throw new Error("Prix invalide.");
+  }
+
   return {
     category_id: categoryId,
     name: dishForm.name.trim(),
-    price: Number(dishForm.price),
-    cost_per_dish: Number(dishForm.cost_per_dish || 0),
+    price,
+    cost_per_dish: Math.round(Number(dishForm.cost_per_dish || 0)) || 0,
     description: dishForm.description.trim() || null,
     image_url: dishForm.image_url.trim() || null,
     is_available: dishForm.is_available,
@@ -76,7 +89,13 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
   const [error, setError] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDishModal, setShowDishModal] = useState(false);
+  const [showEditCategoryModal, setShowEditCategoryModal] = useState(false);
+  const [showEditDishModal, setShowEditDishModal] = useState(false);
   const [dishModalCategoryId, setDishModalCategoryId] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState("");
+  const [editingDishId, setEditingDishId] = useState("");
+  const [editCategoryForm, setEditCategoryForm] = useState(emptyCategory);
+  const [editDishForm, setEditDishForm] = useState(emptyDish);
   const [categoryForm, setCategoryForm] = useState(emptyCategory);
   const [dishForm, setDishForm] = useState(emptyDish);
   const [extraDishForm, setExtraDishForm] = useState(emptyDish);
@@ -84,8 +103,14 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
 
   const readOnly = role === "CUISINE";
   const dishModalCategory = categories.find((category) => category.id === dishModalCategoryId);
+  const editingCategory = categories.find((category) => category.id === editingCategoryId);
+  const editingDishCategory = categories.find((category) => {
+    const dishes = dishesByCategory[category.id] ?? [];
+    return dishes.some((dish) => dish.id === editingDishId);
+  });
   const createTerms = getCatalogTerms(categoryForm.name);
   const dishModalTerms = getCatalogTerms(dishModalCategory?.name);
+  const editDishTerms = getCatalogTerms(editingDishCategory?.name);
 
   const visibleCategories = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -190,15 +215,17 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
       return;
     }
     try {
+      const dishPayload = buildDishPayload(null, dishForm, categoryForm.name);
       const createdCategory = await menuApi.createCategory({
         restaurant_id: restaurantId,
         name: categoryForm.name.trim(),
         description: categoryForm.description.trim() || null,
         image_url: categoryForm.image_url.trim() || null,
       });
-      const createdDish = await menuApi.createDish(
-        buildDishPayload(createdCategory.id, dishForm, createdCategory.name),
-      );
+      const createdDish = await menuApi.createDish({
+        ...dishPayload,
+        category_id: createdCategory.id,
+      });
       setCategories((current) => [createdCategory, ...current]);
       setDishesByCategory((current) => ({
         ...current,
@@ -276,6 +303,87 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
     }));
   }
 
+  function openEditCategoryModal(category) {
+    setEditingCategoryId(category.id);
+    setEditCategoryForm({
+      name: category.name || "",
+      description: category.description || "",
+      image_url: category.image_url || "",
+    });
+    setShowEditCategoryModal(true);
+  }
+
+  function updateEditCategoryForm(event) {
+    const { name, value } = event.target;
+    setEditCategoryForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function saveCategory(event) {
+    event.preventDefault();
+    if (!editingCategoryId || !editCategoryForm.name.trim()) return;
+    try {
+      const updated = await menuApi.updateCategory(editingCategoryId, {
+        name: editCategoryForm.name.trim(),
+        description: editCategoryForm.description.trim() || null,
+        image_url: editCategoryForm.image_url.trim() || null,
+      });
+      setCategories((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setShowEditCategoryModal(false);
+      setEditingCategoryId("");
+      setEditCategoryForm(emptyCategory);
+      onMessage?.(`Catégorie « ${updated.name} » mise à jour.`);
+    } catch (err) {
+      setError(err.message || "Modification de la catégorie impossible.");
+    }
+  }
+
+  function openEditDishModal(dish) {
+    const category = categories.find((item) => item.id === dish.category_id);
+    const terms = getCatalogTerms(category?.name);
+    setEditingDishId(dish.id);
+    setEditDishForm({
+      name: dish.name || "",
+      description: dish.description || "",
+      price: String(Math.round(Number(dish.price || 0))),
+      cost_per_dish: String(Math.round(Number(dish.cost_per_dish || 0))),
+      image_url: dish.image_url || "",
+      is_available: dish.is_available !== false,
+      requires_kitchen:
+        dish.requires_kitchen === null || dish.requires_kitchen === undefined
+          ? terms.defaultRequiresKitchen
+          : Boolean(dish.requires_kitchen),
+    });
+    setShowEditDishModal(true);
+  }
+
+  function updateEditDishForm(event) {
+    const { name, value, type, checked } = event.target;
+    setEditDishForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
+  }
+
+  async function saveDish(event) {
+    event.preventDefault();
+    if (!editingDishId) return;
+    const categoryName = editingDishCategory?.name || "";
+    const terms = getCatalogTerms(categoryName);
+    try {
+      const payload = buildDishPayload(editingDishCategory?.id || null, editDishForm, categoryName);
+      const updated = await menuApi.updateDish(editingDishId, payload);
+      setDishesByCategory((current) => ({
+        ...current,
+        [updated.category_id]: (current[updated.category_id] ?? []).map((item) =>
+          item.id === updated.id ? updated : item,
+        ),
+      }));
+      setShowEditDishModal(false);
+      setEditingDishId("");
+      setEditDishForm(emptyDish);
+      onMessage?.(`${terms.Item} « ${updated.name} » mis à jour.`);
+    } catch (err) {
+      setError(err.message || `Modification du ${terms.item} impossible.`);
+    }
+  }
+
   function toggleExpanded(categoryId) {
     setExpandedCategoryId((current) => (current === categoryId ? "" : categoryId));
   }
@@ -288,7 +396,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
     <section className="space-y-6">
       <PageHeader
         title="Catalogue"
-        subtitle="Créez une catégorie et son premier article en une seule étape. Les boissons sont gérées comme des produits."
+        subtitle="Créez une catégorie et son premier article. Nommez la catégorie « Boissons » pour l’icône verre et l’envoi bar/cuisine."
         primaryAction={
           !readOnly && (
             <button type="button" onClick={() => setShowCreateModal(true)} className="lte-btn lte-btn-primary">
@@ -386,6 +494,17 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                           {!readOnly && (
                             <button
                               type="button"
+                              onClick={() => openEditCategoryModal(category)}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
+                              title="Modifier la catégorie"
+                            >
+                              <DashboardIcon name="Pencil" size={15} />
+                              Modifier
+                            </button>
+                          )}
+                          {!readOnly && (
+                            <button
+                              type="button"
                               onClick={() => openAddDishModal(category.id)}
                               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:border-[var(--dashboard-primary)] hover:text-[var(--dashboard-primary)]"
                             >
@@ -420,7 +539,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                                   {dish.image_url ? (
                                     <img src={dish.image_url} alt="" className="h-10 w-10 rounded-lg object-cover" />
                                   ) : (
-                                    <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${terms.icon === "Package" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-[var(--dashboard-primary)]"}`}>
+                                    <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${terms.drink ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-[var(--dashboard-primary)]"}`}>
                                       <DashboardIcon name={terms.icon} size={16} />
                                     </span>
                                   )}
@@ -431,10 +550,25 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                                     </p>
                                   </div>
                                   <p className="text-sm font-black text-slate-800">{money(dish.price)}</p>
+                                  <StatusPill tone={dish.requires_kitchen === false || (terms.drink && dish.requires_kitchen == null) ? "blue" : "slate"}>
+                                    {dish.requires_kitchen === false || (terms.drink && dish.requires_kitchen == null)
+                                      ? "Bar (pas cuisine)"
+                                      : "Cuisine"}
+                                  </StatusPill>
                                   <StatusPill tone={dish.is_available ? "green" : "orange"}>
                                     {dish.is_available ? "Dispo" : "Indispo"}
                                   </StatusPill>
                                   <div className="flex gap-1">
+                                    {!readOnly && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditDishModal(dish)}
+                                        className="lte-tool-btn"
+                                        title={`Modifier ${terms.item}`}
+                                      >
+                                        <DashboardIcon name="Pencil" size={15} />
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => toggleDish(dish)}
@@ -513,8 +647,11 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                   value={categoryForm.name}
                   onChange={updateCategoryForm}
                   className="form-control"
-                  placeholder="Ex : Entrées, Boissons..."
+                  placeholder="Ex : Entrées, Boissons, Cocktails..."
                 />
+                <span className="lte-help mt-1 block text-xs font-medium text-slate-500">
+                  Pour les boissons, mettez « Boissons » (ou Bar, Cocktails, Jus…) dans le nom : l’icône verre s’affiche et l’envoi cuisine se règle automatiquement.
+                </span>
               </label>
               <label className="lte-form-group md:col-span-2">
                 <span className="lte-label">Description</span>
@@ -544,8 +681,9 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
           </div>
 
           <div className="border-t border-slate-200 pt-5">
-            <p className="mb-3 text-xs font-black uppercase tracking-wide text-[var(--dashboard-primary)]">
-              2. Premier {createTerms.item}
+            <p className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[var(--dashboard-primary)]">
+              <DashboardIcon name={createTerms.icon} size={16} />
+              2. {createTerms.Item}
             </p>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="lte-form-group md:col-span-2">
@@ -556,7 +694,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                   value={dishForm.name}
                   onChange={updateDishForm}
                   className="form-control"
-                  placeholder={createTerms.item === "produit" ? "Ex : Coca-Cola, Jus de bissap..." : "Ex : Poulet braisé, Ndolé..."}
+                  placeholder={createTerms.drink ? "Ex : Coca-Cola, Jus de bissap..." : "Ex : Poulet braisé, Ndolé..."}
                 />
               </label>
               <label className="lte-form-group">
@@ -565,6 +703,7 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                   required
                   type="number"
                   min="0"
+                  step="1"
                   name="price"
                   value={dishForm.price}
                   onChange={updateDishForm}
@@ -626,8 +765,8 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
                   <span className="text-sm font-semibold text-slate-700">
                     Préparer en cuisine
                     <span className="mt-1 block text-xs font-medium text-slate-500">
-                      {createTerms.item === "produit"
-                        ? "Décochez pour les boissons bar (sodas, vin, whisky). Cochez pour les boissons à préparer (jus naturel)."
+                      {createTerms.drink
+                        ? "Décochez = servi au bar (sodas, vin, whisky — pas de ticket cuisine). Cochez = à préparer en cuisine (jus frais, cocktails)."
                         : "Cochez pour les plats chauds et préparations cuisine."}
                     </span>
                   </span>
@@ -711,13 +850,163 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
               <span className="text-sm font-semibold text-slate-700">
                 Préparer en cuisine
                 <span className="mt-1 block text-xs font-medium text-slate-500">
-                  {dishModalTerms.item === "produit"
-                    ? "Décochez pour les boissons bar. Cochez pour les boissons à préparer en cuisine."
+                  {dishModalTerms.drink
+                    ? "Décochez = bar (pas cuisine). Cochez = préparer en cuisine."
                     : "Cochez pour les plats chauds et préparations cuisine."}
                 </span>
               </span>
             </label>
           )}
+        </form>
+      </AdminFormModal>
+
+      <AdminFormModal
+        open={showEditCategoryModal}
+        onClose={() => {
+          setShowEditCategoryModal(false);
+          setEditingCategoryId("");
+          setEditCategoryForm(emptyCategory);
+        }}
+        title={`Modifier la catégorie — ${editingCategory?.name ?? ""}`}
+        description="Modifiez le nom, la description ou l’image de la catégorie."
+        size="lg"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditCategoryModal(false);
+                setEditingCategoryId("");
+                setEditCategoryForm(emptyCategory);
+              }}
+              className="lte-btn lte-btn-default"
+            >
+              Annuler
+            </button>
+            <button type="submit" form="catalog-edit-category-form" className="lte-btn lte-btn-primary">
+              Enregistrer
+            </button>
+          </>
+        }
+      >
+        <form id="catalog-edit-category-form" onSubmit={saveCategory} className="grid gap-4">
+          <label className="lte-form-group">
+            <span className="lte-label">Nom de la catégorie <span className="req">*</span></span>
+            <input
+              required
+              name="name"
+              value={editCategoryForm.name}
+              onChange={updateEditCategoryForm}
+              className="form-control"
+              placeholder="Ex : Entrées, Boissons..."
+            />
+          </label>
+          <label className="lte-form-group">
+            <span className="lte-label">Description</span>
+            <textarea
+              name="description"
+              rows={2}
+              value={editCategoryForm.description}
+              onChange={updateEditCategoryForm}
+              className="form-control"
+            />
+          </label>
+          <label className="lte-form-group">
+            <span className="lte-label">Image catégorie</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => uploadImage(event, setEditCategoryForm)}
+              className="form-control"
+              disabled={uploadingImage}
+            />
+            {editCategoryForm.image_url ? (
+              <img src={editCategoryForm.image_url} alt="" className="mt-2 h-20 w-20 rounded-lg object-cover ring-1 ring-slate-200" />
+            ) : null}
+          </label>
+        </form>
+      </AdminFormModal>
+
+      <AdminFormModal
+        open={showEditDishModal}
+        onClose={() => {
+          setShowEditDishModal(false);
+          setEditingDishId("");
+          setEditDishForm(emptyDish);
+        }}
+        title={`Modifier ${editDishTerms.item} — ${editDishForm.name || ""}`}
+        description={`Modifiez le prix, la disponibilité ou l’envoi cuisine de cette ${editDishTerms.item}.`}
+        size="lg"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditDishModal(false);
+                setEditingDishId("");
+                setEditDishForm(emptyDish);
+              }}
+              className="lte-btn lte-btn-default"
+            >
+              Annuler
+            </button>
+            <button type="submit" form="catalog-edit-dish-form" className="lte-btn lte-btn-primary">
+              Enregistrer
+            </button>
+          </>
+        }
+      >
+        <form id="catalog-edit-dish-form" onSubmit={saveDish} className="grid gap-4 md:grid-cols-2">
+          <label className="lte-form-group md:col-span-2">
+            <span className="lte-label">Nom du {editDishTerms.item} <span className="req">*</span></span>
+            <input required name="name" value={editDishForm.name} onChange={updateEditDishForm} className="form-control" />
+          </label>
+          <label className="lte-form-group">
+            <span className="lte-label">Prix (FCFA) <span className="req">*</span></span>
+            <input required type="number" min="0" step="1" name="price" value={editDishForm.price} onChange={updateEditDishForm} className="form-control" />
+          </label>
+          <label className="lte-form-group">
+            <span className="lte-label">{editDishTerms.costLabel}</span>
+            <input type="number" min="0" step="1" name="cost_per_dish" value={editDishForm.cost_per_dish} onChange={updateEditDishForm} className="form-control" />
+          </label>
+          <label className="lte-form-group md:col-span-2">
+            <span className="lte-label">Description</span>
+            <textarea name="description" rows={2} value={editDishForm.description} onChange={updateEditDishForm} className="form-control" />
+          </label>
+          <label className="lte-form-group md:col-span-2">
+            <span className="lte-label">{editDishTerms.imageLabel}</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => uploadImage(event, setEditDishForm)}
+              className="form-control"
+              disabled={uploadingImage}
+            />
+            {editDishForm.image_url ? (
+              <img src={editDishForm.image_url} alt="" className="mt-2 h-20 w-20 rounded-lg object-cover ring-1 ring-slate-200" />
+            ) : null}
+          </label>
+          <label className="flex items-center gap-2 self-end text-sm font-semibold text-slate-700 md:col-span-2">
+            <input type="checkbox" name="is_available" checked={editDishForm.is_available} onChange={updateEditDishForm} />
+            Disponible à la vente
+          </label>
+          <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:col-span-2">
+            <input
+              type="checkbox"
+              name="requires_kitchen"
+              checked={editDishForm.requires_kitchen !== false}
+              onChange={updateEditDishForm}
+              className="mt-1"
+            />
+            <span className="text-sm font-semibold text-slate-700">
+              Préparer en cuisine
+              <span className="mt-1 block text-xs font-medium text-slate-500">
+                {editDishTerms.drink
+                  ? "Décochez = bar (pas cuisine). Cochez = préparer en cuisine."
+                  : "Cochez pour les plats chauds et préparations cuisine."}
+              </span>
+            </span>
+          </label>
         </form>
       </AdminFormModal>
     </section>

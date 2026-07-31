@@ -191,12 +191,16 @@ def provision_restaurant(
         subdomain = f"{original_subdomain}{counter}"
         counter += 1
 
-    user_filters = [User.username == username]
-    if email:
-        user_filters.append(User.email == email)
-    existing_user = db.query(User).filter(or_(*user_filters)).one_or_none()
-    if existing_user:
-        raise HTTPException(status_code=409, detail="Email ou nom utilisateur deja utilise")
+    if db.query(User).filter(User.username == username).one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Identifiant « {username} » déjà utilisé. Choisissez un autre identifiant propriétaire.",
+        )
+    if email and db.query(User).filter(User.email == email).one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Email « {email} » déjà utilisé. Laissez l'email vide ou utilisez une autre adresse.",
+        )
 
     restaurant = Restaurant(
         name=payload.name,

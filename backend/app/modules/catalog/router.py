@@ -122,7 +122,12 @@ def create_item(
 ):
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
     validate_category(db, payload.category_id, current_user.restaurant_id)
-    item = MenuItem(restaurant_id=current_user.restaurant_id, **payload.dict())
+    data = payload.dict()
+    if "price" in data and data["price"] is not None:
+        data["price"] = round(float(data["price"]))
+    if "cost_per_dish" in data and data["cost_per_dish"] is not None:
+        data["cost_per_dish"] = round(float(data["cost_per_dish"]))
+    item = MenuItem(restaurant_id=current_user.restaurant_id, **data)
     category = category_for_item(db, item.category_id, current_user.restaurant_id)
     item.sale_channel = classify_sale_channel(
         item.name,
@@ -163,6 +168,8 @@ def update_item(
     payload_data = payload.dict(exclude_unset=True)
     validate_category(db, payload_data.get("category_id"), current_user.restaurant_id)
     for field, value in payload_data.items():
+        if field in {"price", "cost_per_dish"} and value is not None:
+            value = round(float(value))
         setattr(item, field, value)
     category = category_for_item(db, item.category_id, current_user.restaurant_id)
     item.sale_channel = classify_sale_channel(

@@ -1,10 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
+from decimal import Decimal
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.modules.shared.models import new_id, utcnow
+
+Money = Numeric(14, 2)
 
 
 class MenuCategory(Base):
@@ -36,8 +40,8 @@ class MenuItem(Base):
     category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("menu_categories.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    price: Mapped[float] = mapped_column(Float, nullable=False)
-    cost_per_dish: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    price: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    cost_per_dish: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"), nullable=False)
     sale_channel: Mapped[str] = mapped_column(String(20), default="REPAS", nullable=False, index=True)
     requires_kitchen: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)

@@ -1,11 +1,18 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 from app.modules.shared.schemas import OrmModel
 
 NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 \.,'’\(\)\&\/\-]{1,159}$"
+
+
+def _round_money(value: float | None) -> float | None:
+    """Évite les dérives float (ex. 15000 stocké/affiché 14999)."""
+    if value is None:
+        return None
+    return float(round(float(value)))
 
 
 class CategoryBase(BaseModel):
@@ -16,6 +23,13 @@ class CategoryBase(BaseModel):
 
 class CategoryCreate(CategoryBase):
     restaurant_id: Optional[str] = None
+
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=120, pattern=NAME_PATTERN)
+    description: Optional[str] = Field(default=None, max_length=255)
+    image_url: Optional[str] = Field(default=None, max_length=500)
+    is_active: Optional[bool] = None
 
 
 class CategoryResponse(CategoryBase, OrmModel):
@@ -34,6 +48,12 @@ class DishBase(BaseModel):
     is_available: bool = True
     requires_kitchen: Optional[bool] = None
 
+    @validator("price", "cost_per_dish", pre=True)
+    def money_as_whole_fcfa(cls, value):
+        if value is None or value == "":
+            return value
+        return _round_money(value)
+
 
 class DishCreate(DishBase):
     category_id: Optional[str] = None
@@ -49,6 +69,12 @@ class DishUpdate(BaseModel):
     is_available: Optional[bool] = None
     requires_kitchen: Optional[bool] = None
 
+    @validator("price", "cost_per_dish", pre=True)
+    def money_as_whole_fcfa(cls, value):
+        if value is None or value == "":
+            return value
+        return _round_money(value)
+
 
 class DishResponse(DishBase, OrmModel):
     id: str
@@ -57,6 +83,10 @@ class DishResponse(DishBase, OrmModel):
     cost_per_dish: float = 0
     requires_kitchen: Optional[bool] = None
     created_at: datetime
+
+    @validator("price", "cost_per_dish", pre=True, always=True)
+    def response_money_rounded(cls, value):
+        return _round_money(value) if value is not None else 0
 
 
 class PublicRestaurantMenu(BaseModel):

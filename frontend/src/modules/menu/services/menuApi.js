@@ -37,6 +37,12 @@ export const menuApi = {
     return browserImageUrl(data?.image_url);
   },
 
+  updateCategory: (categoryId, categoryData) =>
+    request(`/api/v1/menu/categories/${categoryId}`, {
+      method: "PUT",
+      body: JSON.stringify(categoryData),
+    }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
+
   deleteCategory: (categoryId) =>
     request(`/api/v1/menu/categories/${categoryId}`, {
       method: "DELETE",
@@ -51,12 +57,18 @@ export const menuApi = {
     request("/api/v1/menu/dishes", {
       method: "POST",
       body: JSON.stringify(dishData),
-    }),
+    }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
+
+  updateDish: (dishId, dishData) =>
+    request(`/api/v1/menu/dishes/${dishId}`, {
+      method: "PUT",
+      body: JSON.stringify(dishData),
+    }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
 
   toggleDishAvailability: (dishId) =>
     request(`/api/v1/menu/dishes/${dishId}/toggle-availability`, {
       method: "PATCH",
-    }),
+    }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
 
   softDeleteDish: (dishId) =>
     request(`/api/v1/menu/dishes/${dishId}`, {

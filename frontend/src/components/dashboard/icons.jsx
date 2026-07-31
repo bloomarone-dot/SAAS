@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  Archive,
   ArrowLeft,
   BarChart3,
   BadgePercent,
@@ -23,6 +24,7 @@ import {
   EyeOff,
   Facebook,
   FileText,
+  GlassWater,
   History,
   KeyRound,
   LayoutDashboard,
@@ -63,6 +65,7 @@ import {
 export const ICONS = {
   Activity,
   AlertTriangle,
+  Archive,
   ArrowLeft,
   BarChart3,
   BadgePercent,
@@ -85,6 +88,7 @@ export const ICONS = {
   EyeOff,
   Facebook,
   FileText,
+  GlassWater,
   History,
   KeyRound,
   LayoutDashboard,

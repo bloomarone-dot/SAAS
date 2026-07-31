@@ -17,7 +17,7 @@ const emptyDish = {
 };
 
 function money(value) {
-  return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+  return `${Math.round(Number(value || 0)).toLocaleString("fr-FR")} FCFA`;
 }
 
 export default function DishesPage({ restaurantId, role, activeOrderId, showCreateOnMount = false, initialAvailabilityFilter = "ALL" }) {
@@ -133,8 +133,8 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
     try {
       const created = await menuApi.createDish({
         ...form,
-        price: Number(form.price),
-        cost_per_dish: Number(form.cost_per_dish || 0),
+        price: Math.round(Number(form.price)),
+        cost_per_dish: Math.round(Number(form.cost_per_dish || 0)) || 0,
         description: form.description || null,
         image_url: form.image_url || null,
         requires_kitchen:
