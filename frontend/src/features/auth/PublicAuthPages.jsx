@@ -295,7 +295,13 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
 
   const slug = tenant.restaurant?.slug || tenant.subdomain;
   const cleanPath = currentPath.replace(/\/+$/, "") || "/";
-  if (cleanPath === "/login" || cleanPath === "/admin") {
+  // Sur sous-domaine, le login est /login (pas /restaurant/:slug/login — sinon la vitrine ne change pas).
+  const isHostLogin =
+    cleanPath === "/login" ||
+    cleanPath === "/admin" ||
+    cleanPath === `/restaurant/${slug}/login` ||
+    cleanPath === `/restaurant/${slug}/admin`;
+  if (isHostLogin) {
     return <RestaurantLoginPage apiBaseUrl={apiBaseUrl} slug={slug} onAuthenticated={onAuthenticated} />;
   }
   const initialSection =
@@ -311,7 +317,7 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
       apiBaseUrl={apiBaseUrl}
       slug={slug}
       initialData={tenant}
-      loginPath={`/restaurant/${slug}/login`}
+      loginPath="/login"
       initialSection={initialSection}
     />
   );
@@ -543,7 +549,7 @@ export function RestaurantLandingPage({ apiBaseUrl, slug, initialData = null, lo
             <button
               type="button"
               onClick={() => navigate(resolvedLoginPath)}
-              className="hidden h-10 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50 sm:inline-flex sm:items-center"
+              className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 transition hover:bg-slate-50 sm:px-4"
             >
               Se connecter
             </button>

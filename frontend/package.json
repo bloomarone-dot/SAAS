@@ -4,7 +4,7 @@
   "type": "module",
   "version": "1.0.0",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "vite --host 0.0.0.0 --port 5178",
     "build": "vite build",
     "test:offline": "node --test src/offline/syncHelpers.test.js"
   },

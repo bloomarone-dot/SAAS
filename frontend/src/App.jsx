@@ -978,6 +978,7 @@ export default function App() {
           selectedRestaurantId={selectedRestaurantId}
           onSelectRestaurant={setSelectedRestaurantId}
           onMessage={setMessage}
+          onRefreshRestaurants={fetchRestaurants}
         />
       );
     }

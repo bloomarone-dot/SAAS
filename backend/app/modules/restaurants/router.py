@@ -389,6 +389,135 @@ def get_restaurant_detail(
     )
 
 
+def _attach_branches_count(db: Session, restaurant: Restaurant) -> Restaurant:
+    restaurant.branches_count = max(
+        1,
+        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
+    )
+    return restaurant
+
+
+def _apply_restaurant_settings(db: Session, restaurant: Restaurant, incoming: dict) -> Restaurant:
+    """Applique les champs settings (sous-domaine / domaine unique)."""
+    if "subdomain" in incoming and incoming["subdomain"]:
+        incoming["subdomain"] = normalize_subdomain(incoming["subdomain"])
+        if incoming["subdomain"] in RESERVED_SUBDOMAINS:
+            raise HTTPException(status_code=400, detail="Sous-domaine reserve")
+        existing = (
+            db.query(Restaurant)
+            .filter(
+                func.lower(Restaurant.subdomain) == incoming["subdomain"],
+                Restaurant.id != restaurant.id,
+            )
+            .one_or_none()
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="Sous-domaine deja utilise")
+    if "custom_domain" in incoming:
+        if incoming["custom_domain"]:
+            incoming["custom_domain"] = clean_host(incoming["custom_domain"])
+            existing = (
+                db.query(Restaurant)
+                .filter(
+                    func.lower(Restaurant.custom_domain) == incoming["custom_domain"],
+                    Restaurant.id != restaurant.id,
+                )
+                .one_or_none()
+            )
+            if existing:
+                raise HTTPException(status_code=409, detail="Domaine personnalise deja utilise")
+        else:
+            incoming["custom_domain"] = None
+
+    for field, value in incoming.items():
+        if field == "currency" and value:
+            value = value.upper()
+        setattr(restaurant, field, value)
+    return restaurant
+
+
+@router.patch("/{restaurant_id}", response_model=RestaurantPublic)
+def update_restaurant(
+    restaurant_id: str,
+    payload: RestaurantSettingsIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Modifie les infos d'un restaurant (SUPERADMIN)."""
+    if current_user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Seul un super administrateur peut modifier un restaurant")
+    restaurant = db.get(Restaurant, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    incoming = payload.dict(exclude_unset=True)
+    if not incoming:
+        raise HTTPException(status_code=400, detail="Aucun champ a mettre a jour")
+
+    _apply_restaurant_settings(db, restaurant, incoming)
+    log_action(
+        db,
+        current_user,
+        "restaurant.update",
+        "restaurant",
+        restaurant.id,
+        f"Modification restaurant {restaurant.name}",
+        {"fields": list(incoming.keys())},
+    )
+    db.commit()
+    db.refresh(restaurant)
+    return _attach_branches_count(db, restaurant)
+
+
+@router.delete("/{restaurant_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_restaurant(
+    restaurant_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Désactive un restaurant et libère son adresse publique (SUPERADMIN)."""
+    if current_user.role != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Seul un super administrateur peut supprimer un restaurant")
+    restaurant = db.get(Restaurant, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant introuvable")
+
+    stamp = restaurant.id.replace("-", "")[:10]
+    restaurant.is_active = False
+    restaurant.is_open = False
+    restaurant.custom_domain = None
+    # Libère slug / sous-domaine pour pouvoir les réutiliser.
+    restaurant.slug = f"deleted-{stamp}-{restaurant.slug}"[:191]
+    if restaurant.subdomain:
+        restaurant.subdomain = f"deleted-{stamp}-{restaurant.subdomain}"[:120]
+    else:
+        restaurant.subdomain = f"deleted-{stamp}"[:120]
+
+    subscription = (
+        db.query(RestaurantSubscription)
+        .filter(RestaurantSubscription.restaurant_id == restaurant.id)
+        .one_or_none()
+    )
+    if subscription:
+        subscription.status = "Supprimé"
+
+    db.query(User).filter(User.restaurant_id == restaurant.id).update(
+        {"is_active": False},
+        synchronize_session=False,
+    )
+    log_action(
+        db,
+        current_user,
+        "restaurant.delete",
+        "restaurant",
+        restaurant.id,
+        f"Suppression (soft) restaurant {restaurant.name}",
+        {},
+    )
+    db.commit()
+    return None
+
+
 @router.patch("/{restaurant_id}/status", response_model=RestaurantPublic)
 def update_restaurant_status(
     restaurant_id: str,
@@ -470,45 +599,11 @@ def update_my_restaurant_settings(
         raise HTTPException(status_code=404, detail="Restaurant introuvable")
 
     incoming = payload.dict(exclude_unset=True)
-    if "subdomain" in incoming and incoming["subdomain"]:
-        incoming["subdomain"] = normalize_subdomain(incoming["subdomain"])
-        if incoming["subdomain"] in RESERVED_SUBDOMAINS:
-            raise HTTPException(status_code=400, detail="Sous-domaine reserve")
-        existing = (
-            db.query(Restaurant)
-            .filter(
-                func.lower(Restaurant.subdomain) == incoming["subdomain"],
-                Restaurant.id != restaurant.id,
-            )
-            .one_or_none()
-        )
-        if existing:
-            raise HTTPException(status_code=409, detail="Sous-domaine deja utilise")
-    if "custom_domain" in incoming and incoming["custom_domain"]:
-        incoming["custom_domain"] = clean_host(incoming["custom_domain"])
-        existing = (
-            db.query(Restaurant)
-            .filter(
-                func.lower(Restaurant.custom_domain) == incoming["custom_domain"],
-                Restaurant.id != restaurant.id,
-            )
-            .one_or_none()
-        )
-        if existing:
-            raise HTTPException(status_code=409, detail="Domaine personnalise deja utilise")
-
-    for field, value in incoming.items():
-        if field == "currency" and value:
-            value = value.upper()
-        setattr(restaurant, field, value)
+    _apply_restaurant_settings(db, restaurant, incoming)
 
     db.commit()
     db.refresh(restaurant)
-    restaurant.branches_count = max(
-        1,
-        db.query(Branch).filter(Branch.restaurant_id == restaurant.id).count(),
-    )
-    return restaurant
+    return _attach_branches_count(db, restaurant)
 
 
 @router.post("/me/logo", response_model=RestaurantPublic)

@@ -180,12 +180,30 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
   );
 }
 
-export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRestaurantId, onSelectRestaurant, onMessage }) {
+export function SuperadminRestaurantDetail({
+  apiBaseUrl,
+  restaurants,
+  selectedRestaurantId,
+  onSelectRestaurant,
+  onMessage,
+  onRefreshRestaurants,
+}) {
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [ownerPassword, setOwnerPassword] = useState("");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    subdomain: "",
+    custom_domain: "",
+    phone: "",
+    whatsapp_phone: "",
+    email: "",
+    address: "",
+    city: "",
+  });
   const restaurantId = selectedRestaurantId ?? "";
 
   useEffect(() => {
@@ -194,14 +212,80 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
   }, [apiBaseUrl, restaurantId]);
 
   useEffect(() => {
-    if (!restaurantId) setDetail(null);
+    if (!restaurantId) {
+      setDetail(null);
+      setEditing(false);
+    }
   }, [restaurantId]);
 
   async function loadDetail(id) {
     setIsLoading(true);
     try {
-      setDetail(await platformApi(`/api/v1/restaurants/${id}`));
+      const data = await platformApi(`/api/v1/restaurants/${id}`);
+      setDetail(data);
       setOwnerPassword("");
+      setEditing(false);
+      const r = data.restaurant;
+      setEditForm({
+        name: r.name || "",
+        subdomain: r.subdomain || "",
+        custom_domain: r.custom_domain || "",
+        phone: r.phone || "",
+        whatsapp_phone: r.whatsapp_phone || "",
+        email: r.email || "",
+        address: r.address || "",
+        city: r.city || "",
+      });
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function saveRestaurant(event) {
+    event.preventDefault();
+    if (!restaurantId) return;
+    setIsLoading(true);
+    try {
+      const payload = {
+        name: editForm.name.trim(),
+        subdomain: editForm.subdomain.trim() || null,
+        custom_domain: editForm.custom_domain.trim() || null,
+        phone: editForm.phone.trim() || null,
+        whatsapp_phone: editForm.whatsapp_phone.trim() || null,
+        email: editForm.email.trim() || null,
+        address: editForm.address.trim() || null,
+        city: editForm.city.trim() || null,
+      };
+      await platformApi(`/api/v1/restaurants/${restaurantId}`, {
+        method: "PATCH",
+        body: payload,
+      });
+      onMessage("Restaurant mis à jour.");
+      await loadDetail(restaurantId);
+      await onRefreshRestaurants?.();
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function deleteRestaurant() {
+    if (!restaurantId || !detail?.restaurant) return;
+    const name = detail.restaurant.name;
+    const ok = window.confirm(
+      `Supprimer « ${name} » ?\n\nLe restaurant sera désactivé, ses utilisateurs désactivés, et son adresse publique libérée.`,
+    );
+    if (!ok) return;
+    setIsLoading(true);
+    try {
+      await platformApi(`/api/v1/restaurants/${restaurantId}`, { method: "DELETE" });
+      onMessage(`Restaurant « ${name} » supprimé.`);
+      setDetail(null);
+      onSelectRestaurant?.(null);
+      await onRefreshRestaurants?.();
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -305,11 +389,29 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
     <AdminSurface
       eyebrow="Tenant"
       title="Détail restaurant"
-      description="Consultez les données réelles du restaurant, du propriétaire et de son abonnement."
+      description="Consultez, modifiez ou supprimez un restaurant et son adresse publique."
       actions={
-        <button type="button" onClick={() => onSelectRestaurant(null)} className="h-11 bg-[#07133d] px-5 text-sm font-black text-white transition-all hover:bg-[#172554]">
-          Retour à la liste
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setEditing((value) => !value)}
+            disabled={!detail || isLoading}
+            className="h-11 border border-slate-200 bg-white px-5 text-sm font-black text-[#07133d] transition-all hover:bg-slate-50 disabled:opacity-50"
+          >
+            {editing ? "Annuler" : "Modifier"}
+          </button>
+          <button
+            type="button"
+            onClick={deleteRestaurant}
+            disabled={!detail || isLoading}
+            className="h-11 border border-red-200 bg-white px-5 text-sm font-black text-red-600 transition-all hover:bg-red-50 disabled:opacity-50"
+          >
+            Supprimer
+          </button>
+          <button type="button" onClick={() => onSelectRestaurant(null)} className="h-11 bg-[#07133d] px-5 text-sm font-black text-white transition-all hover:bg-[#172554]">
+            Retour à la liste
+          </button>
+        </div>
       }
     >
       <Toolbar>
@@ -327,15 +429,37 @@ export function SuperadminRestaurantDetail({ apiBaseUrl, restaurants, selectedRe
       ) : (
         <div className="grid gap-5 xl:grid-cols-3">
           <SettingsPanel title="Restaurant">
-            <DetailLine label="Nom" value={detail.restaurant.name} />
-            <DetailLine label="Slug" value={detail.restaurant.slug} />
-            <DetailLine label="Sous-domaine" value={detail.restaurant.subdomain ? `${detail.restaurant.subdomain}.bloomarone.com` : "-"} />
-            <DetailLine label="Domaine personnalisé" value={detail.restaurant.custom_domain ?? "-"} />
-            <DetailLine label="Téléphone 1" value={detail.restaurant.phone ?? "-"} />
-            <DetailLine label="Téléphone 2" value={detail.restaurant.whatsapp_phone ?? "-"} />
-            <DetailLine label="Email" value={detail.restaurant.email ?? "Non renseigné"} />
-            <DetailLine label="Branches" value={detail.restaurant.branches_count} />
-            <DetailLine label="Création" value={formatDate(detail.restaurant.created_at)} />
+            {editing ? (
+              <form onSubmit={saveRestaurant} className="space-y-3">
+                <TextField label="Nom" value={editForm.name} onChange={(value) => setEditForm((c) => ({ ...c, name: value }))} required />
+                <TextField label="Sous-domaine" value={editForm.subdomain} onChange={(value) => setEditForm((c) => ({ ...c, subdomain: value }))} />
+                <TextField label="Domaine personnalisé" value={editForm.custom_domain} onChange={(value) => setEditForm((c) => ({ ...c, custom_domain: value }))} />
+                <TextField label="Téléphone" value={editForm.phone} onChange={(value) => setEditForm((c) => ({ ...c, phone: value }))} />
+                <TextField label="WhatsApp" value={editForm.whatsapp_phone} onChange={(value) => setEditForm((c) => ({ ...c, whatsapp_phone: value }))} />
+                <TextField label="Email" value={editForm.email} onChange={(value) => setEditForm((c) => ({ ...c, email: value }))} />
+                <TextField label="Adresse" value={editForm.address} onChange={(value) => setEditForm((c) => ({ ...c, address: value }))} />
+                <TextField label="Ville" value={editForm.city} onChange={(value) => setEditForm((c) => ({ ...c, city: value }))} />
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="inline-flex h-10 w-full items-center justify-center bg-[#07133d] px-4 text-xs font-black text-white hover:bg-[#172554] disabled:opacity-60"
+                >
+                  Enregistrer
+                </button>
+              </form>
+            ) : (
+              <>
+                <DetailLine label="Nom" value={detail.restaurant.name} />
+                <DetailLine label="Slug" value={detail.restaurant.slug} />
+                <DetailLine label="Sous-domaine" value={detail.restaurant.subdomain ? `${detail.restaurant.subdomain}.bloomarone.com` : "-"} />
+                <DetailLine label="Domaine personnalisé" value={detail.restaurant.custom_domain ?? "-"} />
+                <DetailLine label="Téléphone 1" value={detail.restaurant.phone ?? "-"} />
+                <DetailLine label="Téléphone 2" value={detail.restaurant.whatsapp_phone ?? "-"} />
+                <DetailLine label="Email" value={detail.restaurant.email ?? "Non renseigné"} />
+                <DetailLine label="Branches" value={detail.restaurant.branches_count} />
+                <DetailLine label="Création" value={formatDate(detail.restaurant.created_at)} />
+              </>
+            )}
           </SettingsPanel>
           <SettingsPanel title="Propriétaire">
             <DetailLine label="Nom" value={detail.owner ? `${detail.owner.first_name} ${detail.owner.last_name}` : "-"} />
