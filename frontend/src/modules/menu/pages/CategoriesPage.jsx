@@ -12,9 +12,11 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
   const [form, setForm] = useState(emptyForm);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(showCreateOnMount);
+  const [editingId, setEditingId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const createOnly = showCreateOnMount;
+  const canEdit = ["ADMIN", "MANAGER", "CUISINE", "STOCK"].includes(role);
 
   const visibleCategories = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -66,23 +68,42 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
     }
   }
 
+  function openEdit(category) {
+    setEditingId(category.id);
+    setForm({
+      name: category.name || "",
+      description: category.description || "",
+      image_url: category.image_url || "",
+    });
+    setShowForm(true);
+  }
+
   async function createCategory(event) {
     event.preventDefault();
     try {
-      const created = await menuApi.createCategory({
-        restaurant_id: restaurantId,
+      const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
         image_url: form.image_url.trim() || null,
-      });
-      setCategories((current) => [created, ...current]);
-      setDishesByCategory((current) => ({ ...current, [created.id]: [] }));
+      };
+      if (editingId) {
+        const updated = await menuApi.updateCategory(editingId, payload);
+        setCategories((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        setEditingId("");
+      } else {
+        const created = await menuApi.createCategory({
+          restaurant_id: restaurantId,
+          ...payload,
+        });
+        setCategories((current) => [created, ...current]);
+        setDishesByCategory((current) => ({ ...current, [created.id]: [] }));
+      }
       setForm(emptyForm);
       if (!createOnly) {
         setShowForm(false);
       }
     } catch (err) {
-      setError(err.message || "Création de la catégorie impossible.");
+      setError(err.message || (editingId ? "Modification impossible." : "Création de la catégorie impossible."));
     }
   }
 
@@ -101,7 +122,16 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
       subtitle={createOnly ? "Renseignez les informations de la catégorie à ajouter au menu." : "Organisez vos catégories de plats pour une meilleure gestion de votre menu."}
       action={!createOnly && (
         <div className="flex flex-wrap gap-3">
-          <PrimaryAction icon="Plus" onClick={() => setShowForm((value) => !value)}>{showForm ? "Fermer" : "Nouvelle catégorie"}</PrimaryAction>
+          <PrimaryAction
+            icon="Plus"
+            onClick={() => {
+              setEditingId("");
+              setForm(emptyForm);
+              setShowForm((value) => !value);
+            }}
+          >
+            {showForm ? "Fermer" : "Nouvelle catégorie"}
+          </PrimaryAction>
           <SecondaryAction icon="Download" onClick={() => exportCsv(visibleCategories, dishesByCategory)}>Exporter</SecondaryAction>
         </div>
       )}
@@ -119,10 +149,10 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
 
       {showForm && (
         <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
-          <AdminCard title="Informations générales">
+          <AdminCard title={editingId ? "Modifier la catégorie" : "Informations générales"}>
             <form onSubmit={createCategory}>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field name="name" label="Nom de la catégorie" required value={form.name} onChange={updateForm} placeholder="Ex : Entrées, Plats principaux..." />
+                <Field name="name" label="Nom de la catégorie" required value={form.name} onChange={updateForm} placeholder="Ex : Entrées, Boissons..." />
                 <label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 text-sm font-black text-slate-700">
                   <DashboardIcon name="Cloud" size={17} />
                   Cliquez pour télécharger
@@ -131,8 +161,21 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
               </div>
               <Field name="description" label="Description" as="textarea" rows={3} value={form.description} onChange={updateForm} className="mt-4" placeholder="Décrivez cette catégorie..." />
               <Field name="image_url" label="URL image" value={form.image_url} onChange={updateForm} className="mt-4" />
-              <div className="mt-5 flex justify-end">
-                <PrimaryAction icon="Plus" type="submit">Enregistrer</PrimaryAction>
+              <div className="mt-5 flex justify-end gap-2">
+                {editingId && (
+                  <SecondaryAction
+                    onClick={() => {
+                      setEditingId("");
+                      setForm(emptyForm);
+                      setShowForm(false);
+                    }}
+                  >
+                    Annuler
+                  </SecondaryAction>
+                )}
+                <PrimaryAction icon={editingId ? "Pencil" : "Plus"} type="submit">
+                  {editingId ? "Enregistrer" : "Créer"}
+                </PrimaryAction>
               </div>
             </form>
           </AdminCard>
@@ -155,7 +198,13 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
           <FilterBar className="mb-5">
             <SearchBox value={search} onChange={setSearch} placeholder="Rechercher une catégorie..." />
           </FilterBar>
-          <CategoriesTable categories={visibleCategories} dishesByCategory={dishesByCategory} onDelete={deleteCategory} role={role} />
+          <CategoriesTable
+            categories={visibleCategories}
+            dishesByCategory={dishesByCategory}
+            onEdit={openEdit}
+            onDelete={deleteCategory}
+            canEdit={canEdit}
+          />
         </DashboardSection>
         <div className="space-y-5">
           <DashboardSection title="Aperçu rapide">
@@ -183,7 +232,7 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
   );
 }
 
-function CategoriesTable({ categories, dishesByCategory, onDelete, role }) {
+function CategoriesTable({ categories, dishesByCategory, onEdit, onDelete, canEdit }) {
   if (!categories.length) return <EmptyState title="Aucune catégorie" text="Créez une catégorie pour organiser la carte." />;
   return (
     <>
@@ -213,8 +262,8 @@ function CategoriesTable({ categories, dishesByCategory, onDelete, role }) {
               <td><StatusPill tone={category.is_active ? "green" : "red"}>{category.is_active ? "Active" : "Inactive"}</StatusPill></td>
               <td className="text-slate-500">{new Date(category.created_at).toLocaleDateString("fr-FR")}</td>
               <td className="text-right">
-                <IconButton icon="Eye" title="Voir" />
-                {role !== "CUISINE" && <IconButton icon="Trash2" title="Supprimer" tone="red" onClick={() => onDelete(category)} />}
+                {canEdit && <IconButton icon="Pencil" title="Modifier" onClick={() => onEdit(category)} />}
+                {canEdit && <IconButton icon="Trash2" title="Archiver" tone="red" onClick={() => onDelete(category)} />}
               </td>
             </tr>
           ))}

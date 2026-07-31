@@ -101,7 +101,8 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
   const [extraDishForm, setExtraDishForm] = useState(emptyDish);
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  const readOnly = role === "CUISINE";
+  // Cuisine / stock / admin peuvent modifier le catalogue (les boutons étaient masqués pour CUISINE).
+  const readOnly = !["ADMIN", "MANAGER", "CUISINE", "STOCK"].includes(role);
   const dishModalCategory = categories.find((category) => category.id === dishModalCategoryId);
   const editingCategory = categories.find((category) => category.id === editingCategoryId);
   const editingDishCategory = categories.find((category) => {

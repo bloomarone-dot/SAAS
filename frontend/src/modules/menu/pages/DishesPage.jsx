@@ -29,10 +29,12 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [availabilityFilter, setAvailabilityFilter] = useState(initialAvailabilityFilter);
   const [showForm, setShowForm] = useState(showCreateOnMount);
+  const [editingId, setEditingId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const createOnly = showCreateOnMount && !activeOrderId;
+  const canEdit = ["ADMIN", "MANAGER", "CUISINE", "STOCK"].includes(role);
 
   const categoryNameById = useMemo(() => new Map(categories.map((category) => [category.id, category.name])), [categories]);
   const activeCategories = useMemo(
@@ -128,10 +130,29 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
     }
   }
 
+  function openEdit(dish) {
+    setEditingId(dish.id);
+    setForm({
+      category_id: dish.category_id || "",
+      name: dish.name || "",
+      description: dish.description || "",
+      price: String(Math.round(Number(dish.price || 0))),
+      cost_per_dish: String(Math.round(Number(dish.cost_per_dish || 0))),
+      image_url: dish.image_url || "",
+      is_available: dish.is_available !== false,
+      requires_kitchen:
+        dish.requires_kitchen === null || dish.requires_kitchen === undefined
+          ? null
+          : Boolean(dish.requires_kitchen),
+    });
+    setShowForm(true);
+    setNotice("");
+  }
+
   async function createDish(event) {
     event.preventDefault();
     try {
-      const created = await menuApi.createDish({
+      const payload = {
         ...form,
         price: Math.round(Number(form.price)),
         cost_per_dish: Math.round(Number(form.cost_per_dish || 0)) || 0,
@@ -141,14 +162,23 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
           form.requires_kitchen === "" || form.requires_kitchen === null
             ? null
             : Boolean(form.requires_kitchen),
-      });
-      setDishes((current) => [created, ...current]);
+      };
+      if (editingId) {
+        const updated = await menuApi.updateDish(editingId, payload);
+        setDishes((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        setEditingId("");
+        setNotice("Plat / boisson mis à jour.");
+      } else {
+        const created = await menuApi.createDish(payload);
+        setDishes((current) => [created, ...current]);
+        setNotice("Plat / boisson créé.");
+      }
       setForm({ ...emptyDish, category_id: form.category_id });
       if (!createOnly) {
         setShowForm(false);
       }
     } catch (err) {
-      setError(err.message || "Ajout du plat impossible.");
+      setError(err.message || (editingId ? "Modification impossible." : "Ajout du plat impossible."));
     }
   }
 
@@ -222,7 +252,18 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
       subtitle={activeOrderId ? "Ajoutez les plats à la commande de table puis envoyez-les en cuisine." : createOnly ? "Renseignez les informations du plat à ajouter à la carte." : "Gérez votre carte, les tarifs, la disponibilité et les performances des plats."}
       action={!createOnly && (
         <div className="flex flex-wrap gap-3">
-          {!activeOrderId && <PrimaryAction icon="Plus" onClick={() => setShowForm((value) => !value)}>{showForm ? "Fermer" : "Nouveau plat"}</PrimaryAction>}
+          {!activeOrderId && (
+            <PrimaryAction
+              icon="Plus"
+              onClick={() => {
+                setEditingId("");
+                setForm({ ...emptyDish, category_id: activeCategories[0]?.id || "" });
+                setShowForm((value) => !value);
+              }}
+            >
+              {showForm ? "Fermer" : "Nouveau plat"}
+            </PrimaryAction>
+          )}
           <SecondaryAction icon="Download" onClick={() => exportCsv(visibleDishes, categoryNameById)}>Exporter</SecondaryAction>
         </div>
       )}
@@ -249,8 +290,25 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
 
       {showForm && (
         <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
-          <AdminCard>
-            <DishEditor form={form} categories={activeCategories} onChange={updateForm} onUpload={uploadImage} onSubmit={createDish} role={role} />
+          <AdminCard title={editingId ? "Modifier le plat / la boisson" : undefined}>
+            <DishEditor
+              form={form}
+              categories={activeCategories}
+              onChange={updateForm}
+              onUpload={uploadImage}
+              onSubmit={createDish}
+              onCancel={
+                editingId
+                  ? () => {
+                      setEditingId("");
+                      setForm({ ...emptyDish, category_id: activeCategories[0]?.id || "" });
+                      setShowForm(false);
+                    }
+                  : undefined
+              }
+              role={role}
+              submitLabel={editingId ? "Enregistrer" : "Créer"}
+            />
           </AdminCard>
           <DishPreview dish={form} categoryName={categoryNameById.get(form.category_id)} />
         </div>
@@ -282,7 +340,9 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
             categoryNameById={categoryNameById}
             role={role}
             orderMode={Boolean(activeOrderId)}
+            canEdit={canEdit}
             onAddToOrder={addDishToOrder}
+            onEdit={openEdit}
             onToggle={toggleDish}
             onDelete={deleteDish}
           />
@@ -314,8 +374,8 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   );
 }
 
-function DishEditor({ form, categories, onChange, onUpload, onSubmit, role }) {
-  const canSetKitchen = role === "CUISINE" || role === "ADMIN";
+function DishEditor({ form, categories, onChange, onUpload, onSubmit, onCancel, role, submitLabel = "Créer" }) {
+  const canSetKitchen = role === "CUISINE" || role === "ADMIN" || role === "MANAGER" || role === "STOCK";
   return (
     <form onSubmit={onSubmit}>
       <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
@@ -368,7 +428,16 @@ function DishEditor({ form, categories, onChange, onUpload, onSubmit, role }) {
       <Field name="description" label="Description" as="textarea" rows={3} value={form.description} onChange={onChange} className="mt-4" placeholder="Décrivez votre plat..." />
       <Field name="image_url" label="URL image" value={form.image_url} onChange={onChange} placeholder="/uploads/menu/image.webp ou https://..." />
       <div className="mt-2 flex justify-end gap-3 border-t border-slate-100 pt-4">
-        <PrimaryAction icon="Plus" type="submit">Enregistrer</PrimaryAction>
+        <div className="flex justify-end gap-2">
+          {onCancel && (
+            <SecondaryAction type="button" onClick={onCancel}>
+              Annuler
+            </SecondaryAction>
+          )}
+          <PrimaryAction icon={submitLabel === "Enregistrer" ? "Pencil" : "Plus"} type="submit">
+            {submitLabel}
+          </PrimaryAction>
+        </div>
       </div>
     </form>
   );
@@ -436,7 +505,7 @@ function OrderCart({ order, onQuantityChange, onSendToKitchen }) {
   );
 }
 
-function DishesTable({ dishes, categoryNameById, role, orderMode, onAddToOrder, onToggle }) {
+function DishesTable({ dishes, categoryNameById, orderMode, canEdit, onAddToOrder, onEdit, onToggle, onDelete }) {
   if (!dishes.length) return <EmptyState icon="UtensilsCrossed" title="Aucun plat trouvé" text="Créez un plat ou ajustez vos filtres." />;
   return (
     <>
@@ -482,7 +551,9 @@ function DishesTable({ dishes, categoryNameById, role, orderMode, onAddToOrder, 
                   </button>
                 ) : (
                   <>
+                    {canEdit && <IconButton icon="Pencil" title="Modifier" onClick={() => onEdit(dish)} />}
                     <IconButton icon={dish.is_available ? "Eye" : "EyeOff"} title={dish.is_available ? "Marquer indisponible" : "Marquer disponible"} onClick={() => onToggle(dish)} />
+                    {canEdit && <IconButton icon="Trash2" title="Archiver" tone="red" onClick={() => onDelete(dish)} />}
                   </>
                 )}
               </td>
