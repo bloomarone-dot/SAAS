@@ -164,6 +164,7 @@ def create_tables() -> None:
     ensure_instance_requests_table()
     ensure_payment_schedules_table()
     ensure_stock_lots_table()
+    ensure_cash_drawer_sessions_table()
     ensure_performance_indexes()
     ensure_french_status_values()
     seed_superadmin()
@@ -619,6 +620,12 @@ def ensure_stock_lots_table() -> None:
     """Cree la table des lots de stock (peremption / FEFO)."""
     from app.modules.stock.models import StockLot  # noqa: F401
     Base.metadata.create_all(bind=engine, tables=[StockLot.__table__])
+
+
+def ensure_cash_drawer_sessions_table() -> None:
+    """Cree la table des sessions de caisse (fond d'ouverture / clôture)."""
+    from app.modules.orders.models import CashDrawerSession  # noqa: F401
+    Base.metadata.create_all(bind=engine, tables=[CashDrawerSession.__table__])
 
 
 def ensure_user_columns() -> None:

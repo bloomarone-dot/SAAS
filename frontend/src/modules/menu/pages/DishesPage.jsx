@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { orderApi } from "@/modules/orders/services/orderApi";
+import { formatFcfa, parseFcfa } from "@/utils/money";
 import { menuApi } from "../services/menuApi";
 
 const emptyDish = {
@@ -17,7 +18,7 @@ const emptyDish = {
 };
 
 function money(value) {
-  return `${Math.round(Number(value || 0)).toLocaleString("fr-FR")} FCFA`;
+  return formatFcfa(value);
 }
 
 export default function DishesPage({ restaurantId, role, activeOrderId, showCreateOnMount = false, initialAvailabilityFilter = "ALL" }) {
@@ -136,8 +137,8 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
       category_id: dish.category_id || "",
       name: dish.name || "",
       description: dish.description || "",
-      price: String(Math.round(Number(dish.price || 0))),
-      cost_per_dish: String(Math.round(Number(dish.cost_per_dish || 0))),
+      price: String(parseFcfa(dish.price) ?? Math.round(Number(dish.price || 0))),
+      cost_per_dish: String(parseFcfa(dish.cost_per_dish, { allowZero: true }) ?? 0),
       image_url: dish.image_url || "",
       is_available: dish.is_available !== false,
       requires_kitchen:
@@ -152,10 +153,14 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   async function createDish(event) {
     event.preventDefault();
     try {
+      const price = parseFcfa(form.price);
+      if (price == null) {
+        throw new Error("Prix invalide.");
+      }
       const payload = {
         ...form,
-        price: Math.round(Number(form.price)),
-        cost_per_dish: Math.round(Number(form.cost_per_dish || 0)) || 0,
+        price,
+        cost_per_dish: parseFcfa(form.cost_per_dish, { allowZero: true }) ?? 0,
         description: form.description || null,
         image_url: form.image_url || null,
         requires_kitchen:

@@ -51,6 +51,20 @@ function canPayOrder(order) {
   return order.is_closed || PAYMENT_READY_STATUSES.includes(normalizeStatus(order.status));
 }
 
+/** Commande 100 % boissons bar (pas de passage cuisine). */
+function isDrinksOnlyOrder(order, dishes = []) {
+  const dishesById = Object.fromEntries((dishes || []).map((dish) => [dish.id, dish]));
+  const items = (order?.items || []).filter((item) => String(item.sale_channel || "").toUpperCase() !== "EMBALLAGE");
+  if (!items.length) return false;
+  return items.every((item) => {
+    const dish = dishesById[item.menu_item_id];
+    if (dish?.requires_kitchen === true) return false;
+    if (dish?.requires_kitchen === false) return true;
+    const channel = String(item.sale_channel || dish?.sale_channel || "").toUpperCase();
+    return channel === "BOISSON";
+  });
+}
+
 const STEPS = [
   { key: "table", label: "Table" },
   { key: "order", label: "Commande" },
@@ -327,8 +341,9 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     ["Nouvelle", "Acceptée", "En préparation", "Prête", "Livrée"].includes(orderStatus);
   const isReady = isReadyStatus(order?.status);
   const isServed = isServedStatus(order?.status);
+  const drinksOnly = isDrinksOnlyOrder(order, dishes);
   const canRequestPayment = canPayOrder(order);
-  const waitingKitchen = ["En préparation", "Acceptée"].includes(orderStatus) && !isReady && !isServed;
+  const waitingKitchen = !drinksOnly && ["En préparation", "Acceptée"].includes(orderStatus) && !isReady && !isServed;
 
   function openOrder(orderId, tableName, tableRoom, tableId = null) {
     const nextSession = {
@@ -505,6 +520,11 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       setOrder(result.order);
       if (currentUser?.id) saveOrderSnapshot(currentUser.id, result.order);
       setMenuMode(false);
+      if (isDrinksOnlyOrder(result.order, dishes) || result.order?.status === "Prête") {
+        setMessage("Boissons confirmées — demandez le paiement à la caisse maintenant.");
+        setPaymentOrder(result.order);
+        return;
+      }
       setMessage(
         isLocalId(session.orderId)
           ? "Commande envoyée en cuisine locale. Sync à la reconnexion."
@@ -528,7 +548,12 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       setOrder(updated);
       if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
       setMenuMode(false);
-      setMessage("Commande envoyée en cuisine. Attendez la notification « prête ».");
+      if (isDrinksOnlyOrder(updated, dishes) || (updated?.status === "Prête" && updated?.is_closed)) {
+        setMessage("Boissons confirmées — paiement immédiat demandé à la caisse.");
+        setPaymentOrder(updated);
+      } else {
+        setMessage("Commande envoyée en cuisine. Attendez la notification « prête ».");
+      }
     } catch (err) {
       if (isNetworkError(err)) {
         try {
@@ -731,6 +756,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
             menuMode={menuMode}
             canEditOrder={canEditOrder}
             canSendKitchen={canSendKitchen}
+            drinksOnly={drinksOnly}
             isReady={isReady}
             isServed={isServed}
             canRequestPayment={canRequestPayment}
@@ -902,6 +928,7 @@ function OrderPanel({
   menuMode,
   canEditOrder,
   canSendKitchen,
+  drinksOnly = false,
   isReady,
   isServed,
   canRequestPayment,
@@ -929,6 +956,7 @@ function OrderPanel({
         <p className="mt-1 text-xs font-semibold text-slate-500">
           Table {session.tableName} · {orderStatus || "…"}
           {order?.is_closed ? " · Clôturée" : " · Ouverte"}
+          {drinksOnly ? " · Boissons" : ""}
         </p>
       </div>
 
@@ -941,11 +969,19 @@ function OrderPanel({
         </div>
       )}
 
+      {drinksOnly && canEditOrder && (
+        <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+          Commande boissons uniquement : le paiement sera demandé directement à la caisse (pas de cuisine).
+        </p>
+      )}
+
       {(isReady || isServed) && canRequestPayment && (
         <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
-          {isServed
-            ? "Client servi : vous pouvez demander le paiement à la caisse."
-            : "Plats prêts : servez le client puis demandez le paiement."}
+          {drinksOnly || (isReady && order?.is_closed)
+            ? "Boissons confirmées : demandez le paiement à la caisse maintenant."
+            : isServed
+              ? "Client servi : vous pouvez demander le paiement à la caisse."
+              : "Plats prêts : servez le client puis demandez le paiement."}
         </p>
       )}
 
@@ -997,8 +1033,12 @@ function OrderPanel({
             disabled={busy === "kitchen" || items.length === 0}
             className="lte-btn lte-btn-primary w-full"
           >
-            <DashboardIcon name="ChefHat" size={16} />
-            {busy === "kitchen" ? "Envoi…" : "Envoyer en cuisine"}
+            <DashboardIcon name={drinksOnly ? "Wallet" : "ChefHat"} size={16} />
+            {busy === "kitchen"
+              ? "Confirmation…"
+              : drinksOnly
+                ? "Confirmer et demander le paiement"
+                : "Envoyer en cuisine"}
           </button>
         )}
 
@@ -1015,7 +1055,7 @@ function OrderPanel({
           </button>
         )}
 
-        {isReady && !isServed && (
+        {isReady && !isServed && !drinksOnly && !(order?.is_closed && isReady) && (
           <button type="button" onClick={onMarkServed} disabled={busy === "served"} className="lte-btn lte-btn-default w-full">
             <DashboardIcon name="CheckCircle2" size={16} />
             {busy === "served" ? "Validation…" : "Marquer comme servie"}

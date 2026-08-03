@@ -44,12 +44,13 @@ export default defineConfig({
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
+            // Menu : réseau d'abord ; cache seulement si vraiment offline.
+            // Avant: timeout 8s + TTL 24h → anciens prix réaffichés (ex. 1500 → 1445).
             urlPattern: ({ url }) => url.pathname.startsWith('/api/v1/menu/'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'menu-api-cache',
-              networkTimeoutSeconds: 8,
-              expiration: { maxEntries: 80, maxAgeSeconds: 60 * 60 * 24 },
+              expiration: { maxEntries: 40, maxAgeSeconds: 120 },
             },
           },
           {

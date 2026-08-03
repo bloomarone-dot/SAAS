@@ -6,6 +6,7 @@ import { orderApi } from "@/modules/orders/services/orderApi";
 import { DeliveryCashierPanel } from "@/modules/orders/components/DeliveryCashierPanel";
 import { CashierReportAnalytics } from "@/modules/orders/components/CashierReportAnalytics";
 import { InvoiceHistoryPanel } from "@/modules/orders/components/InvoiceHistoryPanel";
+import { CashDrawerSessionPanel } from "@/modules/orders/components/CashDrawerSession";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
 import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
@@ -556,6 +557,12 @@ export function CaisseDashboard({ overrides = {} }) {
             ))}
           </div>
 
+          <CashDrawerSessionPanel
+            key={`drawer-${report.paid_orders_count || 0}-${report.total_collected || 0}`}
+            adminReviewOnly={adminReviewOnly}
+            onMessage={setMessage}
+          />
+
           {!adminReviewOnly && paymentRequests.length > 0 && (
             <DashboardSection title="Demandes de paiement serveur" action={<SmallMeta>{paymentRequests.length} en attente</SmallMeta>}>
               <PaymentRequestsList
@@ -633,6 +640,12 @@ export function CaisseDashboard({ overrides = {} }) {
 
       {activeTab === "closing" && (
         <div className="grid gap-5 md:grid-cols-2">
+          <CashDrawerSessionPanel
+            key={`drawer-close-${report.paid_orders_count || 0}-${report.total_collected || 0}`}
+            adminReviewOnly={adminReviewOnly}
+            onMessage={setMessage}
+          />
+
           <DashboardSection title="Récapitulatif du service">
             <div className="rounded-lg bg-emerald-50 p-6">
               <p className="text-sm font-semibold text-slate-600">Total encaissé aujourd'hui</p>
@@ -1193,40 +1206,83 @@ function receiptHtml(order, restaurant, currentUser) {
         <title>Reçu ${escapeHtml(order.order_number)}</title>
         <style>
           @page { size: 80mm auto; margin: 2mm; }
-          * { box-sizing: border-box; }
-          body { width: 76mm; margin: 0; padding: 0; color: #000; font-family: "Courier New", monospace; font-size: 10.5px; line-height: 1.25; }
-          .receipt { width: 100%; }
-          h1 { margin: 0 0 2px; font-size: 16px; line-height: 1.1; text-align: center; text-transform: uppercase; }
-          p { margin: 2px 0; }
+          * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          html, body {
+            width: 80mm;
+            margin: 0;
+            padding: 0;
+            color: #000;
+            background: #fff;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 13px;
+            line-height: 1.35;
+            font-weight: 700;
+            -webkit-font-smoothing: none;
+            text-rendering: geometricPrecision;
+          }
+          .receipt { width: 76mm; margin: 0 auto; padding: 1mm 2mm; }
+          h1 {
+            margin: 0 0 4px;
+            font-size: 18px;
+            line-height: 1.15;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 0.2px;
+          }
+          p { margin: 3px 0; color: #000; }
           .center { text-align: center; }
-          .muted { font-size: 9.5px; }
-          .separator { margin: 7px 0; border-top: 1px dashed #000; }
-          .meta { display: grid; grid-template-columns: 23mm 1fr; gap: 2px 1mm; }
-          .meta strong { white-space: nowrap; }
+          .muted { font-size: 12px; font-weight: 700; color: #000; }
+          .logo { max-height: 40px; max-width: 48mm; object-fit: contain; image-rendering: crisp-edges; }
+          .separator { margin: 8px 0; border-top: 2px dashed #000; }
+          .meta { display: grid; grid-template-columns: 26mm 1fr; gap: 3px 2mm; font-size: 12px; }
+          .meta strong { white-space: nowrap; font-weight: 800; }
+          .title { font-size: 15px; font-weight: 800; letter-spacing: 0.3px; }
           table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-          th { padding: 3px 0; border-bottom: 1px dashed #000; text-align: left; font-size: 9.5px; }
-          td { padding: 4px 0 0; vertical-align: top; }
+          th {
+            padding: 4px 0;
+            border-bottom: 2px solid #000;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+          td { padding: 5px 0 0; vertical-align: top; font-size: 13px; font-weight: 700; color: #000; }
           .item { width: auto; padding-right: 2mm; overflow-wrap: anywhere; }
-          .qty { width: 8mm; text-align: center; }
-          .amount { width: 23mm; text-align: right; white-space: nowrap; }
-          .unit-row td { padding: 0 0 3px; border-bottom: 1px dotted #777; color: #333; font-size: 9px; }
-          .summary { margin-top: 6px; }
-          .summary-row { display: flex; justify-content: space-between; gap: 4mm; margin: 2px 0; }
-          .total { margin-top: 5px; padding-top: 5px; border-top: 2px solid #000; font-size: 14px; font-weight: 700; }
-          .footer { margin-top: 8px; border-top: 1px dashed #000; padding-top: 7px; text-align: center; }
+          .qty { width: 9mm; text-align: center; font-weight: 800; }
+          .amount { width: 24mm; text-align: right; white-space: nowrap; font-weight: 800; }
+          .unit-row td {
+            padding: 0 0 4px;
+            border-bottom: 1px solid #000;
+            color: #000;
+            font-size: 11px;
+            font-weight: 700;
+          }
+          .summary { margin-top: 8px; font-size: 13px; }
+          .summary-row { display: flex; justify-content: space-between; gap: 4mm; margin: 3px 0; font-weight: 700; }
+          .total {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 3px solid #000;
+            font-size: 16px;
+            font-weight: 900;
+          }
+          .footer { margin-top: 10px; border-top: 2px dashed #000; padding-top: 8px; text-align: center; font-size: 12px; }
           @media screen { body { margin: 12px auto; } }
-          @media print { html, body { width: 76mm; } }
+          @media print {
+            html, body { width: 80mm; }
+            .receipt { width: 76mm; }
+          }
         </style>
       </head>
       <body>
         <div class="receipt">
-          ${logoUrl ? `<p class="center"><img src="${escapeHtml(logoUrl)}" alt="" style="max-height:52px; max-width:60mm; object-fit:contain;" /></p>` : ""}
+          ${logoUrl ? `<p class="center"><img class="logo" src="${escapeHtml(logoUrl)}" alt="" /></p>` : ""}
           <h1>${escapeHtml(restaurantName)}</h1>
           ${restaurantLines.map((line) => `<p class="center muted">${escapeHtml(line)}</p>`).join("")}
           ${restaurant?.nui ? `<p class="center"><strong>NUI : ${escapeHtml(restaurant.nui)}</strong></p>` : ""}
           ${restaurant?.tax_id ? `<p class="center muted">RC/ID fiscal : ${escapeHtml(restaurant.tax_id)}</p>` : ""}
           <div class="separator"></div>
-          <p class="center"><strong>REÇU DE PAIEMENT</strong></p>
+          <p class="center title">REÇU DE PAIEMENT</p>
           <p class="center muted">N° reçu : ${escapeHtml(receiptNumber)}${printCount > 1 ? ` · Duplicata ${printCount}` : ""}</p>
           <p class="center muted">Créée le ${formatDateTime(order.created_at || order.updated_at || new Date().toISOString())}</p>
           <div class="separator"></div>
@@ -1333,7 +1389,8 @@ function reportHtml(report, user) {
 }
 
 function openPrintWindow(html, title) {
-  const popup = window.open("", "_blank", "width=840,height=760");
+  // Fenêtre étroite (~80mm) pour éviter le rétrécissement flou à l'impression.
+  const popup = window.open("", "_blank", "width=340,height=760");
   if (!popup) return;
   popup.document.write(html);
   popup.document.close();

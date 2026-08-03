@@ -30,6 +30,15 @@ export function cacheMenuCatalog(restaurantId, categories, dishes) {
   saveCatalogSnapshot(restaurantId, { categories, dishes }).catch(() => {});
 }
 
+/** À appeler après création / modification / suppression d'un plat. */
+export function clearMenuCatalogCache() {
+  try {
+    localStorage.removeItem(MENU_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getCachedMenuCatalog(restaurantId) {
   const data = read(MENU_KEY);
   if (data && data.restaurantId === restaurantId) {

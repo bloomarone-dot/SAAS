@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -261,3 +261,35 @@ class CashierNetworkReportOut(BaseModel):
     paid_orders_count: int
     average_ticket: float
     analytics: CashierReportAnalytics
+
+
+class CashDrawerOpenIn(BaseModel):
+    opening_float: float = Field(ge=0)
+    notes: Optional[str] = Field(default=None, max_length=255)
+
+
+class CashDrawerCloseIn(BaseModel):
+    closing_counted: float = Field(ge=0)
+    notes: Optional[str] = Field(default=None, max_length=255)
+
+
+class CashDrawerSessionOut(BaseModel):
+    id: Optional[str] = None
+    business_date: date
+    status: str = "NONE"
+    opening_float: float = 0
+    closing_counted: Optional[float] = None
+    opening_notes: Optional[str] = None
+    closing_notes: Optional[str] = None
+    opened_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    opened_by_name: Optional[str] = None
+    closed_by_name: Optional[str] = None
+    sales_total: float = 0
+    cash_sales: float = 0
+    mobile_sales: float = 0
+    card_sales: float = 0
+    expected_in_drawer: float = 0
+    expected_day_total: float = 0
+    variance: Optional[float] = None
+    paid_orders_count: int = 0

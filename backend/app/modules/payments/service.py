@@ -257,6 +257,8 @@ def apply_webhook(
             order.payment_previous_status = None
             order.transaction_id = tx.id
             order.payment_method = "Orange Money" if tx.provider == "ORANGE_CM" else "MTN Mobile Money"
+            if not order.paid_at:
+                order.paid_at = now
             from app.modules.finance.router import PaymentMethod, post_order_sale_entry_safe, post_payment_fees_entry_safe
 
             post_order_sale_entry_safe(db, order, getattr(order, "cashier_id", None), payment_method=PaymentMethod.MOBILE_MONEY)

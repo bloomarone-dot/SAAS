@@ -246,7 +246,12 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
     setKitchenBusyId(order.id);
     try {
       const updated = await orderApi.sendToKitchen(order.id);
-      onMessage?.(`Commande ${order.order_number} envoyée en cuisine.`);
+      const drinksReady = updated?.status === "Prête" && updated?.is_closed;
+      onMessage?.(
+        drinksReady
+          ? `Commande ${order.order_number} : boissons uniquement — prête à encaisser.`
+          : `Commande ${order.order_number} envoyée en cuisine.`,
+      );
       setOrders((current) =>
         current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
       );

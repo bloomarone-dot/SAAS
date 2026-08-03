@@ -112,6 +112,8 @@ function rewriteActionIds(action, idMap) {
   const next = { ...action };
   if (next.localOrderId && idMap[next.localOrderId]) next.localOrderId = idMap[next.localOrderId];
   if (next.orderId && idMap[next.orderId]) next.orderId = idMap[next.orderId];
+  if (next.localTableId && idMap[next.localTableId]) next.localTableId = idMap[next.localTableId];
+  if (next.tableId && idMap[next.tableId]) next.tableId = idMap[next.tableId];
   if (Array.isArray(next.requests)) {
     next.requests = next.requests.map((request) => ({
       ...request,
@@ -131,7 +133,14 @@ function resolveOrderId(action, idMap) {
 
 export function isNetworkError(error) {
   const message = String(error?.message || error || "");
-  return !navigator.onLine || message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("Connexion indisponible");
+  return (
+    !navigator.onLine
+    || message.includes("Failed to fetch")
+    || message.includes("NetworkError")
+    || message.includes("Connexion indisponible")
+    || message.includes("pris trop de temps")
+    || /timeout/i.test(message)
+  );
 }
 
 async function matchAndApplyKitchenStatus(apiFetch, action, orderId) {
@@ -164,8 +173,40 @@ async function matchAndApplyKitchenStatus(apiFetch, action, orderId) {
 async function runAction(action, { apiFetch, apiFetchPublic, idMap }) {
   const type = action.type || "http";
 
+  if (type === "create_table") {
+    const localTableId = action.localTableId;
+    const payload = action.payload || {};
+    const result = await apiFetch(`/tables?restaurant_id=${encodeURIComponent(action.restaurantId)}`, {
+      method: "POST",
+      body: {
+        name: payload.name,
+        room: payload.room || "Rez-de-chaussée",
+        capacity: Number(payload.capacity || 1),
+      },
+      fallback: action.errorMessage || "Création de table impossible.",
+    });
+    const serverTableId = result?.id;
+    if (serverTableId == null) throw new Error("Création de table : id serveur manquant.");
+    if (localTableId) {
+      idMap[localTableId] = serverTableId;
+      try {
+        const { remapLocalTableId } = await import("@/offline/ops");
+        await remapLocalTableId(localTableId, serverTableId, action.restaurantId);
+      } catch {
+        // best effort
+      }
+    }
+    return;
+  }
+
   if (type === "create_table_order") {
-    const result = await apiFetch(`/tables/${action.tableId}/orders`, {
+    const tableId = idMap[action.tableId] || action.tableId;
+    if (isLocalId(tableId)) {
+      const err = new Error("Table locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    const result = await apiFetch(`/tables/${tableId}/orders`, {
       method: "POST",
       body: { party_size: action.party_size || 1 },
       fallback: action.errorMessage || "Création de commande impossible.",

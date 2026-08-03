@@ -4,6 +4,7 @@ import { DashboardIcon } from "@/components/dashboard/icons";
 import { DashboardSection, EmptyState as AdminEmptyState, FilterBar, PageHeader } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { apiFetch } from "@/config/http";
+import { bustMenuApiCache, formatFcfa, parseFcfa } from "@/utils/money";
 import { validationFor } from "@/utils/validation";
 
 const CATALOG_FALLBACK = "Action catalogue impossible.";
@@ -25,7 +26,7 @@ const emptyItem = {
 };
 
 function formatPrice(value) {
-  return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+  return formatFcfa(value);
 }
 
 function optionalText(value) {
@@ -128,17 +129,22 @@ export function CatalogAdmin({ onMessage }) {
     event.preventDefault();
     setIsLoading(true);
     try {
+      const price = parseFcfa(itemForm.price);
+      if (price == null) {
+        throw new Error("Prix invalide.");
+      }
       const created = await catalogApi("/api/v1/catalog/items", {
         method: "POST",
         body: {
           ...itemForm,
           name: itemForm.name.trim(),
-          price: Number(itemForm.price),
-          cost_per_dish: Number(itemForm.cost_per_dish || 0),
+          price,
+          cost_per_dish: parseFcfa(itemForm.cost_per_dish, { allowZero: true }) ?? 0,
           image_url: optionalText(itemForm.image_url),
           description: optionalText(itemForm.description),
         },
       });
+      await bustMenuApiCache();
       setItems((current) => [created, ...current]);
       setItemForm({ ...emptyItem, category_id: itemForm.category_id });
       onMessage(`Plat "${created.name}" ajouté au menu.`);
@@ -156,6 +162,7 @@ export function CatalogAdmin({ onMessage }) {
         method: "PATCH",
         body: { is_available: !item.is_available },
       });
+      await bustMenuApiCache();
       setItems((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
       onMessage(updated.is_available ? "Plat remis en vente." : "Plat retiré temporairement.");
     } catch (error) {
@@ -170,6 +177,7 @@ export function CatalogAdmin({ onMessage }) {
     setIsLoading(true);
     try {
       await catalogApi(`/api/v1/catalog/items/${item.id}`, { method: "DELETE" });
+      await bustMenuApiCache();
       setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, is_available: false } : entry)));
       onMessage("Plat archivé du catalogue.");
     } catch (error) {

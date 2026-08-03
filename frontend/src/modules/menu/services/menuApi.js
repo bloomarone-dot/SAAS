@@ -1,7 +1,14 @@
 import { apiFetch } from "@/config/http";
+import { bustMenuApiCache } from "@/utils/money";
 
 const request = (path, options = {}) =>
   apiFetch(path, { ...options, fallback: "Requete menu impossible." });
+
+async function mutatingRequest(path, options = {}) {
+  const data = await request(path, options);
+  await bustMenuApiCache();
+  return data;
+}
 
 function browserImageUrl(url) {
   if (!url) return "";
@@ -21,9 +28,9 @@ export const menuApi = {
     ),
 
   createCategory: (categoryData) =>
-    request("/api/v1/menu/categories", {
+    mutatingRequest("/api/v1/menu/categories", {
       method: "POST",
-      body: JSON.stringify(categoryData),
+      body: categoryData,
     }),
 
   uploadImage: async (file) => {
@@ -38,13 +45,13 @@ export const menuApi = {
   },
 
   updateCategory: (categoryId, categoryData) =>
-    request(`/api/v1/menu/categories/${categoryId}`, {
+    mutatingRequest(`/api/v1/menu/categories/${categoryId}`, {
       method: "PUT",
-      body: JSON.stringify(categoryData),
+      body: categoryData,
     }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
 
   deleteCategory: (categoryId) =>
-    request(`/api/v1/menu/categories/${categoryId}`, {
+    mutatingRequest(`/api/v1/menu/categories/${categoryId}`, {
       method: "DELETE",
     }),
 
@@ -54,24 +61,24 @@ export const menuApi = {
     ),
 
   createDish: (dishData) =>
-    request("/api/v1/menu/dishes", {
+    mutatingRequest("/api/v1/menu/dishes", {
       method: "POST",
-      body: JSON.stringify(dishData),
+      body: dishData,
     }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
 
   updateDish: (dishId, dishData) =>
-    request(`/api/v1/menu/dishes/${dishId}`, {
+    mutatingRequest(`/api/v1/menu/dishes/${dishId}`, {
       method: "PUT",
-      body: JSON.stringify(dishData),
+      body: dishData,
     }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
 
   toggleDishAvailability: (dishId) =>
-    request(`/api/v1/menu/dishes/${dishId}/toggle-availability`, {
+    mutatingRequest(`/api/v1/menu/dishes/${dishId}/toggle-availability`, {
       method: "PATCH",
     }).then((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
 
   softDeleteDish: (dishId) =>
-    request(`/api/v1/menu/dishes/${dishId}`, {
+    mutatingRequest(`/api/v1/menu/dishes/${dishId}`, {
       method: "DELETE",
     }),
 };

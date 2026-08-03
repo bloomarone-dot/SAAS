@@ -54,6 +54,8 @@ def get_active_kitchen_tickets(
         db.query(KitchenTicketModel)
         .join(CustomerOrder, CustomerOrder.id == KitchenTicketModel.order_id)
         .filter(CustomerOrder.restaurant_id == current_user.restaurant_id)
+        .filter(CustomerOrder.deleted_at.is_(None))
+        .filter(~CustomerOrder.status.in_({"Annulée", "Annulee", "Archivée", "Archivee"}))
         .filter(KitchenTicketModel.status != KitchenStatus.SERVIE)
         .order_by(KitchenTicketModel.created_at.asc())
         .all()
@@ -95,6 +97,10 @@ def kitchen_month_stats(
     assert_kitchen_read_allowed(current_user)
     now = utcnow()
     month_start = datetime(now.year, now.month, 1)
+    active_orders = (
+        CustomerOrder.deleted_at.is_(None),
+        ~CustomerOrder.status.in_({"Annulée", "Annulee", "Archivée", "Archivee"}),
+    )
     base = (
         db.query(KitchenTicketModel)
         .join(CustomerOrder, CustomerOrder.id == KitchenTicketModel.order_id)
@@ -102,6 +108,7 @@ def kitchen_month_stats(
             CustomerOrder.restaurant_id == current_user.restaurant_id,
             KitchenTicketModel.created_at >= month_start,
             KitchenTicketModel.status != KitchenStatus.EN_ATTENTE,
+            *active_orders,
         )
     )
     total_dishes = (
@@ -112,6 +119,7 @@ def kitchen_month_stats(
             CustomerOrder.restaurant_id == current_user.restaurant_id,
             KitchenTicketModel.created_at >= month_start,
             KitchenTicketModel.status != KitchenStatus.EN_ATTENTE,
+            *active_orders,
         )
         .scalar()
     )

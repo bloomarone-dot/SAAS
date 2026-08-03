@@ -4,6 +4,7 @@
  */
 
 export const TYPE_PRIORITY = {
+  create_table: 5,
   create_table_order: 10,
   update_order_items: 20,
   send_to_kitchen: 30,

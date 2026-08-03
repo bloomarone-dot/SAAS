@@ -160,7 +160,11 @@ export function OrdersAdmin({ apiBaseUrl, currentUser, onMessage }) {
   }
 
   async function deleteOrder(order) {
-    if (!window.confirm(`Archiver la commande ${order.order_number} ?\n\nElle restera en base de données et pourra être restaurée en changeant son statut.`)) return;
+    if (!window.confirm(
+      `Supprimer la commande test ${order.order_number} ?\n\n`
+      + `Elle disparaîtra de la cuisine, de la caisse et des totaux.\n`
+      + `(Archivage admin — non comptabilisée.)`,
+    )) return;
     setIsLoading(true);
     try {
       await api(`/api/v1/orders/${order.id}`, { method: "DELETE" });

@@ -17,9 +17,26 @@ from app.modules.branches.models import DeliveryArea
 from app.modules.finance.models import CashRegister, PromotionCode
 from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
 from app.modules.kitchen.router import mark_order_kitchen_tickets_served
-from app.modules.orders.models import CustomerOrder, CustomerOrderItem
+from app.modules.orders.models import CashDrawerSession, CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
-from app.modules.orders.schemas import CashierDeliveryCreateIn, CashierDiscountLine, CashierNetworkReportOut, CashierPaymentIn, CashierReportOut, OrderCashAssignmentIn, OrderDeleteIn, OrderPublic, OrderReopenIn, OrderStatusUpdateIn, OrderUpdateIn, PromoApplyIn, PublicOrderCreateIn
+from app.modules.orders.schemas import (
+    CashDrawerCloseIn,
+    CashDrawerOpenIn,
+    CashDrawerSessionOut,
+    CashierDeliveryCreateIn,
+    CashierDiscountLine,
+    CashierNetworkReportOut,
+    CashierPaymentIn,
+    CashierReportOut,
+    OrderCashAssignmentIn,
+    OrderDeleteIn,
+    OrderPublic,
+    OrderReopenIn,
+    OrderStatusUpdateIn,
+    OrderUpdateIn,
+    PromoApplyIn,
+    PublicOrderCreateIn,
+)
 from app.modules.permissions.models import Permission, Role
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockMovement, StockMovementType, StockRecipeIngredient
@@ -304,6 +321,214 @@ def cashier_report(
     )
 
 
+def _is_cash_method(method: str | None) -> bool:
+    value = (method or "").strip().lower()
+    return value in {"espèces", "especes", "cash", "liquide"}
+
+
+def _is_mobile_method(method: str | None) -> bool:
+    value = (method or "").strip().lower()
+    return "orange" in value or "mtn" in value or "mobile" in value
+
+
+def _is_card_method(method: str | None) -> bool:
+    value = (method or "").strip().lower()
+    return "carte" in value or "card" in value
+
+
+def build_cash_drawer_session_out(
+    db: Session,
+    restaurant_id: str,
+    session: CashDrawerSession | None,
+    business_date,
+) -> CashDrawerSessionOut:
+    start = datetime.combine(business_date, time.min)
+    end = datetime.combine(business_date, time.max)
+    receipts = (
+        db.query(CustomerOrder)
+        .filter(
+            CustomerOrder.restaurant_id == restaurant_id,
+            CustomerOrder.deleted_at.is_(None),
+            CustomerOrder.status.in_(PAID_STATUSES),
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start,
+            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end,
+        )
+        .all()
+    )
+    sales_total = 0.0
+    cash_sales = 0.0
+    mobile_sales = 0.0
+    card_sales = 0.0
+    for order in receipts:
+        amount = float(order.total_amount or 0)
+        sales_total += amount
+        method = order.payment_method
+        if _is_cash_method(method):
+            cash_sales += amount
+        elif _is_mobile_method(method):
+            mobile_sales += amount
+        elif _is_card_method(method):
+            card_sales += amount
+
+    opening_float = float(session.opening_float) if session else 0.0
+    closing_counted = float(session.closing_counted) if session and session.closing_counted is not None else None
+    expected_in_drawer = round(opening_float + cash_sales, 2)
+    expected_day_total = round(opening_float + sales_total, 2)
+    variance = round(closing_counted - expected_in_drawer, 2) if closing_counted is not None else None
+
+    user_ids = set()
+    if session:
+        user_ids.add(session.opened_by_id)
+        if session.closed_by_id:
+            user_ids.add(session.closed_by_id)
+    users = {
+        user.id: ((f"{user.first_name or ''} {user.last_name or ''}".strip()) or user.username)
+        for user in db.query(User).filter(User.id.in_(list(user_ids))).all()
+    } if user_ids else {}
+
+    return CashDrawerSessionOut(
+        id=session.id if session else None,
+        business_date=business_date,
+        status=session.status if session else "NONE",
+        opening_float=opening_float,
+        closing_counted=closing_counted,
+        opening_notes=session.opening_notes if session else None,
+        closing_notes=session.closing_notes if session else None,
+        opened_at=session.opened_at if session else None,
+        closed_at=session.closed_at if session else None,
+        opened_by_name=users.get(session.opened_by_id) if session else None,
+        closed_by_name=users.get(session.closed_by_id) if session and session.closed_by_id else None,
+        sales_total=round(sales_total, 2),
+        cash_sales=round(cash_sales, 2),
+        mobile_sales=round(mobile_sales, 2),
+        card_sales=round(card_sales, 2),
+        expected_in_drawer=expected_in_drawer,
+        expected_day_total=expected_day_total,
+        variance=variance,
+        paid_orders_count=len(receipts),
+    )
+
+
+@router.get("/cash-session", response_model=CashDrawerSessionOut)
+def get_cash_session(
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_can_read_cashier(current_user)
+    business_date = utcnow().date()
+    session = (
+        db.query(CashDrawerSession)
+        .filter(
+            CashDrawerSession.restaurant_id == current_user.restaurant_id,
+            CashDrawerSession.business_date == business_date,
+        )
+        .order_by(CashDrawerSession.opened_at.desc())
+        .first()
+    )
+    return build_cash_drawer_session_out(db, current_user.restaurant_id, session, business_date)
+
+
+@router.post("/cash-session/open", response_model=CashDrawerSessionOut)
+def open_cash_session(
+    payload: CashDrawerOpenIn,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_can_collect_cashier(current_user)
+    business_date = utcnow().date()
+    existing = (
+        db.query(CashDrawerSession)
+        .filter(
+            CashDrawerSession.restaurant_id == current_user.restaurant_id,
+            CashDrawerSession.business_date == business_date,
+            CashDrawerSession.status == "OPEN",
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Une session de caisse est déjà ouverte pour aujourd'hui.")
+
+    closed_today = (
+        db.query(CashDrawerSession)
+        .filter(
+            CashDrawerSession.restaurant_id == current_user.restaurant_id,
+            CashDrawerSession.business_date == business_date,
+            CashDrawerSession.status == "CLOSED",
+        )
+        .first()
+    )
+    if closed_today:
+        raise HTTPException(status_code=409, detail="La caisse du jour est déjà clôturée.")
+
+    session = CashDrawerSession(
+        restaurant_id=current_user.restaurant_id,
+        business_date=business_date,
+        opened_by_id=current_user.id,
+        opening_float=Decimal(str(round(float(payload.opening_float), 0))),
+        opening_notes=(payload.notes or "").strip() or None,
+        status="OPEN",
+    )
+    db.add(session)
+    log_action(
+        db,
+        current_user,
+        "cashier.session_open",
+        "cash_drawer_session",
+        session.id,
+        f"Ouverture caisse fond {session.opening_float} FCFA",
+        {"opening_float": float(session.opening_float)},
+    )
+    db.commit()
+    db.refresh(session)
+    return build_cash_drawer_session_out(db, current_user.restaurant_id, session, business_date)
+
+
+@router.post("/cash-session/close", response_model=CashDrawerSessionOut)
+def close_cash_session(
+    payload: CashDrawerCloseIn,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_can_collect_cashier(current_user)
+    business_date = utcnow().date()
+    session = (
+        db.query(CashDrawerSession)
+        .filter(
+            CashDrawerSession.restaurant_id == current_user.restaurant_id,
+            CashDrawerSession.business_date == business_date,
+            CashDrawerSession.status == "OPEN",
+        )
+        .order_by(CashDrawerSession.opened_at.desc())
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Aucune session de caisse ouverte à clôturer.")
+
+    session.closing_counted = Decimal(str(round(float(payload.closing_counted), 0)))
+    session.closing_notes = (payload.notes or "").strip() or None
+    session.closed_by_id = current_user.id
+    session.closed_at = utcnow()
+    session.status = "CLOSED"
+    summary = build_cash_drawer_session_out(db, current_user.restaurant_id, session, business_date)
+    log_action(
+        db,
+        current_user,
+        "cashier.session_close",
+        "cash_drawer_session",
+        session.id,
+        f"Clôture caisse compté {session.closing_counted} FCFA (écart {summary.variance})",
+        {
+            "closing_counted": float(session.closing_counted),
+            "expected_in_drawer": summary.expected_in_drawer,
+            "variance": summary.variance,
+            "sales_total": summary.sales_total,
+        },
+    )
+    db.commit()
+    db.refresh(session)
+    return build_cash_drawer_session_out(db, current_user.restaurant_id, session, business_date)
+
+
 @router.get("/cashier-network-report", response_model=CashierNetworkReportOut)
 def cashier_network_report(
     start_date: datetime | None = Query(default=None),
@@ -575,15 +800,46 @@ def send_order_to_kitchen(
         created_count += 1
 
     previous_status = order.status
+    kitchen_items = [item for item in order.items if item.sale_channel != "EMBALLAGE"]
+    drinks_only = bool(kitchen_items) and skipped_bar == len(kitchen_items) and created_count == 0
+
+    if drinks_only:
+        # Boissons bar uniquement (ex. boissons gazeuses) → paiement immédiat, sans cuisine.
+        order.status = "Prête"
+        order.is_closed = True
+        order.closed_at = utcnow()
+        order.closed_by_id = current_user.id
+        notify(
+            db,
+            restaurant_id=current_user.restaurant_id,
+            role=Role.CAISSE.value,
+            title="Boissons à encaisser",
+            message=f"{order.order_number} : boissons uniquement — paiement immédiat ({order.total_amount} FCFA).",
+            category="order",
+            link="unpaid-orders",
+        )
+        log_action(
+            db,
+            current_user,
+            "order.drinks_ready_for_payment",
+            "order",
+            order.id,
+            f"Commande boissons {order.order_number} prête à encaisser",
+            {
+                "previous_status": previous_status,
+                "new_status": order.status,
+                "tickets_created": 0,
+                "bar_items_skipped": skipped_bar,
+                "total_amount": order.total_amount,
+            },
+        )
+        db.commit()
+        db.refresh(order)
+        return get_order_or_404(db, order.id, current_user.restaurant_id)
+
     if order.status == "Nouvelle":
         order.status = "Acceptée"
     if created_count == 0:
-        kitchen_items = [item for item in order.items if item.sale_channel != "EMBALLAGE"]
-        if kitchen_items and skipped_bar == len(kitchen_items):
-            raise HTTPException(
-                status_code=400,
-                detail="Cette commande ne contient que des boissons bar — rien à envoyer en cuisine.",
-            )
         if tickets:
             raise HTTPException(status_code=400, detail="Tous les plats sont déjà envoyés en cuisine.")
         raise HTTPException(status_code=400, detail="Aucun plat à envoyer en cuisine.")
@@ -654,6 +910,7 @@ def update_order_status(
             link="orders",
         )
     if payload.status == "Annulée" and previous_status != "Annulée":
+        mark_order_kitchen_tickets_served(db, order.id)
         notify_order_cancelled(db, current_user, order, previous_status)
     log_action(
         db,
@@ -711,6 +968,7 @@ def update_order(
         if payload.status == "Annulée" and order.cancelled_at is None:
             order.cancelled_at = utcnow()
             if previous_status != "Annulée":
+                mark_order_kitchen_tickets_served(db, order.id)
                 notify_order_cancelled(db, current_user, order, previous_status)
         sync_table_status(db, order)
     if payload.items is not None:
@@ -919,7 +1177,9 @@ def delete_order(
     order.cancelled_at = utcnow()
     order.deleted_at = order.cancelled_at
     order.deleted_by = current_user.id
-    order.delete_reason = payload.reason.strip() if payload and payload.reason else None
+    order.delete_reason = payload.reason.strip() if payload and payload.reason else "Commande test / archivage admin"
+    # Retire immédiatement les tickets cuisine pour ne plus polluer l'écran cuisine.
+    mark_order_kitchen_tickets_served(db, order.id)
     log_action(
         db,
         current_user,
@@ -1067,8 +1327,17 @@ def assert_can_collect_cashier(user: User) -> None:
 
 
 def cashier_period(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime, datetime]:
+    """Borne inclusive de la journée caisse.
+
+    Les clients qui envoient seulement une date (`YYYY-MM-DD`) aboutissent à
+    minuit des deux côtés : sans expansion, aucun paiement de la journée ne match.
+    """
     if start_date and end_date:
-        return start_date, end_date
+        start = start_date.replace(tzinfo=None) if getattr(start_date, "tzinfo", None) else start_date
+        end = end_date.replace(tzinfo=None) if getattr(end_date, "tzinfo", None) else end_date
+        if end.hour == 0 and end.minute == 0 and end.second == 0 and end.microsecond == 0:
+            end = datetime.combine(end.date(), time.max)
+        return start, end
     today = utcnow().date()
     return datetime.combine(today, time.min), datetime.combine(today, time.max)
 

@@ -9,6 +9,7 @@ import {
   StatusPill,
   TableFooter,
 } from "@/modules/admin/components/AdminUi";
+import { formatFcfa, parseFcfa } from "@/utils/money";
 import { menuApi } from "../services/menuApi";
 
 const emptyCategory = { name: "", description: "", image_url: "" };
@@ -23,14 +24,7 @@ const emptyDish = {
 };
 
 function money(value) {
-  return `${Math.round(Number(value || 0)).toLocaleString("fr-FR")} FCFA`;
-}
-
-function parseMoneyInput(value) {
-  const cleaned = String(value ?? "").replace(/\s/g, "").replace(",", ".");
-  const amount = Number(cleaned);
-  if (!Number.isFinite(amount) || amount <= 0) return null;
-  return Math.round(amount);
+  return formatFcfa(value);
 }
 
 function isDrinkCategory(name = "") {
@@ -62,7 +56,7 @@ function buildDishPayload(categoryId, dishForm, categoryName = "") {
     requiresKitchen = Boolean(requiresKitchen);
   }
 
-  const price = parseMoneyInput(dishForm.price);
+  const price = parseFcfa(dishForm.price);
   if (price == null) {
     throw new Error("Prix invalide.");
   }
@@ -71,7 +65,7 @@ function buildDishPayload(categoryId, dishForm, categoryName = "") {
     category_id: categoryId,
     name: dishForm.name.trim(),
     price,
-    cost_per_dish: Math.round(Number(dishForm.cost_per_dish || 0)) || 0,
+    cost_per_dish: parseFcfa(dishForm.cost_per_dish, { allowZero: true }) ?? 0,
     description: dishForm.description.trim() || null,
     image_url: dishForm.image_url.trim() || null,
     is_available: dishForm.is_available,
@@ -345,8 +339,8 @@ export default function MenuCatalogAdmin({ restaurantId, role, onMessage }) {
     setEditDishForm({
       name: dish.name || "",
       description: dish.description || "",
-      price: String(Math.round(Number(dish.price || 0))),
-      cost_per_dish: String(Math.round(Number(dish.cost_per_dish || 0))),
+      price: String(parseFcfa(dish.price) ?? Math.round(Number(dish.price || 0))),
+      cost_per_dish: String(parseFcfa(dish.cost_per_dish, { allowZero: true }) ?? 0),
       image_url: dish.image_url || "",
       is_available: dish.is_available !== false,
       requires_kitchen:

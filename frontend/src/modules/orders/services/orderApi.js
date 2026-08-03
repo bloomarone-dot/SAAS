@@ -74,6 +74,20 @@ export const orderApi = {
     return request(`/api/v1/orders/cashier-report${suffix}`);
   },
 
+  getCashSession: () => request("/api/v1/orders/cash-session"),
+
+  openCashSession: (payload) =>
+    request("/api/v1/orders/cash-session/open", {
+      method: "POST",
+      body: payload,
+    }),
+
+  closeCashSession: (payload) =>
+    request("/api/v1/orders/cash-session/close", {
+      method: "POST",
+      body: payload,
+    }),
+
   createCashierDelivery: (payload) =>
     request("/api/v1/orders/cashier-delivery", {
       method: "POST",

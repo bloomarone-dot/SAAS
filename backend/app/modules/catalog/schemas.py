@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
+from app.modules.menu.schemas import _round_money
 from app.modules.shared.schemas import OrmModel
 
 
@@ -40,6 +41,10 @@ class MenuItemPublic(OrmModel):
     is_available: bool
     created_at: datetime
 
+    @validator("price", "cost_per_dish", pre=True, always=True)
+    def response_money_rounded(cls, value):
+        return _round_money(value) if value is not None else 0
+
 
 class MenuItemIn(BaseModel):
     name: str = Field(min_length=2, max_length=160)
@@ -49,6 +54,12 @@ class MenuItemIn(BaseModel):
     category_id: Optional[str] = None
     requires_kitchen: Optional[bool] = None
     image_url: Optional[str] = Field(default=None, max_length=500)
+
+    @validator("price", "cost_per_dish", pre=True)
+    def money_as_whole_fcfa(cls, value):
+        if value is None or value == "":
+            return value
+        return _round_money(value)
 
 
 class MenuItemUpdateIn(BaseModel):
@@ -60,3 +71,9 @@ class MenuItemUpdateIn(BaseModel):
     requires_kitchen: Optional[bool] = None
     image_url: Optional[str] = Field(default=None, max_length=500)
     is_available: Optional[bool] = None
+
+    @validator("price", "cost_per_dish", pre=True)
+    def money_as_whole_fcfa(cls, value):
+        if value is None or value == "":
+            return value
+        return _round_money(value)

@@ -3,6 +3,8 @@ import { DashboardIcon } from '@/components/dashboard/icons';
 import { AdminFormModal, DashboardSection, FilterBar } from '@/modules/admin/components/AdminUi';
 import { useAutoRefresh } from '@/utils/useAutoRefresh';
 import { cacheTables, getCachedTables } from '@/utils/offlineCache';
+import { isNetworkError } from '@/utils/network';
+import { createLocalTable, isLocalId } from '@/offline';
 import { validationFor } from '@/utils/validation';
 import { tableApi } from '../services/tableApi';
 
@@ -34,12 +36,28 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
   const [roomFilter, setRoomFilter] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     loadTables();
   }, [restaurantId]);
 
   useAutoRefresh(() => loadTables({ silent: true }), 8000, [restaurantId]);
+
+  useEffect(() => {
+    const onRemap = (event) => {
+      if (event.detail?.kind !== 'table') return;
+      setTables((current) =>
+        current.map((table) =>
+          String(table.id) === String(event.detail.localId)
+            ? { ...table, id: event.detail.serverId, _local: false }
+            : table,
+        ),
+      );
+    };
+    window.addEventListener('offline-id-remapped', onRemap);
+    return () => window.removeEventListener('offline-id-remapped', onRemap);
+  }, []);
 
   const rooms = useMemo(() => {
     const values = [...defaultRooms, ...tables.map((table) => table.room).filter(Boolean)];
@@ -53,23 +71,66 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
       .map((table, index) => ({ ...table, slot: tableSlots[index % tableSlots.length] }));
   }, [roomFilter, tables]);
 
+  function mergeWithLocalTables(remoteTables = []) {
+    const cached = getCachedTables(restaurantId) || [];
+    const localOnly = cached.filter((table) => isLocalId(table.id));
+    const byId = new Map((remoteTables || []).map((table) => [String(table.id), table]));
+    for (const local of localOnly) {
+      if (!byId.has(String(local.id))) byId.set(String(local.id), local);
+    }
+    return [...byId.values()];
+  }
+
   async function loadTables({ silent = false } = {}) {
     if (!silent) {
       setLoading(true);
       setError('');
     }
+    if (!navigator.onLine) {
+      const cached = getCachedTables(restaurantId);
+      if (cached?.length) {
+        setTables(cached);
+        if (!silent) setNotice('Mode hors ligne : plan de salle depuis le cache local.');
+      } else if (!silent) {
+        setError('Hors ligne et aucun plan de salle en cache. Créez une table localement.');
+      }
+      if (!silent) setLoading(false);
+      return;
+    }
     try {
       const data = await tableApi.getTables(restaurantId);
-      setTables(data);
-      cacheTables(restaurantId, data);
+      const merged = mergeWithLocalTables(data);
+      setTables(merged);
+      cacheTables(restaurantId, merged);
+      if (!silent) setNotice('');
     } catch (error) {
       const cached = getCachedTables(restaurantId);
-      if (cached) {
+      if (cached?.length) {
         setTables(cached);
+        if (!silent) setNotice('Connexion instable : affichage du plan de salle local.');
       } else if (!silent) setError(error.message || 'Impossible de charger le plan de salle.');
     } finally {
       if (!silent) setLoading(false);
     }
+  }
+
+  async function createTableLocally(requestedTable) {
+    const created = normalizeTable(
+      await createLocalTable({
+        restaurantId,
+        name: requestedTable.name,
+        room: requestedTable.room,
+        capacity: requestedTable.capacity,
+      }),
+      requestedTable,
+    );
+    setTables((current) => [...current.filter((table) => String(table.id) !== String(created.id)), created]);
+    setRoomFilter(created.room || 'Rez-de-chaussée');
+    setForm(emptyTable);
+    setShowForm(false);
+    setError('');
+    setNotice(`Table « ${created.name} » créée hors ligne. Elle sera synchronisée à la reconnexion.`);
+    return created;
   }
 
   async function createTable(event) {
@@ -79,14 +140,38 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
       capacity: Number(form.capacity || 1),
       room: form.room || 'Rez-de-chaussée',
     };
+    if (!requestedTable.name) {
+      setError('Indiquez un nom de table.');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      try {
+        await createTableLocally(requestedTable);
+      } catch (err) {
+        setError(err.message || 'Création locale de table impossible.');
+      }
+      return;
+    }
+
     try {
       const created = normalizeTable(await tableApi.createTable(restaurantId, requestedTable), requestedTable);
-      setTables((current) => [...current.filter((table) => table.id !== created.id), created]);
+      setTables((current) => [...current.filter((table) => String(table.id) !== String(created.id)), created]);
       setRoomFilter(created.room || 'Rez-de-chaussée');
       setForm(emptyTable);
       setShowForm(false);
+      setNotice('');
       await loadTables({ silent: true });
     } catch (err) {
+      if (isNetworkError(err)) {
+        try {
+          await createTableLocally(requestedTable);
+          return;
+        } catch (localErr) {
+          setError(localErr.message || 'Création locale de table impossible.');
+          return;
+        }
+      }
       setError(err.message || 'Création de table impossible.');
     }
   }
@@ -121,6 +206,11 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
       </FilterBar>
 
       {error && <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>}
+      {notice && !error && (
+        <div className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+          {notice}
+        </div>
+      )}
 
       <AdminFormModal
         open={showForm && !readOnly}
@@ -233,6 +323,7 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
 
 function VisualTable({ table, slot, fallbackNumber, onClick }) {
   const status = table.status || 'Libre';
+  const localPending = isLocalId(table.id) || Boolean(table._local);
   const occupiedSeats = Number(table.occupied_seats || 0);
   const freeSeats = Math.max(0, Number(table.free_seats ?? table.capacity ?? 0));
   const palette = {
@@ -262,7 +353,7 @@ function VisualTable({ table, slot, fallbackNumber, onClick }) {
       onClick={onClick}
       className="absolute -translate-x-1/2 -translate-y-1/2"
       style={{ left: `${slot.left}%`, top: `${slot.top}%` }}
-      title={`${label} - ${table.room || 'Rez-de-chaussée'} - ${table.capacity} places`}
+      title={`${label} - ${table.room || 'Rez-de-chaussée'} - ${table.capacity} places${localPending ? ' (hors ligne)' : ''}`}
     >
       <span className="relative block h-24 w-28">
         <Chairs round={isRound} color={palette.chair} />
@@ -271,7 +362,7 @@ function VisualTable({ table, slot, fallbackNumber, onClick }) {
           <span className="text-[10px] font-black leading-none">{occupiedSeats}/{table.capacity}</span>
         </span>
         <span className="absolute -bottom-1 left-1/2 z-20 -translate-x-1/2 rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-700 shadow">
-          {table.room || 'Rez-de-chaussée'} · {freeSeats} libre(s)
+          {localPending ? 'Hors ligne' : `${table.room || 'Rez-de-chaussée'} · ${freeSeats} libre(s)`}
         </span>
       </span>
     </button>

@@ -162,6 +162,28 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
     }
   }
 
+  async function updateDeliveryAreaFee(area, rawFee) {
+    const deliveryFee = Math.round(Number(String(rawFee).replace(/\s/g, "").replace(",", ".")));
+    if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
+      onMessage("Frais de livraison invalide.");
+      return;
+    }
+    if (deliveryFee === Number(area.delivery_fee || 0)) return;
+    setIsLoading(true);
+    try {
+      const updated = await settingsApi(`/api/v1/branches/delivery-areas/${area.id}`, {
+        method: "PATCH",
+        body: { delivery_fee: deliveryFee },
+      });
+      setDeliveryAreas((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      onMessage(`Frais ${area.name} : ${deliveryFee.toLocaleString("fr-FR")} FCFA`);
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   async function saveSettings(event) {
     event.preventDefault();
     setIsLoading(true);
@@ -316,7 +338,16 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
                 <Field name="email" label="Email public" type="email" value={form.email} onChange={updateField} disabled={fieldsDisabled} />
                 <Field name="website_url" label="Site web" value={form.website_url} onChange={updateField} disabled={fieldsDisabled} />
                 <Field name="opening_hours" label="Horaires d'ouverture" value={form.opening_hours} onChange={updateField} placeholder="Ex: Lun-Dim 09:00 - 22:00" disabled={fieldsDisabled} />
-                <Field name="delivery_fee" label="Frais de livraison" type="number" min="0" value={form.delivery_fee} onChange={updateField} disabled={fieldsDisabled} />
+                <Field
+                  name="delivery_fee"
+                  label="Frais livraison par défaut"
+                  type="number"
+                  min="0"
+                  value={form.delivery_fee}
+                  onChange={updateField}
+                  disabled={fieldsDisabled}
+                  placeholder="Utilisé si le quartier n'a pas de tarif"
+                />
                 <div className="md:col-span-2">
                   <Field name="payment_methods" label="Modes de paiement" value={form.payment_methods} onChange={updateField} placeholder="Ex: Orange Money, MTN MoMo, Cash" disabled={fieldsDisabled} />
                 </div>
@@ -337,6 +368,9 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
             </SettingsGroup>
 
             <SettingsGroup title="Quartiers de livraison">
+              <p className="mb-3 text-xs font-semibold text-slate-500">
+                Chaque quartier a son propre tarif (500 / 1 000 / 1 500 / 2 000 FCFA). Modifiez le montant si besoin.
+              </p>
               <div className="grid gap-3 md:grid-cols-[1fr_140px_140px_auto]">
                 <Field name="name" label="Quartier" value={areaForm.name} onChange={updateAreaField} disabled={!canUpdate || isLoading} required />
                 <Field name="delivery_fee" label="Frais" type="number" min="0" value={areaForm.delivery_fee} onChange={updateAreaField} disabled={!canUpdate || isLoading} required />
@@ -348,10 +382,23 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
               <div className="mt-4 divide-y divide-slate-200 border border-slate-200 bg-white">
                 {deliveryAreas.map((area) => (
                   <div key={area.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="font-black text-[#070528]">{area.name}</p>
-                      <p className="text-xs font-semibold text-slate-500">{Number(area.delivery_fee || 0).toLocaleString("fr-FR")} FCFA · {area.average_delivery_minutes || "-"} min</p>
+                      <p className="text-xs font-semibold text-slate-500">{area.average_delivery_minutes || "-"} min</p>
                     </div>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        defaultValue={Number(area.delivery_fee || 0)}
+                        key={`${area.id}-${area.delivery_fee}`}
+                        disabled={!canUpdate || isLoading}
+                        onBlur={(event) => updateDeliveryAreaFee(area, event.target.value)}
+                        className="h-9 w-28 rounded border border-slate-200 px-2 text-right text-sm font-black text-[#070528]"
+                      />
+                      <span className="text-xs font-bold text-slate-500">FCFA</span>
+                    </label>
                     <button type="button" onClick={() => toggleDeliveryArea(area)} disabled={!canUpdate || isLoading} className="rounded border border-slate-200 px-3 py-2 text-xs font-black text-slate-700">
                       {area.is_active ? "Désactiver" : "Activer"}
                     </button>

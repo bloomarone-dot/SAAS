@@ -1,18 +1,42 @@
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Optional
+import re
 
 from pydantic import BaseModel, Field, validator
 
 from app.modules.shared.schemas import OrmModel
 
 NAME_PATTERN = r"^[A-Za-zÀ-ÖØ-öø-ÿ0-9][A-Za-zÀ-ÖØ-öø-ÿ0-9 \.,'’\(\)\&\/\-]{1,159}$"
+_EU_THOUSANDS = re.compile(r"^\d{1,3}(\.\d{3})+$")
 
 
-def _round_money(value: float | None) -> float | None:
-    """Évite les dérives float (ex. 15000 stocké/affiché 14999)."""
-    if value is None:
+def _round_money(value: float | int | str | Decimal | None) -> float | None:
+    """Normalise un montant FCFA en entier (évite 15000→14999 et '1.500'→1.5)."""
+    if value is None or value == "":
         return None
-    return float(round(float(value)))
+    try:
+        if isinstance(value, str):
+            compact = (
+                value.strip()
+                .replace("\u00a0", "")
+                .replace("\u202f", "")
+                .replace(" ", "")
+                .replace("FCFA", "")
+                .replace("fcfa", "")
+                .replace("XAF", "")
+            )
+            if _EU_THOUSANDS.match(compact):
+                amount = Decimal(compact.replace(".", ""))
+            else:
+                amount = Decimal(compact.replace(",", "."))
+        elif isinstance(value, Decimal):
+            amount = value
+        else:
+            amount = Decimal(str(value))
+        return float(int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
+    except (InvalidOperation, ValueError, TypeError):
+        return float(round(float(value)))
 
 
 class CategoryBase(BaseModel):

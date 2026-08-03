@@ -21,6 +21,8 @@ export {
   isLocalId,
   mirrorOrderLocal,
   mirrorTicketsLocal,
+  createLocalTable,
+  remapLocalTableId,
   createLocalTableOrder,
   getLocalOrder,
   remapLocalOrderId,

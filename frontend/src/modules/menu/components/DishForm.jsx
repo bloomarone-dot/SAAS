@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { AdminCard, Field, PrimaryAction } from "@/modules/admin/components/AdminUi";
+import { parseFcfa } from "@/utils/money";
 import { menuApi } from "../services/menuApi";
 
 function isDrinkCategory(name = "") {
@@ -35,8 +36,8 @@ export default function DishForm({ categories, onDishCreated }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const parsedPrice = Math.round(Number(String(price).replace(/\s/g, "").replace(",", ".")));
-    if (!name.trim() || !categoryId || !Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+    const parsedPrice = parseFcfa(price);
+    if (!name.trim() || !categoryId || parsedPrice == null) {
       setError("Veuillez remplir correctement tous les champs requis.");
       return;
     }

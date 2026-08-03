@@ -9,11 +9,14 @@ import {
   listLocalKitchenTickets,
   listLocalOrders,
   loadCashierSnapshot,
+  loadTablesSnapshot,
   saveCashierSnapshot,
+  saveTablesSnapshot,
   upsertLocalKitchenTicket,
   upsertLocalOrder,
 } from "@/offline/store";
 import { idbDelete, idbGet, STORES } from "@/offline/db";
+import { cacheTables } from "@/utils/offlineCache";
 
 export function newLocalId(prefix = "local") {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
@@ -66,6 +69,93 @@ export async function mirrorTicketsLocal(tickets, restaurantId) {
     );
   }
   return saved;
+}
+
+export async function createLocalTable({
+  restaurantId,
+  name,
+  room = "Rez-de-chaussée",
+  capacity = 4,
+}) {
+  await initOfflineFoundation();
+  const id = newLocalId("local_table");
+  const createdAt = nowIso();
+  const table = {
+    id,
+    restaurant_id: restaurantId,
+    restaurantId,
+    name: String(name || "").trim(),
+    number: String(name || "").trim(),
+    room: room || "Rez-de-chaussée",
+    capacity: Math.max(1, Number(capacity || 1)),
+    status: "Libre",
+    occupied_seats: 0,
+    free_seats: Math.max(1, Number(capacity || 1)),
+    is_active: true,
+    created_at: createdAt,
+    updated_at: createdAt,
+    _local: true,
+  };
+
+  const snapshot = await loadTablesSnapshot(restaurantId);
+  const current = Array.isArray(snapshot?.tables) ? snapshot.tables : [];
+  const nextTables = [...current.filter((item) => String(item.id) !== String(id)), table];
+  await saveTablesSnapshot(restaurantId, nextTables);
+  cacheTables(restaurantId, nextTables);
+
+  enqueueOfflineAction({
+    type: "create_table",
+    label: `Création table ${table.name}`,
+    localTableId: id,
+    restaurantId,
+    payload: {
+      name: table.name,
+      room: table.room,
+      capacity: table.capacity,
+    },
+    requests: [],
+  });
+
+  return table;
+}
+
+export async function remapLocalTableId(localTableId, serverTableId, restaurantId) {
+  if (!localTableId || serverTableId == null || String(localTableId) === String(serverTableId)) {
+    return null;
+  }
+  await initOfflineFoundation();
+  const snapshot = await loadTablesSnapshot(restaurantId);
+  const tables = Array.isArray(snapshot?.tables) ? snapshot.tables : [];
+  const nextTables = tables.map((table) => {
+    if (String(table.id) !== String(localTableId)) return table;
+    return {
+      ...table,
+      id: serverTableId,
+      _local: false,
+      updated_at: nowIso(),
+    };
+  });
+  await saveTablesSnapshot(restaurantId, nextTables);
+  cacheTables(restaurantId, nextTables);
+
+  const orders = await listLocalOrders(restaurantId);
+  for (const order of orders) {
+    if (String(order.table_id) !== String(localTableId)) continue;
+    await upsertLocalOrder({
+      ...order,
+      table_id: serverTableId,
+      updatedAt: nowIso(),
+    });
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("offline-id-remapped", {
+        detail: { localId: localTableId, serverId: serverTableId, kind: "table" },
+      }),
+    );
+  }
+  return serverTableId;
 }
 
 export async function createLocalTableOrder({
@@ -232,9 +322,12 @@ export async function sendLocalOrderToKitchen(order, restaurantId, dishesById = 
     tickets.push(ticket);
   }
 
+  const drinksOnly = items.length > 0 && kitchenItems.length === 0;
   const nextOrder = {
     ...order,
-    status: kitchenItems.length ? "Acceptée" : order.status,
+    status: drinksOnly ? "Prête" : kitchenItems.length ? "Acceptée" : order.status,
+    is_closed: drinksOnly ? true : order.is_closed,
+    closed_at: drinksOnly ? createdAt : order.closed_at,
     updated_at: createdAt,
     updatedAt: createdAt,
   };

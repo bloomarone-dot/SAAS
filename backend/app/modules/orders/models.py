@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -76,3 +77,24 @@ class CustomerOrderItem(Base):
     line_total: Mapped[float] = mapped_column(Float, nullable=False)
 
     order = relationship("CustomerOrder", back_populates="items")
+
+
+class CashDrawerSession(Base):
+    """Session de caisse : fond d'ouverture + clôture (fond + ventes)."""
+
+    __tablename__ = "cash_drawer_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    restaurant_id: Mapped[str] = mapped_column(String(36), ForeignKey("restaurants.id"), index=True, nullable=False)
+    business_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    opened_by_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    closed_by_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    opening_float: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0.00"))
+    closing_counted: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False, index=True)
+    opening_notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    closing_notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

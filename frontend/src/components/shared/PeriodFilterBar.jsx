@@ -33,35 +33,67 @@ export function PeriodFilterBar({ period, onPeriodChange, customPeriod, onCustom
   );
 }
 
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+/** Date/heure locale (pas UTC) pour que « aujourd'hui » couvre toute la journée caisse. */
+function toLocalDateTime(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
+function startOfLocalDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+}
+
+function endOfLocalDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
+}
+
 export function periodToApiDates(period, customPeriod = { start: "", end: "" }) {
   const now = new Date();
-  const toIsoDate = (date) => date.toISOString().slice(0, 10);
-  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
 
   if (period === "today") {
-    return { start_date: toIsoDate(startOfDay(now)), end_date: toIsoDate(endOfDay(now)) };
+    return {
+      start_date: toLocalDateTime(startOfLocalDay(now)),
+      end_date: toLocalDateTime(endOfLocalDay(now)),
+    };
   }
   if (period === "yesterday") {
     const y = new Date(now);
     y.setDate(now.getDate() - 1);
-    return { start_date: toIsoDate(startOfDay(y)), end_date: toIsoDate(endOfDay(y)) };
+    return {
+      start_date: toLocalDateTime(startOfLocalDay(y)),
+      end_date: toLocalDateTime(endOfLocalDay(y)),
+    };
   }
   if (period === "week") {
     const s = new Date(now);
     s.setDate(now.getDate() - 6);
-    return { start_date: toIsoDate(startOfDay(s)), end_date: toIsoDate(endOfDay(now)) };
+    return {
+      start_date: toLocalDateTime(startOfLocalDay(s)),
+      end_date: toLocalDateTime(endOfLocalDay(now)),
+    };
   }
   if (period === "month") {
     const s = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { start_date: toIsoDate(s), end_date: toIsoDate(endOfDay(now)) };
+    return {
+      start_date: toLocalDateTime(startOfLocalDay(s)),
+      end_date: toLocalDateTime(endOfLocalDay(now)),
+    };
   }
   if (period === "year") {
     const s = new Date(now.getFullYear(), 0, 1);
-    return { start_date: toIsoDate(s), end_date: toIsoDate(endOfDay(now)) };
+    return {
+      start_date: toLocalDateTime(startOfLocalDay(s)),
+      end_date: toLocalDateTime(endOfLocalDay(now)),
+    };
   }
   if (period === "custom" && customPeriod.start && customPeriod.end) {
-    return { start_date: customPeriod.start, end_date: customPeriod.end };
+    return {
+      start_date: `${customPeriod.start}T00:00:00`,
+      end_date: `${customPeriod.end}T23:59:59`,
+    };
   }
   return {};
 }
