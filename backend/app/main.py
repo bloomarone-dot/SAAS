@@ -40,6 +40,7 @@ from app.modules.kitchen.router import router as kitchen_router
 from app.modules.payments import router as payments
 from app.modules.payments.realtime import payment_connections
 from app.modules.payments.service import reconciliation_loop
+from app.modules.loyalty import router as loyalty
 from app.modules.platform.service import subscription_enforcement_loop
 
 # Point d'entree FastAPI: assemble le middleware CORS, la creation de tables
@@ -165,6 +166,7 @@ def create_tables() -> None:
     ensure_payment_schedules_table()
     ensure_stock_lots_table()
     ensure_cash_drawer_sessions_table()
+    ensure_loyalty_cards_table()
     ensure_performance_indexes()
     ensure_french_status_values()
     seed_superadmin()
@@ -626,6 +628,12 @@ def ensure_cash_drawer_sessions_table() -> None:
     """Cree la table des sessions de caisse (fond d'ouverture / clôture)."""
     from app.modules.orders.models import CashDrawerSession  # noqa: F401
     Base.metadata.create_all(bind=engine, tables=[CashDrawerSession.__table__])
+
+
+def ensure_loyalty_cards_table() -> None:
+    """Cree la table des cartes de fidelite (9 plats → 10e offert)."""
+    from app.modules.loyalty.models import LoyaltyCard  # noqa: F401
+    Base.metadata.create_all(bind=engine, tables=[LoyaltyCard.__table__])
 
 
 def ensure_user_columns() -> None:
@@ -1103,3 +1111,4 @@ app.include_router(platform.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(stock.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
+app.include_router(loyalty.router, prefix="/api/v1")

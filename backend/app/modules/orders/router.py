@@ -1269,6 +1269,9 @@ def settle_cash_payment(
     order.payment_method = (payment_method or "").strip() or order.payment_method
     if discount_amount is not None:
         order.discount_amount = discount_amount
+    from app.modules.loyalty.service import apply_loyalty_on_payment
+
+    apply_loyalty_on_payment(db, order)
     recalculate_order_total(order)
     deduct_order_packaging_stock(db, order, user.id)
     order.cashier_id = user.id

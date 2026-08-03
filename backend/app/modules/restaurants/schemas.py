@@ -58,12 +58,24 @@ class RestaurantPublic(OrmModel):
 
 
 class RestaurantBrandingPublic(OrmModel):
-    """Identite visuelle du restaurant, accessible a tout utilisateur tenant."""
+    """Identite visuelle + en-tete recu, accessible a tout utilisateur tenant."""
 
     id: str
     name: str
     slug: str
     logo_url: Optional[str] = None
+    legal_name: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    postal_box: Optional[str] = None
+    phone: Optional[str] = None
+    whatsapp_phone: Optional[str] = None
+    email: Optional[str] = None
+    website_url: Optional[str] = None
+    nui: Optional[str] = None
+    tax_id: Optional[str] = None
+    currency: str = "XAF"
     primary_color: str
     secondary_color: str
     accent_color: str = "#F59E0B"

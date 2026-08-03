@@ -391,6 +391,20 @@ class ExportAuditIn(BaseModel):
     format: str = Field(pattern="^(pdf|excel|xlsx|xls|csv)$")
 
 
+class ProductImportErrorOut(BaseModel):
+    line: int
+    message: str
+
+
+class ProductImportResultOut(BaseModel):
+    created: int = 0
+    updated: int = 0
+    entries: int = 0
+    skipped: int = 0
+    errors: list[ProductImportErrorOut] = Field(default_factory=list)
+    message: str = ""
+
+
 class PackagingLinkPublic(OrmModel):
     id: str
     restaurant_id: str

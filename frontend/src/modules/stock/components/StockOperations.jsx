@@ -20,6 +20,7 @@ import {
 } from "./shared/constants";
 import { Dashboard } from "./Dashboard/Dashboard";
 import { ProductCreate } from "./Produit/Create";
+import { ProductImport } from "./Produit/Import";
 import { ProductList } from "./Produit/List";
 import { DepotCreate } from "./Depot/Create";
 import { DepotList } from "./Depot/List";
@@ -391,6 +392,19 @@ export function StockOperations({ mode = "stock", onMessage }) {
     );
   }
 
+  async function importProductsFile(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const summary = await stockApi("/api/v1/stock/products/import", {
+      method: "POST",
+      body: formData,
+      fallback: "Import Excel impossible.",
+    });
+    await loadAll();
+    emit(summary?.message || "Import terminé.");
+    return summary;
+  }
+
   async function submitDepot(event) {
     event.preventDefault();
     await submit(
@@ -641,12 +655,15 @@ export function StockOperations({ mode = "stock", onMessage }) {
 
       {activeTab === "products" && (
         <section className="grid gap-4 xl:grid-cols-[380px_1fr]">
-          <ProductCreate
-            units={units}
-            form={productForm}
-            setForm={setProductForm}
-            onSubmit={submitProduct}
-          />
+          <div className="space-y-4">
+            <ProductCreate
+              units={units}
+              form={productForm}
+              setForm={setProductForm}
+              onSubmit={submitProduct}
+            />
+            <ProductImport onImport={importProductsFile} busy={isLoading} />
+          </div>
           <ProductList
             products={visibleProducts}
             query={query}

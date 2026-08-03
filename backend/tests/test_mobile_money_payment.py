@@ -99,6 +99,15 @@ def make_order():
         transaction_id="tx-1",
         payment_method="Orange Money",
         paid_at=None,
+        restaurant_id="restaurant-1",
+        customer_phone="",
+        customer_name="Client",
+        discount_amount=0,
+        delivery_fee=0,
+        total_amount=10000.0,
+        notes="",
+        items=[],
+        cashier_id=None,
     )
 
 

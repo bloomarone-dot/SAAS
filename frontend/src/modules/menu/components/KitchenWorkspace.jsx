@@ -9,6 +9,12 @@ import CategoriesPage from "../pages/CategoriesPage";
 import DishesPage from "../pages/DishesPage";
 import { kitchenApi } from "../services/kitchenApi";
 import { formatMinutes, ticketCurrentStageMinutes, ticketStageLines } from "../utils/kitchenTiming";
+import {
+  buildKitchenReportText,
+  downloadTextFile,
+  shareReportOnWhatsApp,
+  toCsv,
+} from "@/utils/roleReportShare";
 
 const COLUMNS = [
   {
@@ -189,6 +195,59 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
             <StatCard label="Prêtes" value={readyCount.toLocaleString("fr-FR")} trend="À servir" icon="CheckCircle2" tone="success" />
             <StatCard label="Plats ce mois" value={Number(monthStats?.total_dishes || 0).toLocaleString("fr-FR")} trend={monthStats?.month || "Mois courant"} icon="UtensilsCrossed" tone="default" />
           </div>
+
+          <DashboardSection
+            title="Rapport cuisine"
+            description="Partagez ou exportez votre synthèse (production + mois)."
+            action={
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-black text-slate-700"
+                  onClick={() => {
+                    const rows = [
+                      ["Rapport cuisine", currentUser?.first_name || ""],
+                      ["Mois", monthStats?.month || ""],
+                      ["Nouvelles", pendingCount],
+                      ["En préparation", preparingCount],
+                      ["Prêtes", readyCount],
+                      ["Plats ce mois", monthStats?.total_dishes || 0],
+                      [],
+                      ["Plat", "Quantité"],
+                      ...((monthStats?.top_items || []).map((item) => [item.name, item.quantity])),
+                    ];
+                    downloadTextFile(
+                      `rapport-cuisine-${new Date().toISOString().slice(0, 10)}.csv`,
+                      `\uFEFF${toCsv(rows)}`,
+                    );
+                  }}
+                >
+                  Exporter
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-black text-white"
+                  onClick={() =>
+                    shareReportOnWhatsApp(
+                      buildKitchenReportText({
+                        name: currentUser?.first_name,
+                        monthStats,
+                        pending: pendingCount,
+                        preparing: preparingCount,
+                        ready: readyCount,
+                      }),
+                    )
+                  }
+                >
+                  WhatsApp
+                </button>
+              </div>
+            }
+          >
+            <p className="text-sm font-semibold text-slate-600">
+              Envoyez votre rapport sur WhatsApp ou téléchargez-le en CSV.
+            </p>
+          </DashboardSection>
 
           {monthStats?.top_items?.length > 0 && (
             <DashboardSection title="Plats les plus préparés" description={`Synthèse du mois ${monthStats.month}`}>

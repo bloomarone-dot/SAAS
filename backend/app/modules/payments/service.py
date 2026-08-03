@@ -262,8 +262,19 @@ def apply_webhook(
             order.payment_method = "Orange Money" if tx.provider == "ORANGE_CM" else "MTN Mobile Money"
             if not order.paid_at:
                 order.paid_at = now
+            from app.modules.loyalty.service import apply_loyalty_on_payment
             from app.modules.finance.router import PaymentMethod, post_order_sale_entry_safe, post_payment_fees_entry_safe
 
+            apply_loyalty_on_payment(db, order)
+            subtotal = sum(
+                float(item.line_total or 0)
+                for item in (order.items or [])
+                if getattr(item, "sale_channel", None) != "EMBALLAGE"
+            )
+            order.total_amount = max(
+                0.0,
+                subtotal + float(order.delivery_fee or 0) - float(order.discount_amount or 0),
+            )
             post_order_sale_entry_safe(db, order, getattr(order, "cashier_id", None), payment_method=PaymentMethod.MOBILE_MONEY)
             # Frais opérateur + commission plateforme : Débit 627 / Crédit trésorerie (brut -> net).
             fees = Decimal(str(aggregator_fee or 0)) + Decimal(str(bloomar_commission or 0))

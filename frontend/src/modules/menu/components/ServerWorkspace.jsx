@@ -12,6 +12,12 @@ import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnap
 import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { cacheMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
+import {
+  buildServerReportText,
+  downloadTextFile,
+  shareReportOnWhatsApp,
+  toCsv,
+} from "@/utils/roleReportShare";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { formatMinutes, orderKitchenTimingDetails, orderKitchenTimingLabel } from "../utils/kitchenTiming";
 import {
@@ -905,9 +911,37 @@ function MenuPanel({
 }
 
 function ServerDailyStats({ stats, name }) {
+  const dateLabel = new Date().toLocaleDateString("fr-FR");
+  function shareWhatsApp() {
+    shareReportOnWhatsApp(buildServerReportText({ name, stats, dateLabel }));
+  }
+  function exportCsv() {
+    const rows = [
+      ["Rapport serveuse", name || ""],
+      ["Date", dateLabel],
+      ["Commandes", stats.orders],
+      ["Clients servis", stats.clients],
+      ["Encaissées", stats.paid],
+      ["Total du jour", stats.sales],
+      [],
+      ["Commande", "Statut", "Montant"],
+      ...(stats.recent || []).map((item) => [item.order_number, item.status, item.total_amount]),
+    ];
+    downloadTextFile(`rapport-serveuse-${new Date().toISOString().slice(0, 10)}.csv`, `\uFEFF${toCsv(rows)}`);
+  }
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-black uppercase text-slate-500">Vos ventes du jour{name ? ` · ${name}` : ""}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-black uppercase text-slate-500">Vos ventes du jour{name ? ` · ${name}` : ""}</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={exportCsv} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-black text-slate-700">
+            Exporter
+          </button>
+          <button type="button" onClick={shareWhatsApp} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-black text-white">
+            WhatsApp
+          </button>
+        </div>
+      </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-4">
         <StatChip label="Commandes" value={stats.orders} />
         <StatChip label="Clients servis" value={stats.clients} />

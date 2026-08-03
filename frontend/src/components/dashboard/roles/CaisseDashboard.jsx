@@ -18,6 +18,12 @@ import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFilterBar";
 import { orderTakerDisplay, orderTakerGroupKey, orderTakerRole, isDeliveryOrder } from "@/modules/orders/utils/orderLabels";
 import {
+  buildCashierReportText,
+  downloadTextFile,
+  shareReportOnWhatsApp,
+  toCsv,
+} from "@/utils/roleReportShare";
+import {
   loadCashierReportMerged,
   mirrorCashierReport,
   OFFLINE_CASH_METHODS,
@@ -131,6 +137,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const [activePaymentRequest, setActivePaymentRequest] = useState(null);
   const [methodChosen, setMethodChosen] = useState(false);
   const [lastPaidOrder, setLastPaidOrder] = useState(null);
+  const [loyaltyPreview, setLoyaltyPreview] = useState(null);
   const restaurantId = currentUser?.restaurant_id;
 
   useEffect(() => {
@@ -204,11 +211,19 @@ export function CaisseDashboard({ overrides = {} }) {
 
   async function loadRestaurant() {
     try {
-      setRestaurant(await apiFetch("/api/v1/restaurants/me", {
+      // /me exige RESTAURANT_SETTINGS_READ (souvent absent pour la caisse).
+      // /me/branding est accessible à tout le personnel tenant (nom + logo reçu).
+      setRestaurant(await apiFetch("/api/v1/restaurants/me/branding", {
         fallback: "Impossible de charger les informations du restaurant.",
       }));
     } catch {
-      setRestaurant(null);
+      try {
+        setRestaurant(await apiFetch("/api/v1/restaurants/me", {
+          fallback: "Impossible de charger les informations du restaurant.",
+        }));
+      } catch {
+        setRestaurant(null);
+      }
     }
   }
 
@@ -260,6 +275,26 @@ export function CaisseDashboard({ overrides = {} }) {
   const receipts = report.receipts ?? [];
   const selectedOrder = pendingOrders.find((order) => order.id === selectedOrderId) || pendingOrders[0] || null;
   const selectedReceipt = receipts.find((order) => order.id === selectedReceiptId) || receipts[0] || null;
+
+  useEffect(() => {
+    if (!selectedOrder?.id || !selectedOrder?.customer_phone) {
+      setLoyaltyPreview(null);
+      return undefined;
+    }
+    let cancelled = false;
+    apiFetch(`/api/v1/loyalty/preview/${selectedOrder.id}`, {
+      fallback: "Carte fidélité indisponible.",
+    })
+      .then((data) => {
+        if (!cancelled) setLoyaltyPreview(data);
+      })
+      .catch(() => {
+        if (!cancelled) setLoyaltyPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOrder?.id, selectedOrder?.customer_phone, selectedOrder?.discount_amount]);
   const mobileMoneyTotal = Object.entries(report.by_payment_method ?? {})
     .filter(([method]) => /mobile|orange|mtn/i.test(method))
     .reduce((total, [, amount]) => total + Number(amount || 0), 0);
@@ -477,6 +512,27 @@ export function CaisseDashboard({ overrides = {} }) {
 
   function printCashReport() {
     openPrintWindow(reportHtml(report, currentUser), "Rapport de caisse");
+  }
+
+  function shareCashReportWhatsApp() {
+    const text = buildCashierReportText({
+      name: [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ") || currentUser?.username,
+      report,
+    });
+    shareReportOnWhatsApp(text, restaurant?.whatsapp_phone);
+  }
+
+  function exportCashReportCsv() {
+    const rows = [
+      ["Indicateur", "Valeur"],
+      ["Total encaissé", report.total_collected],
+      ["Réductions", report.total_discounts],
+      ["Transactions", report.paid_orders_count],
+      [],
+      ["Mode de paiement", "Montant"],
+      ...Object.entries(report.by_payment_method || {}).map(([method, amount]) => [method, amount]),
+    ];
+    downloadTextFile(`rapport-caisse-${new Date().toISOString().slice(0, 10)}.csv`, `\uFEFF${toCsv(rows)}`);
   }
 
   return (
@@ -717,6 +773,22 @@ export function CaisseDashboard({ overrides = {} }) {
         {selectedOrder && (
           <div className="space-y-5">
             <OrderDetail order={selectedOrder} discountPreview={discount} paymentRequest={activePaymentRequest} />
+            {loyaltyPreview && (
+              <div className={`rounded-lg border px-4 py-3 text-sm font-semibold ${
+                loyaltyPreview.free_dishes > 0
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : "border-amber-100 bg-amber-50 text-amber-900"
+              }`}
+              >
+                <p className="font-black">Carte fidélité · 9 plats → 10e offert</p>
+                <p className="mt-1">{loyaltyPreview.message}</p>
+                {loyaltyPreview.free_dishes > 0 && (
+                  <p className="mt-1 font-black">
+                    Remise fidélité prévue : −{Number(loyaltyPreview.discount_amount || 0).toLocaleString("fr-FR")} FCFA
+                  </p>
+                )}
+              </div>
+            )}
             {!adminReviewOnly && (
               <>
                 <div>
@@ -814,6 +886,14 @@ export function CaisseDashboard({ overrides = {} }) {
           <>
             <button type="button" onClick={() => setShowReportModal(false)} className="lte-btn lte-btn-default">
               Fermer
+            </button>
+            <button type="button" onClick={exportCashReportCsv} className="lte-btn lte-btn-default">
+              <DashboardIcon name="Download" size={16} />
+              Exporter CSV
+            </button>
+            <button type="button" onClick={shareCashReportWhatsApp} className="lte-btn lte-btn-default">
+              <DashboardIcon name="Phone" size={16} />
+              WhatsApp
             </button>
             <button type="button" onClick={printCashReport} className="lte-btn lte-btn-primary">
               <DashboardIcon name="ReceiptText" size={16} />
@@ -1160,7 +1240,9 @@ function receiptHtml(order, restaurant, currentUser) {
     const amount = Number(value || 0).toLocaleString("fr-FR");
     return currency === "XAF" ? `${amount} FCFA` : `${amount} ${currency}`;
   };
-  const restaurantName = restaurant?.legal_name || restaurant?.name || "Restaurant";
+  const restaurantName = (restaurant?.name || restaurant?.legal_name || "").trim() || "Établissement";
+  const legalName = (restaurant?.legal_name || "").trim();
+  const showLegalName = legalName && legalName.toLowerCase() !== restaurantName.toLowerCase();
   const rawLogo = restaurant?.logo_url || "";
   const logoUrl = rawLogo && !/^https?:\/\//i.test(rawLogo)
     ? `${getApiBaseUrl()}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
@@ -1276,8 +1358,9 @@ function receiptHtml(order, restaurant, currentUser) {
       </head>
       <body>
         <div class="receipt">
-          ${logoUrl ? `<p class="center"><img class="logo" src="${escapeHtml(logoUrl)}" alt="" /></p>` : ""}
+          ${logoUrl ? `<p class="center"><img class="logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(restaurantName)}" /></p>` : ""}
           <h1>${escapeHtml(restaurantName)}</h1>
+          ${showLegalName ? `<p class="center muted">${escapeHtml(legalName)}</p>` : ""}
           ${restaurantLines.map((line) => `<p class="center muted">${escapeHtml(line)}</p>`).join("")}
           ${restaurant?.nui ? `<p class="center"><strong>NUI : ${escapeHtml(restaurant.nui)}</strong></p>` : ""}
           ${restaurant?.tax_id ? `<p class="center muted">RC/ID fiscal : ${escapeHtml(restaurant.tax_id)}</p>` : ""}
@@ -1297,6 +1380,9 @@ function receiptHtml(order, restaurant, currentUser) {
             <strong>Serveur</strong><span>${escapeHtml(staffName)}</span>
             <strong>Caissier</strong><span>${escapeHtml(cashierName)}</span>`}
             <strong>Paiement</strong><span>${escapeHtml(order.payment_method || "Non renseigné")}</span>
+            ${order.notes && String(order.notes).includes("Fidélité")
+              ? `<strong>Fidélité</strong><span>${escapeHtml(String(order.notes).split("|").map((p) => p.trim()).find((p) => p.startsWith("Fidélité")) || "Plat offert")}</span>`
+              : ""}
             <strong>Encaissement</strong><span>${escapeHtml(formatDateTime(order.paid_at || order.updated_at || new Date().toISOString()))}</span>
             <strong>Impression</strong><span>${escapeHtml(formatDateTime(order.printed_at || new Date().toISOString()))}</span>
             ${order.transaction_id ? `<strong>Transaction</strong><span>${escapeHtml(order.transaction_id)}</span>` : ""}

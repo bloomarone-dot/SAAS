@@ -9,3 +9,4 @@ httpx
 alembic
 redis
 tzdata
+openpyxl

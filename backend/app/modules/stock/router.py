@@ -2,7 +2,8 @@ from datetime import datetime, timedelta
 from app.modules.shared.models import utcnow
 from decimal import Decimal, ROUND_HALF_UP
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy import and_, case, func, inspect, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -36,6 +37,13 @@ from app.modules.stock.models import (
     Supplier,
     Unit,
 )
+from app.modules.stock.import_excel import (
+    ImportRow,
+    build_template_csv,
+    build_template_xlsx,
+    parse_import_file,
+    slug_depot_code,
+)
 from app.modules.stock.schemas import (
     CategoryIn,
     CategoryPublic,
@@ -50,6 +58,8 @@ from app.modules.stock.schemas import (
     InventoryPublic,
     PackagingLinkIn,
     PackagingLinkPublic,
+    ProductImportErrorOut,
+    ProductImportResultOut,
     ProductIn,
     ProductPublic,
     ProductStockByDepot,
@@ -471,12 +481,82 @@ def resolve_unit(db: Session, restaurant_id: str, value: str | None) -> Unit:
         )
         if unit:
             return unit
+        unit = (
+            db.query(Unit)
+            .filter(Unit.restaurant_id == restaurant_id)
+            .filter(Unit.symbol.ilike(value.strip()))
+            .first()
+        )
+        if unit:
+            return unit
     unit = db.query(Unit).filter(Unit.restaurant_id == restaurant_id).order_by(Unit.created_at.asc()).first()
     if not unit:
         unit = Unit(restaurant_id=restaurant_id, name="piece", symbol="piece")
         db.add(unit)
         db.flush()
     return unit
+
+
+def ensure_unit_by_label(db: Session, restaurant_id: str, label: str) -> Unit:
+    """Trouve une unité par nom/symbole ou la crée (import Excel)."""
+    cleaned = (label or "").strip()
+    if not cleaned:
+        return resolve_unit(db, restaurant_id, None)
+    key = normalize_unit_key(cleaned, cleaned)
+    for unit in db.query(Unit).filter(Unit.restaurant_id == restaurant_id).all():
+        if normalize_unit_key(unit.name, unit.symbol) == key or normalize_unit_key(unit.symbol, unit.name) == key:
+            return unit
+        if unit.name.lower() == cleaned.lower() or unit.symbol.lower() == cleaned.lower():
+            return unit
+    symbol = cleaned[:20]
+    unit = Unit(restaurant_id=restaurant_id, name=cleaned[:80], symbol=symbol)
+    db.add(unit)
+    db.flush()
+    return unit
+
+
+def ensure_depot_by_label(db: Session, restaurant_id: str, label: str) -> Depot:
+    """Trouve un dépôt par nom/code ou le crée (import Excel)."""
+    cleaned = (label or "").strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Dépôt obligatoire")
+    depot = (
+        db.query(Depot)
+        .filter(Depot.restaurant_id == restaurant_id)
+        .filter(Depot.name.ilike(cleaned))
+        .first()
+    )
+    if depot:
+        return depot
+    code = slug_depot_code(cleaned)
+    by_code = (
+        db.query(Depot)
+        .filter(Depot.restaurant_id == restaurant_id, Depot.code == code)
+        .first()
+    )
+    if by_code:
+        return by_code
+    # Éviter collision de code
+    suffix = 1
+    unique_code = code
+    while (
+        db.query(Depot)
+        .filter(Depot.restaurant_id == restaurant_id, Depot.code == unique_code)
+        .first()
+    ):
+        unique_code = f"{code[:36]}-{suffix}"[:40]
+        suffix += 1
+    depot = Depot(
+        restaurant_id=restaurant_id,
+        name=cleaned[:160],
+        code=unique_code,
+        type=DepotType.AUTRE,
+        description="Créé via import Excel",
+        is_active=True,
+    )
+    db.add(depot)
+    db.flush()
+    return depot
 
 
 def unit_for_product(db: Session, product: Product, unit_id: str | None = None) -> Unit | None:
@@ -968,6 +1048,153 @@ def create_product(payload: ProductIn, current_user: User = Depends(require_tena
         raise HTTPException(status_code=400, detail=f"Création du produit impossible: {exc.__class__.__name__}.") from exc
     db.refresh(product)
     return product_public(db, product, total_stock=Decimal("0"), include_stock_by_depot=False)
+
+
+@router.get("/products/import-template")
+def download_product_import_template(
+    format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
+    current_user: User = Depends(require_tenant_user),
+):
+    assert_permission(current_user, Permission.STOCK_READ)
+    if format == "xlsx":
+        content = build_template_xlsx()
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="modele-import-stock.xlsx"'},
+        )
+    content = build_template_csv()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="modele-import-stock.csv"'},
+    )
+
+
+@router.post("/products/import", response_model=ProductImportResultOut)
+async def import_products_from_excel(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_permission(current_user, Permission.STOCK_UPDATE)
+    ensure_default_data(db, current_user.restaurant_id)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+    try:
+        rows = parse_import_file(file.filename, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not rows:
+        raise HTTPException(status_code=400, detail="Aucune ligne produit à importer.")
+
+    created = updated = entries = skipped = 0
+    errors: list[ProductImportErrorOut] = []
+
+    for row in rows:
+        try:
+            result = _import_product_row(db, current_user, row)
+            created += result["created"]
+            updated += result["updated"]
+            entries += result["entries"]
+            skipped += result["skipped"]
+            db.commit()
+        except HTTPException as exc:
+            db.rollback()
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            errors.append(ProductImportErrorOut(line=row.line_number, message=detail))
+        except Exception as exc:
+            db.rollback()
+            errors.append(ProductImportErrorOut(line=row.line_number, message=str(exc)))
+
+    log_action(
+        db,
+        current_user,
+        "stock.product_import",
+        "stock_import",
+        current_user.restaurant_id,
+        f"Import Excel: {created} créés, {updated} maj, {entries} entrées, {len(errors)} erreurs",
+        {"created": created, "updated": updated, "entries": entries, "errors": len(errors)},
+    )
+    db.commit()
+
+    message = (
+        f"Import terminé : {created} créé(s), {updated} mis à jour, "
+        f"{entries} entrée(s) stock, {len(errors)} erreur(s)."
+    )
+    return ProductImportResultOut(
+        created=created,
+        updated=updated,
+        entries=entries,
+        skipped=skipped,
+        errors=errors[:50],
+        message=message,
+    )
+
+
+def _import_product_row(db: Session, current_user: User, row: ImportRow) -> dict[str, int]:
+    restaurant_id = current_user.restaurant_id
+    unit = ensure_unit_by_label(db, restaurant_id, row.unite)
+    product = None
+    if row.code:
+        product = (
+            db.query(Product)
+            .filter(Product.restaurant_id == restaurant_id, Product.code == row.code)
+            .one_or_none()
+        )
+    if product is None:
+        product = (
+            db.query(Product)
+            .filter(Product.restaurant_id == restaurant_id, Product.name == row.nom)
+            .one_or_none()
+        )
+
+    created = updated = entries = skipped = 0
+    if product is None:
+        product = Product(
+            restaurant_id=restaurant_id,
+            code=row.code,
+            name=row.nom,
+            product_type=StockProductType.INGREDIENT,
+            unit_id=unit.id,
+            purchase_price=0,
+            cmup=0,
+            minimum_stock=row.seuil_min,
+            is_active=True,
+        )
+        db.add(product)
+        db.flush()
+        created = 1
+    else:
+        product.unit_id = unit.id
+        product.minimum_stock = row.seuil_min
+        if row.code and not product.code:
+            product.code = row.code
+        db.flush()
+        updated = 1
+
+    if row.quantite is not None and row.quantite > 0:
+        depot = ensure_depot_by_label(db, restaurant_id, row.depot or "")
+        unit_price = dec(row.prix_achat) if row.prix_achat is not None else None
+        add_movement(
+            db,
+            restaurant_id=restaurant_id,
+            user_id=current_user.id,
+            movement_type=StockMovementType.DIRECT_ENTRY,
+            product_id=product.id,
+            destination_depot_id=depot.id,
+            quantity=dec(row.quantite),
+            unit_price=unit_price,
+            reason="Import Excel",
+            reference=f"import-ligne-{row.line_number}",
+            movement_date=utcnow(),
+        )
+        entries = 1
+    elif created == 0 and updated == 1 and row.quantite is None:
+        skipped = 0
+
+    return {"created": created, "updated": updated, "entries": entries, "skipped": skipped}
 
 
 @router.get("/products/{product_id}", response_model=ProductPublic)
