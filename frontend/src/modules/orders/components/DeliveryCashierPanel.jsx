@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { AdminFormModal, DashboardSection, FilterBar, SecondaryAction } from "@/modules/admin/components/AdminUi";
 import { menuApi } from "@/modules/menu/services/menuApi";
 import { orderTakerDisplay } from "@/modules/orders/utils/orderLabels";
 import { orderApi } from "@/modules/orders/services/orderApi";
-import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
+import {
+  cacheDeliveryAreas,
+  cacheMenuCatalog,
+  getCachedDeliveryAreasAsync,
+  getCachedMenuCatalogAsync,
+} from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 
 const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
@@ -67,7 +73,11 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   const [cart, setCart] = useState(new Map());
   const [areaSearch, setAreaSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [letterFilter, setLetterFilter] = useState("ALL");
   const [kitchenBusyId, setKitchenBusyId] = useState("");
+  const [feeDraft, setFeeDraft] = useState("");
+  const [feeBusy, setFeeBusy] = useState(false);
+  const [usingOfflineCatalog, setUsingOfflineCatalog] = useState(false);
 
   useEffect(() => {
     loadAreas();
@@ -80,9 +90,20 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   async function loadAreas() {
     try {
       const data = await orderApi.listDeliveryAreas();
-      setAreas(data.sort((a, b) => a.name.localeCompare(b.name, "fr")));
+      const sorted = data.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+      setAreas(sorted);
+      if (restaurantId) cacheDeliveryAreas(restaurantId, sorted);
+      setUsingOfflineCatalog(false);
     } catch {
-      setAreas([]);
+      const cached = restaurantId ? await getCachedDeliveryAreasAsync(restaurantId) : null;
+      if (cached?.length) {
+        setAreas([...cached].sort((a, b) => a.name.localeCompare(b.name, "fr")));
+        setUsingOfflineCatalog(true);
+        onMessage?.("Quartiers chargés depuis la mémoire locale (hors ligne).");
+      } else {
+        setAreas([]);
+        onMessage?.("Aucun quartier en mémoire. Connectez-vous une fois pour les mémoriser.");
+      }
     }
   }
 
@@ -119,10 +140,16 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
       setDishes(nextDishes);
       cacheMenuCatalog(restaurantId, nextCategories, nextDishes);
     } catch {
-      const cached = getCachedMenuCatalog(restaurantId);
+      const cached = await getCachedMenuCatalogAsync(restaurantId);
       if (cached) {
         setCategories(cached.categories || []);
         setDishes(cached.dishes || []);
+        setUsingOfflineCatalog(true);
+        onMessage?.("Menu chargé depuis la mémoire locale (hors ligne).");
+      } else {
+        setCategories([]);
+        setDishes([]);
+        onMessage?.("Aucun menu en mémoire. Connectez-vous une fois pour le mémoriser.");
       }
     }
   }
@@ -133,6 +160,10 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   const deliveryFee = Number(selectedArea?.delivery_fee || 0);
   const total = subtotal + deliveryFee;
 
+  useEffect(() => {
+    setFeeDraft(selectedArea ? String(Number(selectedArea.delivery_fee || 0)) : "");
+  }, [selectedArea?.id, selectedArea?.delivery_fee]);
+
   const filteredAreas = useMemo(() => {
     const query = areaSearch.trim().toLowerCase();
     if (!query) return areas;
@@ -140,9 +171,34 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   }, [areaSearch, areas]);
 
   const visibleDishes = useMemo(() => {
-    if (categoryFilter === "ALL") return dishes;
-    return dishes.filter((dish) => dish.category_id === categoryFilter);
-  }, [categoryFilter, dishes]);
+    const byCategory =
+      categoryFilter === "ALL" ? dishes : dishes.filter((dish) => dish.category_id === categoryFilter);
+    return filterByLetter(byCategory, letterFilter);
+  }, [categoryFilter, dishes, letterFilter]);
+
+  async function saveSelectedAreaFee() {
+    if (!selectedArea) return;
+    const nextFee = Math.round(Number(String(feeDraft).replace(/\s/g, "").replace(",", ".")));
+    if (!Number.isFinite(nextFee) || nextFee < 0) {
+      onMessage?.("Frais de livraison invalide.");
+      return;
+    }
+    if (nextFee === Number(selectedArea.delivery_fee || 0)) return;
+    setFeeBusy(true);
+    try {
+      const updated = await orderApi.updateDeliveryAreaFee(selectedArea.id, nextFee);
+      setAreas((current) => {
+        const next = current.map((area) => (area.id === updated.id ? { ...area, ...updated } : area));
+        if (restaurantId) cacheDeliveryAreas(restaurantId, next);
+        return next;
+      });
+      onMessage?.(`Frais ${selectedArea.name} : ${nextFee.toLocaleString("fr-FR")} FCFA`);
+    } catch (error) {
+      onMessage?.(error.message || "Impossible de modifier le frais de livraison.");
+    } finally {
+      setFeeBusy(false);
+    }
+  }
 
   const query = search.trim().toLowerCase();
   const filteredOrders = useMemo(
@@ -185,6 +241,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
     });
     setCart(new Map());
     setCategoryFilter("ALL");
+    setLetterFilter("ALL");
     setAreaSearch("");
   }
 
@@ -409,7 +466,34 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
                   </option>
                 ))}
               </select>
-              <span className="lte-help">{areas.length} quartier(s) disponibles à Yaoundé</span>
+              <span className="lte-help">
+                {areas.length} quartier(s) disponibles
+                {usingOfflineCatalog ? " · mémoire locale" : ""}
+              </span>
+              {selectedArea && (
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <label className="lte-form-group mb-0 min-w-[140px] flex-1">
+                    <span className="lte-label">Frais {selectedArea.name}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="50"
+                      value={feeDraft}
+                      onChange={(event) => setFeeDraft(event.target.value)}
+                      className="form-control"
+                      disabled={feeBusy}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="lte-tool-btn"
+                    disabled={feeBusy || !feeDraft}
+                    onClick={saveSelectedAreaFee}
+                  >
+                    {feeBusy ? "…" : "Enregistrer frais"}
+                  </button>
+                </div>
+              )}
             </label>
             <label className="lte-form-group">
               <span className="lte-label">Paiement</span>
@@ -464,7 +548,15 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
                   </button>
                 ))}
               </div>
+              <div className="mb-3">
+                <AlphabetFilter value={letterFilter} onChange={setLetterFilter} items={dishes} />
+              </div>
               <div className="grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2">
+                {visibleDishes.length === 0 && (
+                  <p className="col-span-full py-6 text-center text-xs font-semibold text-slate-500">
+                    Aucun produit pour cette lettre.
+                  </p>
+                )}
                 {visibleDishes.map((dish) => (
                   <button
                     key={dish.id}

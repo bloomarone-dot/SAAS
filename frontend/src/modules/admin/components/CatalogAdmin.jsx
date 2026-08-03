@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { DashboardSection, EmptyState as AdminEmptyState, FilterBar, PageHeader } from "@/modules/admin/components/AdminUi";
 import { nextSort, SortButton, sortRows } from "@/utils/sort";
 import { apiFetch } from "@/config/http";
@@ -41,6 +42,7 @@ export function CatalogAdmin({ onMessage }) {
   const [itemForm, setItemForm] = useState(emptyItem);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [letterFilter, setLetterFilter] = useState("ALL");
   const [availabilityFilter, setAvailabilityFilter] = useState("ALL");
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
   const [isLoading, setIsLoading] = useState(false);
@@ -61,7 +63,7 @@ export function CatalogAdmin({ onMessage }) {
         (availabilityFilter === "UNAVAILABLE" && !item.is_available);
       return matchesSearch && matchesCategory && matchesAvailability;
     });
-    return sortRows(rows, sort, {
+    return sortRows(filterByLetter(rows, letterFilter), sort, {
       name: (item) => item.name,
       category: (item) => categories.find((category) => category.id === item.category_id)?.name ?? "",
       price: (item) => Number(item.price),
@@ -69,7 +71,7 @@ export function CatalogAdmin({ onMessage }) {
       status: (item) => Number(item.is_available),
       created_at: (item) => item.created_at,
     });
-  }, [availabilityFilter, categories, categoryFilter, items, search, sort]);
+  }, [availabilityFilter, categories, categoryFilter, items, letterFilter, search, sort]);
 
   useEffect(() => {
     loadCatalog();
@@ -286,6 +288,9 @@ export function CatalogAdmin({ onMessage }) {
                 <option value="UNAVAILABLE">Indisponibles</option>
               </select>
           </FilterBar>
+          <div className="mb-4">
+            <AlphabetFilter value={letterFilter} onChange={setLetterFilter} items={items} />
+          </div>
 
           <div className="overflow-x-auto">
             <table className="lte-table min-w-[820px]">

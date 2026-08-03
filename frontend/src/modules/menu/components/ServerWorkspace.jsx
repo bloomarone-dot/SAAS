@@ -9,7 +9,8 @@ import { paymentApi } from "@/modules/orders/services/paymentApi";
 import TableGrid from "./TableGrid";
 import TableSessionModal from "./TableSessionModal";
 import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnapshot, saveServerSession } from "../utils/serverSessionStorage";
-import { cacheMenuCatalog, getCachedMenuCatalog } from "@/utils/offlineCache";
+import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
+import { cacheMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { formatMinutes, orderKitchenTimingDetails, orderKitchenTimingLabel } from "../utils/kitchenTiming";
@@ -97,6 +98,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const [categories, setCategories] = useState([]);
   const [dishes, setDishes] = useState([]);
   const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [letterFilter, setLetterFilter] = useState("ALL");
   const [message, setMessage] = useState("");
   useAutoClearMessage(message, setMessage);
   const [error, setError] = useState("");
@@ -150,17 +152,19 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
           menuApi.getDishesByCategory(category.id, false).catch(() => [])
         )
       );
-      setCategories(fetchedCategories.filter((item) => item.is_active !== false));
-      setDishes(groups.flat().filter((dish) => dish.is_available !== false));
-      cacheMenuCatalog(restaurantId, fetchedCategories, groups.flat());
+      const nextCategories = fetchedCategories.filter((item) => item.is_active !== false);
+      const nextDishes = groups.flat().filter((dish) => dish.is_available !== false);
+      setCategories(nextCategories);
+      setDishes(nextDishes);
+      cacheMenuCatalog(restaurantId, nextCategories, nextDishes);
     } catch {
-      const cached = getCachedMenuCatalog(restaurantId);
+      const cached = await getCachedMenuCatalogAsync(restaurantId);
       if (cached) {
         setCategories((cached.categories || []).filter((item) => item.is_active !== false));
         setDishes((cached.dishes || []).filter((dish) => dish.is_available !== false));
-        setMessage("Menu chargé depuis la mémoire locale (connexion instable).");
+        setMessage("Menu chargé depuis la mémoire locale (hors ligne).");
       } else {
-        setError("Impossible de charger le menu.");
+        setError("Impossible de charger le menu. Connectez-vous une fois pour le mémoriser.");
       }
     }
   }, [restaurantId]);
@@ -321,9 +325,10 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   }, [session, currentUser?.id, resuming]);
 
   const visibleDishes = useMemo(() => {
-    if (categoryFilter === "ALL") return dishes;
-    return dishes.filter((dish) => dish.category_id === categoryFilter);
-  }, [categoryFilter, dishes]);
+    const byCategory =
+      categoryFilter === "ALL" ? dishes : dishes.filter((dish) => dish.category_id === categoryFilter);
+    return filterByLetter(byCategory, letterFilter);
+  }, [categoryFilter, dishes, letterFilter]);
 
   const visibleItems = useMemo(
     () => (order?.items ?? []).filter((item) => item.sale_channel !== "EMBALLAGE"),
@@ -742,8 +747,11 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
             hidden={!showMenu}
             categories={categories}
             dishes={visibleDishes}
+            allDishes={dishes}
             categoryFilter={categoryFilter}
+            letterFilter={letterFilter}
             onCategoryChange={setCategoryFilter}
+            onLetterChange={setLetterFilter}
             onAddDish={addDish}
             disabled={!canEditOrder || busy === "items"}
           />
@@ -820,7 +828,18 @@ function StepBar({ current }) {
   );
 }
 
-function MenuPanel({ hidden, categories, dishes, categoryFilter, onCategoryChange, onAddDish, disabled }) {
+function MenuPanel({
+  hidden,
+  categories,
+  dishes,
+  allDishes,
+  categoryFilter,
+  letterFilter,
+  onCategoryChange,
+  onLetterChange,
+  onAddDish,
+  disabled,
+}) {
   if (hidden) {
     return (
       <div className="rounded-lg border border-dashed border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -853,9 +872,13 @@ function MenuPanel({ hidden, categories, dishes, categoryFilter, onCategoryChang
         </select>
       </div>
 
+      <div className="mt-3 border-b border-slate-100 pb-3">
+        <AlphabetFilter value={letterFilter} onChange={onLetterChange} items={allDishes} />
+      </div>
+
       <div className="mt-4 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
         {dishes.length === 0 && (
-          <p className="py-8 text-center text-sm font-semibold text-slate-500">Aucun plat disponible.</p>
+          <p className="py-8 text-center text-sm font-semibold text-slate-500">Aucun plat pour cette lettre.</p>
         )}
         {dishes.map((dish) => (
           <div

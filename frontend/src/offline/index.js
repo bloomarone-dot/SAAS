@@ -7,6 +7,8 @@ export {
   loadTablesSnapshot,
   saveCashierSnapshot,
   loadCashierSnapshot,
+  saveDeliveryAreasSnapshot,
+  loadDeliveryAreasSnapshot,
   upsertLocalOrder,
   listLocalOrders,
   upsertLocalKitchenTicket,

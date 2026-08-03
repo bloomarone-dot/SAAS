@@ -1,7 +1,15 @@
-import { loadCatalogSnapshot, loadTablesSnapshot, saveCatalogSnapshot, saveTablesSnapshot } from "@/offline/store";
+import {
+  loadCatalogSnapshot,
+  loadDeliveryAreasSnapshot,
+  loadTablesSnapshot,
+  saveCatalogSnapshot,
+  saveDeliveryAreasSnapshot,
+  saveTablesSnapshot,
+} from "@/offline/store";
 
 const MENU_KEY = "offline_menu_cache";
 const TABLES_KEY = "offline_tables_cache";
+const AREAS_KEY = "offline_delivery_areas_cache";
 
 function read(key) {
   try {
@@ -104,4 +112,36 @@ export async function getCachedTablesAsync(restaurantId) {
   if (!snapshot) return null;
   write(TABLES_KEY, restaurantId, snapshot.tables);
   return snapshot.tables;
+}
+
+/** Cache quartiers / frais livraison : localStorage + IndexedDB. */
+export function cacheDeliveryAreas(restaurantId, areas) {
+  if (!restaurantId || !Array.isArray(areas)) return;
+  write(AREAS_KEY, restaurantId, areas);
+  saveDeliveryAreasSnapshot(restaurantId, areas).catch(() => {});
+}
+
+export function getCachedDeliveryAreas(restaurantId) {
+  const data = read(AREAS_KEY);
+  if (data && data.restaurantId === restaurantId) {
+    return data.payload;
+  }
+  loadDeliveryAreasSnapshot(restaurantId)
+    .then((snapshot) => {
+      if (!snapshot) return;
+      write(AREAS_KEY, restaurantId, snapshot.areas);
+    })
+    .catch(() => {});
+  return null;
+}
+
+export async function getCachedDeliveryAreasAsync(restaurantId) {
+  const data = read(AREAS_KEY);
+  if (data && data.restaurantId === restaurantId) {
+    return data.payload;
+  }
+  const snapshot = await loadDeliveryAreasSnapshot(restaurantId);
+  if (!snapshot) return null;
+  write(AREAS_KEY, restaurantId, snapshot.areas);
+  return snapshot.areas;
 }

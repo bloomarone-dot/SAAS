@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
+import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { formatFcfa, parseFcfa } from "@/utils/money";
+import { cacheMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
 import { menuApi } from "../services/menuApi";
 
 const emptyDish = {
@@ -28,6 +30,7 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   const [form, setForm] = useState(emptyDish);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [letterFilter, setLetterFilter] = useState("ALL");
   const [availabilityFilter, setAvailabilityFilter] = useState(initialAvailabilityFilter);
   const [showForm, setShowForm] = useState(showCreateOnMount);
   const [editingId, setEditingId] = useState("");
@@ -44,7 +47,7 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
   );
   const visibleDishes = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return dishes.filter((dish) => {
+    const filtered = dishes.filter((dish) => {
       const category = categoryNameById.get(dish.category_id) ?? "";
       const matchesSearch = !query || [dish.name, dish.description, category].join(" ").toLowerCase().includes(query);
       const matchesCategory = categoryFilter === "ALL" || dish.category_id === categoryFilter;
@@ -54,7 +57,8 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         (availabilityFilter === "UNAVAILABLE" && !dish.is_available);
       return matchesSearch && matchesCategory && matchesAvailability;
     });
-  }, [availabilityFilter, categoryFilter, categoryNameById, dishes, search]);
+    return filterByLetter(filtered, letterFilter);
+  }, [availabilityFilter, categoryFilter, categoryNameById, dishes, letterFilter, search]);
 
   const averagePrice = dishes.length ? dishes.reduce((total, dish) => total + Number(dish.price || 0), 0) / dishes.length : 0;
   const topDishes = dishes.slice(0, 4);
@@ -87,8 +91,10 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
       const fetchedCategories = await menuApi.getCategories(restaurantId);
       const results = await Promise.all(fetchedCategories.map((category) => menuApi.getDishesByCategory(category.id)));
       const availableCategories = fetchedCategories.filter((category) => category.is_active !== false);
+      const nextDishes = results.flat();
       setCategories(fetchedCategories);
-      setDishes(results.flat());
+      setDishes(nextDishes);
+      if (restaurantId) cacheMenuCatalog(restaurantId, availableCategories, nextDishes);
       setForm((current) => {
         const isCurrentActive = availableCategories.some((category) => category.id === current.category_id);
         return { ...current, category_id: isCurrentActive ? current.category_id : availableCategories[0]?.id || "" };
@@ -98,7 +104,14 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
         return availableCategories.some((category) => category.id === current) ? current : "ALL";
       });
     } catch {
-      setError("Erreur lors du chargement des plats.");
+      const cached = restaurantId ? await getCachedMenuCatalogAsync(restaurantId) : null;
+      if (cached?.dishes?.length) {
+        setCategories(cached.categories || []);
+        setDishes(cached.dishes || []);
+        setNotice("Plats chargés depuis la mémoire locale (hors ligne).");
+      } else {
+        setError("Erreur lors du chargement des plats.");
+      }
     } finally {
       setLoading(false);
     }
@@ -340,6 +353,9 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
               </select>
             </div>
           </FilterBar>
+          <div className="mb-4">
+            <AlphabetFilter value={letterFilter} onChange={setLetterFilter} items={dishes} />
+          </div>
           <DishesTable
             dishes={visibleDishes}
             categoryNameById={categoryNameById}

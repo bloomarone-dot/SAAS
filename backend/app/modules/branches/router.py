@@ -149,12 +149,24 @@ def update_delivery_area(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+    fields_set = set(getattr(payload, "model_fields_set", None) or payload.__fields_set__)
+    fee_only = fields_set and fields_set <= {"delivery_fee"}
+    if has_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE):
+        pass
+    elif fee_only and has_permission(current_user, Permission.CASHIER_UPDATE):
+        pass
+    else:
+        assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+
     area = get_delivery_area_or_404(db, current_user.restaurant_id, area_id)
-    fields_set = getattr(payload, "model_fields_set", None) or payload.__fields_set__
     if "branch_id" in fields_set:
         validate_branch_scope(db, current_user.restaurant_id, payload.branch_id)
-    for field in ("name", "delivery_fee", "branch_id", "average_delivery_minutes", "is_active"):
+    allowed_fields = (
+        ("delivery_fee",)
+        if fee_only and not has_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
+        else ("name", "delivery_fee", "branch_id", "average_delivery_minutes", "is_active")
+    )
+    for field in allowed_fields:
         if field in fields_set:
             value = getattr(payload, field)
             if field == "name" and isinstance(value, str):

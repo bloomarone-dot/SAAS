@@ -224,6 +224,7 @@ export async function clearLocalOpsData(restaurantId) {
     await idbDelete(STORES.catalog, restaurantId);
     await idbDelete(STORES.tables, restaurantId);
     await idbDelete(STORES.meta, `cashier_report:${restaurantId}`);
+    await idbDelete(STORES.meta, `delivery_areas:${restaurantId}`);
     const orders = await listLocalOrders(restaurantId);
     for (const order of orders) await idbDelete(STORES.orders, order.id);
     const tickets = await listLocalKitchenTickets(restaurantId);
@@ -247,6 +248,31 @@ export async function loadCashierSnapshot(restaurantId) {
     await initOfflineFoundation();
     const row = await idbGet(STORES.meta, `cashier_report:${restaurantId}`);
     return row?.report || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveDeliveryAreasSnapshot(restaurantId, areas = []) {
+  if (!restaurantId) return null;
+  await initOfflineFoundation();
+  return idbPut(STORES.meta, {
+    key: `delivery_areas:${restaurantId}`,
+    areas,
+    savedAt: new Date().toISOString(),
+  });
+}
+
+export async function loadDeliveryAreasSnapshot(restaurantId) {
+  if (!restaurantId) return null;
+  try {
+    await initOfflineFoundation();
+    const row = await idbGet(STORES.meta, `delivery_areas:${restaurantId}`);
+    if (!row) return null;
+    return {
+      areas: Array.isArray(row.areas) ? row.areas : [],
+      savedAt: row.savedAt,
+    };
   } catch {
     return null;
   }

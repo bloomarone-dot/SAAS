@@ -117,4 +117,10 @@ export const orderApi = {
     const suffix = query.toString() ? `?${query}` : "";
     return request(`/api/v1/branches/delivery-areas${suffix}`);
   },
+
+  updateDeliveryAreaFee: (areaId, deliveryFee) =>
+    request(`/api/v1/branches/delivery-areas/${areaId}`, {
+      method: "PATCH",
+      body: { delivery_fee: Number(deliveryFee) },
+    }),
 };

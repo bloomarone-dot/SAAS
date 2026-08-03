@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { PageHeader } from "@/modules/admin/components/AdminUi";
 import { apiFetch } from "@/config/http";
+import { cacheDeliveryAreas } from "@/utils/offlineCache";
 import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { validationFor } from "@/utils/validation";
 
@@ -97,7 +98,7 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
         timezone: data.timezone ?? "Africa/Douala",
       });
       onThemeChange?.(buildRestaurantTheme(data));
-      loadDeliveryAreas();
+      loadDeliveryAreas(data.id || currentUser?.restaurant_id);
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -115,9 +116,12 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
     setAreaForm((current) => ({ ...current, [name]: value }));
   }
 
-  async function loadDeliveryAreas() {
+  async function loadDeliveryAreas(restaurantIdOverride) {
     try {
-      setDeliveryAreas(await settingsApi("/api/v1/branches/delivery-areas"));
+      const areas = await settingsApi("/api/v1/branches/delivery-areas");
+      setDeliveryAreas(areas);
+      const restaurantId = restaurantIdOverride || currentUser?.restaurant_id || restaurant?.id;
+      if (restaurantId) cacheDeliveryAreas(restaurantId, areas);
     } catch {
       setDeliveryAreas([]);
     }
@@ -175,7 +179,12 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
         method: "PATCH",
         body: { delivery_fee: deliveryFee },
       });
-      setDeliveryAreas((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setDeliveryAreas((current) => {
+        const next = current.map((item) => (item.id === updated.id ? updated : item));
+        const restaurantId = currentUser?.restaurant_id || restaurant?.id;
+        if (restaurantId) cacheDeliveryAreas(restaurantId, next);
+        return next;
+      });
       onMessage(`Frais ${area.name} : ${deliveryFee.toLocaleString("fr-FR")} FCFA`);
     } catch (error) {
       onMessage(error.message);
