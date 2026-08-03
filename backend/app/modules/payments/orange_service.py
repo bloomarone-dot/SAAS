@@ -1,23 +1,31 @@
 """
 Service d'intégration Orange Money Cameroun via l'API Y-Note / Paynote.
 
-Documentation : https://www.paynote.africa/documentation-paynote.html
+Documentation : https://www.y-note.cm/integration-de-lapi-local-orange-money/
 Endpoint prod : https://api-s1.orange.cm/
+
+Flux USSD :
+  1. POST /token          → access_token
+  2. POST /mp/init        → payToken
+  3. POST /mp/pay         → push USSD (orderId, notifUrl, …)
 
 Toutes les credentials sont lues depuis les variables d'environnement —
 elles ne doivent JAMAIS apparaître dans le code source.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
-from typing import Optional
+import re
+from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# ─── Config (injectée via variables d'environnement) ──────────────────────────
 
 def _cfg(key: str, default: str = "") -> str:
     return os.getenv(key, default).strip()
@@ -25,7 +33,7 @@ def _cfg(key: str, default: str = "") -> str:
 
 def get_orange_config() -> dict:
     return {
-        "base_url": _cfg("ORANGE_API_URL", "https://api-s1.orange.cm"),
+        "base_url": _cfg("ORANGE_API_URL", "https://api-s1.orange.cm").rstrip("/"),
         "username": _cfg("ORANGE_USERNAME"),
         "password": _cfg("ORANGE_PASSWORD"),
         "channel_msisdn": _cfg("ORANGE_CHANNEL_MSISDN"),
@@ -37,7 +45,57 @@ def get_orange_config() -> dict:
 
 def is_orange_configured() -> bool:
     cfg = get_orange_config()
-    return bool(cfg["username"] and cfg["password"] and cfg["channel_msisdn"] and cfg["pin"])
+    return bool(cfg["username"] and cfg["password"] and cfg["channel_msisdn"] and cfg["pin"] and cfg["x_auth_token"])
+
+
+def normalize_cm_msisdn(msisdn: str) -> str:
+    """Normalise un numéro camerounais (9 chiffres, sans +237 / 0 initial)."""
+    digits = re.sub(r"\D", "", str(msisdn or ""))
+    if digits.startswith("237") and len(digits) >= 12:
+        digits = digits[3:]
+    if len(digits) == 10 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits
+
+
+def require_public_notify_url(notify_url: Optional[str]) -> str:
+    """Orange exige une NotifUrl publique non vide (HTTPS recommandé)."""
+    url = (notify_url or "").strip()
+    if not url:
+        raise OrangePaymentError(
+            "URL de notification manquante. Définissez APP_PUBLIC_URL "
+            "(ex. https://restaurant.bloomarone.com) dans le .env du serveur."
+        )
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise OrangePaymentError(f"URL de notification invalide: {url}")
+    host = (parsed.hostname or "").lower()
+    if host in {"localhost", "127.0.0.1", "0.0.0.0"} or host.endswith(".local"):
+        raise OrangePaymentError(
+            "APP_PUBLIC_URL doit être une URL publique (pas localhost) pour Orange Money."
+        )
+    return url
+
+
+def _auth_headers(cfg: dict, token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-AUTH-TOKEN": cfg["x_auth_token"],
+        "Content-Type": "application/json",
+    }
+
+
+def _flatten_orange_payload(data: dict) -> dict:
+    """Aplatit {message, data:{...}} pour le reste du module paiements."""
+    if not isinstance(data, dict):
+        return {"raw": data}
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        flat = {**nested}
+        if data.get("message") and "message" not in flat:
+            flat["message"] = data["message"]
+        return flat
+    return data
 
 
 # ─── Étape 1 : obtenir un access token OAuth2 ────────────────────────────────
@@ -45,7 +103,7 @@ def is_orange_configured() -> bool:
 async def fetch_access_token(cfg: dict) -> str:
     """
     POST /token
-    Basic auth avec username:password encodé en base64.
+    Basic auth avec username:password.
     Retourne le bearer token.
     """
     url = f"{cfg['base_url']}/token"
@@ -64,7 +122,31 @@ async def fetch_access_token(cfg: dict) -> str:
         return token
 
 
-# ─── Étape 2 : initier le paiement (cashin) ──────────────────────────────────
+# ─── Étape 2 : initialiser le paiement (payToken) ────────────────────────────
+
+async def fetch_pay_token(cfg: dict, token: str) -> str:
+    """POST /omcoreapis/1.0.2/mp/init → payToken."""
+    url = f"{cfg['base_url']}/omcoreapis/1.0.2/mp/init"
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, headers=_auth_headers(cfg, token))
+        raw = response.text
+        try:
+            data = response.json()
+        except Exception:
+            data = {"raw": raw, "status_code": response.status_code}
+
+        if response.status_code not in (200, 201, 202):
+            error_msg = data.get("message") or data.get("error") or raw[:200]
+            raise OrangePaymentError(f"Erreur Orange Money init ({response.status_code}): {error_msg}", raw=raw)
+
+        flat = _flatten_orange_payload(data)
+        pay_token = flat.get("payToken") or flat.get("pay_token")
+        if not pay_token:
+            raise OrangePaymentError("Réponse Orange init sans payToken", raw=raw)
+        return str(pay_token)
+
+
+# ─── Étape 3 : initier le paiement (cashin USSD) ─────────────────────────────
 
 async def initiate_cashin(
     amount: int,
@@ -79,43 +161,47 @@ async def initiate_cashin(
     Paramètres :
         amount        : montant en FCFA (entier)
         payer_msisdn  : numéro Orange du client (ex: 690000000)
-        order_ref     : référence unique de commande
-        notify_url    : URL webhook de confirmation (optionnel)
-
-    Retourne le dict de réponse Orange contenant pay_token, status, etc.
+        order_ref     : référence unique de commande / transaction
+        notify_url    : URL webhook de confirmation (obligatoire côté Orange)
     """
     cfg = get_orange_config()
+    notif_url = require_public_notify_url(notify_url)
+    order_id = str(order_ref or "").strip()
+    if not order_id:
+        raise OrangePaymentError("OrderId manquant pour Orange Money.")
+
+    subscriber = normalize_cm_msisdn(payer_msisdn)
+    if len(subscriber) != 9 or not subscriber.startswith("6"):
+        raise OrangePaymentError(
+            f"Numéro Orange invalide ({payer_msisdn}). Format attendu : 6XXXXXXXX."
+        )
+
     token = await fetch_access_token(cfg)
+    pay_token = await fetch_pay_token(cfg, token)
 
     url = f"{cfg['base_url']}/omcoreapis/1.0.2/mp/pay"
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "X-AUTH-TOKEN": cfg["x_auth_token"],
-        "Content-Type": "application/json",
-    }
-
+    # Noms camelCase exigés par l'API Orange CM (OrderId / NotifUrl côté serveur).
     payload = {
-        "merchant_key": cfg["x_auth_token"],
-        "currency": "XAF",
-        "order_id": order_ref,
-        "amount": int(amount),
-        "return_url": notify_url or "",
-        "cancel_url": notify_url or "",
-        "notif_url": notify_url or "",
-        "lang": "fr",
-        "reference": order_ref,
-        # Champs spécifiques appel de fonds USSD
-        "channelUserMsisdn": cfg["channel_msisdn"],
+        "notifUrl": notif_url,
+        "channelUserMsisdn": normalize_cm_msisdn(cfg["channel_msisdn"]),
+        "amount": str(int(amount)),
+        "subscriberMsisdn": subscriber,
         "pin": cfg["pin"],
-        "subscriberMsisdn": payer_msisdn.lstrip("0").lstrip("+237"),
-        "description": description,
+        "orderId": order_id,
+        "description": (description or "Paiement Bloomar One")[:255],
+        "payToken": pay_token,
     }
 
-    logger.info("Orange Money cashin request: order=%s amount=%s payer=%s", order_ref, amount, payer_msisdn)
+    logger.info(
+        "Orange Money cashin request: order=%s amount=%s payer=%s notif=%s",
+        order_id,
+        amount,
+        subscriber,
+        notif_url,
+    )
 
     async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(url, json=payload, headers=headers)
+        response = await client.post(url, json=payload, headers=_auth_headers(cfg, token))
         raw = response.text
         logger.debug("Orange Money raw response [%s]: %s", response.status_code, raw[:500])
 
@@ -125,13 +211,20 @@ async def initiate_cashin(
             data = {"raw": raw, "status_code": response.status_code}
 
         if response.status_code not in (200, 201, 202):
-            error_msg = data.get("message") or data.get("error") or raw[:200]
+            error_msg = data.get("message") or data.get("title") or data.get("error") or raw[:300]
+            if isinstance(data.get("errors"), dict):
+                error_msg = f"{error_msg} {json.dumps(data['errors'], ensure_ascii=False)}"
             raise OrangePaymentError(f"Erreur Orange Money ({response.status_code}): {error_msg}", raw=raw)
 
-        return data
+        flat = _flatten_orange_payload(data)
+        # Garantir que le payToken de l'init est conservé si absente de la réponse pay.
+        flat.setdefault("payToken", pay_token)
+        flat.setdefault("orderId", order_id)
+        flat.setdefault("notifUrl", notif_url)
+        return flat
 
 
-# ─── Étape 3 : vérifier le statut d'une transaction ──────────────────────────
+# ─── Étape 4 : vérifier le statut d'une transaction ──────────────────────────
 
 async def check_transaction_status(pay_token: str) -> dict:
     """
@@ -143,15 +236,10 @@ async def check_transaction_status(pay_token: str) -> dict:
 
     url = f"{cfg['base_url']}/omcoreapis/1.0.2/mp/paymentstatus/{pay_token}"
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "X-AUTH-TOKEN": cfg["x_auth_token"],
-    }
-
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(url, headers=headers)
+        response = await client.get(url, headers=_auth_headers(cfg, token))
         response.raise_for_status()
-        return response.json()
+        return _flatten_orange_payload(response.json())
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -161,10 +249,15 @@ def parse_orange_status(raw_data: dict) -> str:
     Traduit la réponse Orange en statut interne :
     SUCCESS | PENDING | FAILED | CANCELLED | EXPIRED
     """
-    status = (raw_data.get("status") or raw_data.get("paymentStatus") or "").upper()
-    message = (raw_data.get("message") or "").upper()
+    data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        data = {**data, **nested}
 
-    if status in {"SUCCESSFULL", "SUCCESS", "SUCCESSFUL"} or "SUCCESS" in message:
+    status = (data.get("status") or data.get("paymentStatus") or "").upper()
+    message = (data.get("message") or data.get("inittxnmessage") or "").upper()
+
+    if status in {"SUCCESSFULL", "SUCCESSFUL", "SUCCESS"} or "SUCCESS" in message:
         return "SUCCESS"
     if status in {"EXPIRED"}:
         return "EXPIRED"

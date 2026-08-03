@@ -63,7 +63,11 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 def _build_notify_url(request: Request, provider: str) -> str:
-    base = os.getenv("APP_PUBLIC_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+    """URL webhook publique pour Orange/MTN (APP_PUBLIC_URL obligatoire en prod)."""
+    base = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
+    if not base:
+        # Fallback utile en local uniquement — Orange refuse localhost.
+        base = str(request.base_url).rstrip("/")
     return f"{base}/api/v1/payments/{provider}/webhook"
 
 

@@ -136,9 +136,12 @@ def record_push_response(
     result: dict,
     parsed_status: str,
 ) -> None:
-    tx.pay_token = result.get("pay_token") or result.get("payToken")
-    tx.notif_token = result.get("notif_token") or result.get("notifToken")
-    tx.provider_tx_id = result.get("txnid") or result.get("transaction_id")
+    payload = result if isinstance(result, dict) else {}
+    nested = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    merged = {**nested, **payload}
+    tx.pay_token = merged.get("pay_token") or merged.get("payToken")
+    tx.notif_token = merged.get("notif_token") or merged.get("notifToken")
+    tx.provider_tx_id = merged.get("txnid") or merged.get("transaction_id")
     tx.raw_response = safe_json(result)
     tx.reconciliation_status = parsed_status
     if parsed_status in TERMINAL_FAILURE_STATUSES:

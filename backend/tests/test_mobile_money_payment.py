@@ -98,6 +98,7 @@ def make_order():
         payment_previous_status="Livrée",
         transaction_id="tx-1",
         payment_method="Orange Money",
+        paid_at=None,
     )
 
 
