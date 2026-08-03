@@ -302,7 +302,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   }, [session, currentUser?.id]);
 
   useEffect(() => {
-    if (session || !currentUser?.id || resuming) return;
+    if (!currentUser?.id || resuming) return;
     orderApi
       .list({ server_id: currentUser.id, limit: 200 })
       .then((orders) => {
@@ -327,7 +327,15 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
           recent: mineToday.slice(0, 6),
         });
       })
-      .catch(() => setDailyStats(null));
+      .catch(() =>
+        setDailyStats({
+          orders: 0,
+          clients: 0,
+          sales: 0,
+          paid: 0,
+          recent: [],
+        }),
+      );
   }, [session, currentUser?.id, resuming]);
 
   const visibleDishes = useMemo(() => {
@@ -645,12 +653,53 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     return <div className="p-6 text-sm font-semibold text-slate-500">Reprise de votre session...</div>;
   }
 
+  const reportStats = dailyStats || { orders: 0, clients: 0, sales: 0, paid: 0, recent: [] };
+  const serverName = currentUser?.first_name || currentUser?.username || "Serveuse";
+
+  function exportServerReport() {
+    const dateLabel = new Date().toLocaleDateString("fr-FR");
+    const rows = [
+      ["Rapport serveuse", serverName],
+      ["Date", dateLabel],
+      ["Commandes", reportStats.orders],
+      ["Clients servis", reportStats.clients],
+      ["Encaissées", reportStats.paid],
+      ["Total du jour", reportStats.sales],
+      [],
+      ["Commande", "Statut", "Montant"],
+      ...(reportStats.recent || []).map((item) => [item.order_number, item.status, item.total_amount]),
+    ];
+    downloadTextFile(`rapport-serveuse-${new Date().toISOString().slice(0, 10)}.csv`, `\uFEFF${toCsv(rows)}`);
+  }
+
+  function shareServerReport() {
+    shareReportOnWhatsApp(
+      buildServerReportText({
+        name: serverName,
+        stats: reportStats,
+        dateLabel: new Date().toLocaleDateString("fr-FR"),
+      }),
+    );
+  }
+
   return (
     <section className="space-y-4">
       <PageHeader
         eyebrow="Service"
         title={session ? `${session.tableRoom} · Table ${session.tableName}` : "Choisissez une table"}
         subtitle={session ? "Gérez la commande active, l’envoi cuisine et la demande de paiement." : "Ouvrez ou reprenez une table pour démarrer la prise de commande."}
+        secondaryActions={
+          <>
+            <button type="button" onClick={exportServerReport} className="lte-btn lte-btn-default">
+              <DashboardIcon name="Download" size={16} />
+              Exporter
+            </button>
+            <button type="button" onClick={shareServerReport} className="lte-btn lte-btn-primary">
+              <DashboardIcon name="Phone" size={16} />
+              WhatsApp
+            </button>
+          </>
+        }
         primaryAction={session ? (
             <button
               type="button"
@@ -729,7 +778,12 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
       {!session ? (
         <>
-          {dailyStats && <ServerDailyStats stats={dailyStats} name={currentUser?.first_name} />}
+          <ServerDailyStats
+            stats={reportStats}
+            name={serverName}
+            onExport={exportServerReport}
+            onWhatsApp={shareServerReport}
+          />
           <TableGrid
             restaurantId={restaurantId}
             onSelectTable={setSelectedTable}
@@ -910,34 +964,16 @@ function MenuPanel({
   );
 }
 
-function ServerDailyStats({ stats, name }) {
-  const dateLabel = new Date().toLocaleDateString("fr-FR");
-  function shareWhatsApp() {
-    shareReportOnWhatsApp(buildServerReportText({ name, stats, dateLabel }));
-  }
-  function exportCsv() {
-    const rows = [
-      ["Rapport serveuse", name || ""],
-      ["Date", dateLabel],
-      ["Commandes", stats.orders],
-      ["Clients servis", stats.clients],
-      ["Encaissées", stats.paid],
-      ["Total du jour", stats.sales],
-      [],
-      ["Commande", "Statut", "Montant"],
-      ...(stats.recent || []).map((item) => [item.order_number, item.status, item.total_amount]),
-    ];
-    downloadTextFile(`rapport-serveuse-${new Date().toISOString().slice(0, 10)}.csv`, `\uFEFF${toCsv(rows)}`);
-  }
+function ServerDailyStats({ stats, name, onExport, onWhatsApp }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-black uppercase text-slate-500">Vos ventes du jour{name ? ` · ${name}` : ""}</p>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={exportCsv} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-black text-slate-700">
+          <button type="button" onClick={onExport} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-700">
             Exporter
           </button>
-          <button type="button" onClick={shareWhatsApp} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-black text-white">
+          <button type="button" onClick={onWhatsApp} className="h-10 rounded-lg bg-emerald-700 px-4 text-sm font-black text-white">
             WhatsApp
           </button>
         </div>
