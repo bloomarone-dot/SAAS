@@ -359,7 +359,7 @@ export async function sendLocalOrderToKitchen(order, restaurantId, dishesById = 
   return { order: nextOrder, tickets };
 }
 
-export async function advanceLocalTicket(ticket, nextStatus, restaurantId) {
+export async function advanceLocalTicket(ticket, nextStatus, restaurantId, { cookUserId = null } = {}) {
   const now = nowIso();
   const updated = {
     ...ticket,
@@ -367,7 +367,10 @@ export async function advanceLocalTicket(ticket, nextStatus, restaurantId) {
     updatedAt: now,
     restaurantId: restaurantId || ticket.restaurantId,
   };
-  if (nextStatus === "En préparation" && !updated.started_at) updated.started_at = now;
+  if (nextStatus === "En préparation") {
+    if (!updated.started_at) updated.started_at = now;
+    if (cookUserId && !updated.assigned_cook_id) updated.assigned_cook_id = cookUserId;
+  }
   if (nextStatus === "Prête") {
     if (!updated.started_at) updated.started_at = now;
     if (!updated.ready_at) updated.ready_at = now;
@@ -489,7 +492,7 @@ export async function markLocalOrderServed(order, restaurantId) {
   return nextOrder;
 }
 
-export async function loadKitchenTicketsMerged(restaurantId, remoteTickets = []) {
+export async function loadKitchenTicketsMerged(restaurantId, remoteTickets = [], { cookUserId = null } = {}) {
   await initOfflineFoundation();
   const local = await listLocalKitchenTickets(restaurantId);
   const byKey = new Map();
@@ -518,13 +521,21 @@ export async function loadKitchenTicketsMerged(restaurantId, remoteTickets = [])
         started_at: remote.started_at || ticket.started_at,
         ready_at: remote.ready_at || ticket.ready_at,
         served_at: remote.served_at || ticket.served_at,
+        assigned_cook_id: remote.assigned_cook_id ?? ticket.assigned_cook_id,
       });
     }
   }
 
-  return [...byKey.values()].sort(
+  const merged = [...byKey.values()].sort(
     (a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0),
   );
+  if (!cookUserId) return merged;
+  return merged.filter((ticket) => ticketVisibleToCook(ticket, cookUserId));
+}
+
+function ticketVisibleToCook(ticket, cookUserId) {
+  const assigned = ticket.assigned_cook_id ?? ticket.assignedCookId ?? null;
+  return !assigned || assigned === cookUserId;
 }
 
 export async function removeLocalTicket(ticketId) {
@@ -563,6 +574,27 @@ function cashierNameOf(user) {
   if (!user) return null;
   const full = `${user.first_name || ""} ${user.last_name || ""}`.trim();
   return full || user.username || null;
+}
+
+function orderVisibleToCashier(order, cashierUserId, { pending = false } = {}) {
+  if (!cashierUserId) return true;
+  if (pending) {
+    const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
+    return !assigned || assigned === cashierUserId;
+  }
+  const cashier = order.cashier_id ?? order.cashierId ?? null;
+  return cashier === cashierUserId;
+}
+
+export function scopeCashierReport(report, cashierUserId) {
+  if (!cashierUserId || !report) return report;
+  const pending = (report.pending_orders || []).filter((order) =>
+    orderVisibleToCashier(order, cashierUserId, { pending: true }),
+  );
+  const receipts = (report.receipts || []).filter((order) =>
+    orderVisibleToCashier(order, cashierUserId),
+  );
+  return recomputeTotals({ ...report, pending_orders: pending, receipts });
 }
 
 function recomputeTotals(report) {
@@ -618,7 +650,7 @@ export async function mirrorCashierReport(report, restaurantId) {
   return report;
 }
 
-export async function loadCashierReportMerged(restaurantId, remoteReport = null) {
+export async function loadCashierReportMerged(restaurantId, remoteReport = null, { cashierUserId = null } = {}) {
   await initOfflineFoundation();
   const base = remoteReport
     || (await loadCashierSnapshot(restaurantId))
@@ -643,7 +675,7 @@ export async function loadCashierReportMerged(restaurantId, remoteReport = null)
     }
   }
 
-  return recomputeTotals({
+  const merged = recomputeTotals({
     ...base,
     pending_orders: [...pendingById.values()].sort(
       (a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0),
@@ -652,6 +684,42 @@ export async function loadCashierReportMerged(restaurantId, remoteReport = null)
       (a, b) => new Date(b.paid_at || b.updated_at || 0) - new Date(a.paid_at || a.updated_at || 0),
     ),
   });
+  return scopeCashierReport(merged, cashierUserId);
+}
+
+/**
+ * Réserve une commande pour la caissière connectée (mode hors ligne).
+ */
+export async function claimLocalOrderForCashier(order, restaurantId, cashier) {
+  if (!cashier?.id || !order?.id) return order;
+  const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
+  if (assigned && assigned !== cashier.id) {
+    throw new Error("Cette commande est déjà prise en charge par une autre caissière.");
+  }
+  if (assigned === cashier.id) return order;
+  const rid = restaurantId || order.restaurantId || order.restaurant_id;
+  const next = {
+    ...order,
+    assigned_cashier_id: cashier.id,
+    restaurantId: rid,
+    restaurant_id: rid,
+  };
+  await upsertLocalOrder(next);
+  if (!isLocalId(order.id)) {
+    enqueueOfflineAction({
+      type: "claim_cashier",
+      label: `Prise en charge ${order.order_number || order.id}`,
+      localOrderId: order.id,
+      orderId: order.id,
+      restaurantId: rid,
+      requests: [{
+        path: `/api/v1/orders/${order.id}/claim-cashier`,
+        method: "POST",
+        requiresAuth: true,
+      }],
+    });
+  }
+  return next;
 }
 
 /**
@@ -700,6 +768,7 @@ export async function payLocalCashOrder(order, {
     updated_at: paidAt,
     updatedAt: paidAt,
     cashier_id: cashier?.id || order.cashier_id || null,
+    assigned_cashier_id: cashier?.id || order.assigned_cashier_id || null,
     cashier_name: cashierNameOf(cashier) || order.cashier_name || null,
     restaurantId: rid,
     restaurant_id: rid,

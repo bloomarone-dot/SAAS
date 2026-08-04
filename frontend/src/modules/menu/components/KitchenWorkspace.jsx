@@ -48,11 +48,12 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [offlineHint, setOfflineHint] = useState("");
+  const cookUserId = role === "CUISINE" ? currentUser?.id || null : null;
 
   const loadTickets = useCallback(async () => {
     async function applyLocal() {
       if (!restaurantId) return false;
-      const local = await loadKitchenTicketsMerged(restaurantId, []);
+      const local = await loadKitchenTicketsMerged(restaurantId, [], { cookUserId });
       setTickets(local.filter((ticket) => ticket.status !== "Servie"));
       setOfflineHint("Mode hors ligne : tickets cuisine locaux.");
       setError("");
@@ -71,7 +72,7 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
         mirrorTicketsLocal(remote, restaurantId).catch(() => {});
       }
       const merged = restaurantId
-        ? await loadKitchenTicketsMerged(restaurantId, remote)
+        ? await loadKitchenTicketsMerged(restaurantId, remote, { cookUserId })
         : remote;
       setTickets(merged.filter((ticket) => ticket.status !== "Servie"));
       setError("");
@@ -85,7 +86,7 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
     } finally {
       setLoading(false);
     }
-  }, [restaurantId]);
+  }, [restaurantId, cookUserId]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -120,7 +121,7 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
     setError("");
     if (isLocalId(ticket.id) || shouldPreferLocalData()) {
       try {
-        await advanceLocalTicket(ticket, nextStatus, restaurantId);
+        await advanceLocalTicket(ticket, nextStatus, restaurantId, { cookUserId });
         setTickets((current) =>
           current
             .map((item) => (item.id === ticket.id ? { ...item, status: nextStatus } : item))
@@ -141,7 +142,7 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
     } catch (err) {
       if (isNetworkError(err)) {
         try {
-          await advanceLocalTicket(ticket, nextStatus, restaurantId);
+          await advanceLocalTicket(ticket, nextStatus, restaurantId, { cookUserId });
           setTickets((current) =>
             current
               .map((item) => (item.id === ticket.id ? { ...item, status: nextStatus } : item))
@@ -164,7 +165,11 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
       <PageHeader
         eyebrow="Cuisine"
         title={screen === "production" ? "Production du jour" : "Carte & plats"}
-        subtitle={screen === "production" ? `Suivez les tickets à préparer${currentUser?.first_name ? `, ${currentUser.first_name}` : ""} et faites avancer chaque commande.` : "Gérez les catégories et les plats disponibles pour la cuisine."}
+        subtitle={screen === "production"
+          ? cookUserId
+            ? `Votre espace de production${currentUser?.first_name ? `, ${currentUser.first_name}` : ""} — vous voyez les nouvelles commandes et vos tickets en cours.`
+            : `Suivez les tickets à préparer${currentUser?.first_name ? `, ${currentUser.first_name}` : ""} et faites avancer chaque commande.`
+          : "Gérez les catégories et les plats disponibles pour la cuisine."}
         secondaryActions={
           <>
             <button

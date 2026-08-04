@@ -2,7 +2,7 @@ from datetime import datetime
 from app.modules.shared.models import utcnow
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from typing import List
 from app.tenancy import tenant_get_or_404
@@ -40,7 +40,58 @@ def create_kitchen_ticket(
     db.add(db_ticket)
     db.commit()
     db.refresh(db_ticket)
-    return db_ticket
+    return serialize_kitchen_ticket(db_ticket, db)
+
+
+def serialize_kitchen_ticket(ticket: KitchenTicketModel, db: Session) -> dict:
+    cook_name = None
+    if ticket.assigned_cook_id:
+        cook = db.query(User).filter(User.id == ticket.assigned_cook_id).first()
+        if cook:
+            cook_name = f"{cook.first_name or ''} {cook.last_name or ''}".strip() or cook.username
+    return {
+        "id": ticket.id,
+        "order_id": ticket.order_id,
+        "table_number": ticket.table_number,
+        "item_name": ticket.item_name,
+        "quantity": ticket.quantity,
+        "notes": ticket.notes,
+        "status": ticket.status,
+        "assigned_cook_id": ticket.assigned_cook_id,
+        "assigned_cook_name": cook_name,
+        "created_at": ticket.created_at,
+        "started_at": ticket.started_at,
+        "ready_at": ticket.ready_at,
+        "served_at": ticket.served_at,
+    }
+
+
+def apply_kitchen_staff_scope(query, user: User):
+    """Cuisinier : nouveautés non assignées + ses propres tickets."""
+    if user.role not in {Role.CUISINE}:
+        return query
+    return query.filter(
+        or_(
+            KitchenTicketModel.assigned_cook_id.is_(None),
+            KitchenTicketModel.assigned_cook_id == user.id,
+        )
+    )
+
+
+def assert_ticket_mutable_by_cook(ticket: KitchenTicketModel, user: User, new_status: KitchenStatus) -> None:
+    if user.role not in {Role.CUISINE}:
+        return
+    if ticket.assigned_cook_id and ticket.assigned_cook_id != user.id:
+        raise HTTPException(status_code=403, detail="Ce ticket est pris en charge par un autre cuisinier.")
+    if not ticket.assigned_cook_id and new_status != KitchenStatus.EN_PREPARATION:
+        raise HTTPException(status_code=403, detail="Prenez d'abord le ticket en préparation.")
+
+
+def claim_ticket_for_cook(ticket: KitchenTicketModel, user: User, new_status: KitchenStatus) -> None:
+    if user.role not in {Role.CUISINE}:
+        return
+    if new_status == KitchenStatus.EN_PREPARATION and not ticket.assigned_cook_id:
+        ticket.assigned_cook_id = user.id
 
 # 2. RÉCUPÉRER TOUS LES TICKETS ACTIFS (Pour l'écran des cuisiniers)
 # On exclut les plats déjà servis pour ne pas encombrer l'écran
@@ -50,17 +101,17 @@ def get_active_kitchen_tickets(
     db: Session = Depends(get_db),
 ):
     assert_kitchen_read_allowed(current_user)
-    tickets = (
+    query = (
         db.query(KitchenTicketModel)
         .join(CustomerOrder, CustomerOrder.id == KitchenTicketModel.order_id)
         .filter(CustomerOrder.restaurant_id == current_user.restaurant_id)
         .filter(CustomerOrder.deleted_at.is_(None))
         .filter(~CustomerOrder.status.in_({"Annulée", "Annulee", "Archivée", "Archivee"}))
         .filter(KitchenTicketModel.status != KitchenStatus.SERVIE)
-        .order_by(KitchenTicketModel.created_at.asc())
-        .all()
     )
-    return tickets
+    query = apply_kitchen_staff_scope(query, current_user)
+    tickets = query.order_by(KitchenTicketModel.created_at.asc()).all()
+    return [serialize_kitchen_ticket(ticket, db) for ticket in tickets]
 
 # 3. METTRE À JOUR LE STATUT D'UN PLAT (En attente -> En préparation -> Prête -> Servie)
 @router.patch("/ticket/{ticket_id}/status", response_model=KitchenTicketResponse)
@@ -81,12 +132,14 @@ def update_ticket_status(
     if not db_ticket:
         raise HTTPException(status_code=404, detail="Ticket de cuisine introuvable.")
 
+    assert_ticket_mutable_by_cook(db_ticket, current_user, obj_in.status)
+    claim_ticket_for_cook(db_ticket, current_user, obj_in.status)
     apply_kitchen_status_timestamps(db_ticket, obj_in.status)
     db_ticket.status = obj_in.status
     sync_order_status_from_tickets(db, db_ticket.order_id)
     db.commit()
     db.refresh(db_ticket)
-    return db_ticket
+    return serialize_kitchen_ticket(db_ticket, db)
 
 
 @router.get("/stats/month")
@@ -111,7 +164,8 @@ def kitchen_month_stats(
             *active_orders,
         )
     )
-    total_dishes = (
+    base = apply_kitchen_staff_scope(base, current_user)
+    total_query = (
         db.query(func.coalesce(func.sum(KitchenTicketModel.quantity), 0))
         .select_from(KitchenTicketModel)
         .join(CustomerOrder, CustomerOrder.id == KitchenTicketModel.order_id)
@@ -121,8 +175,9 @@ def kitchen_month_stats(
             KitchenTicketModel.status != KitchenStatus.EN_ATTENTE,
             *active_orders,
         )
-        .scalar()
     )
+    total_query = apply_kitchen_staff_scope(total_query, current_user)
+    total_dishes = total_query.scalar()
     rows = (
         base.with_entities(
             KitchenTicketModel.item_name,

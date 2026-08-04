@@ -55,6 +55,11 @@ export const orderApi = {
       body: JSON.stringify(payload),
     }),
 
+  claimForCashier: (orderId) =>
+    request(`/api/v1/orders/${orderId}/claim-cashier`, {
+      method: "POST",
+    }),
+
   cancelPayment: (orderId) =>
     request(`/api/v1/orders/${orderId}/payment-cancel`, {
       method: "POST",

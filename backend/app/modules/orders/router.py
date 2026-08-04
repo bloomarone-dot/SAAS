@@ -259,17 +259,20 @@ def cashier_report(
         .filter(CustomerOrder.deleted_at.is_(None))
         .filter(~CustomerOrder.status.in_(EXCLUDED_ACTIVE_STATUSES))
     )
-    pending_orders = (
-        base_query.filter(CustomerOrder.status.in_(CASHIER_PENDING_STATUSES))
-        .order_by(CustomerOrder.created_at.asc())
-        .all()
+    pending_query = apply_cashier_pending_scope(
+        base_query.filter(CustomerOrder.status.in_(CASHIER_PENDING_STATUSES)),
+        current_user,
     )
-    receipts = (
+    pending_orders = pending_query.order_by(CustomerOrder.created_at.asc()).all()
+    receipts_query = apply_cashier_receipts_scope(
         base_query.filter(CustomerOrder.status.in_(PAID_STATUSES))
-        .filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start, func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end)
-        .order_by(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at).desc())
-        .all()
+        .filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start)
+        .filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end),
+        current_user,
     )
+    receipts = receipts_query.order_by(
+        func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at).desc()
+    ).all()
     total_collected = sum(float(order.total_amount or 0) for order in receipts)
     discount_lines: list[CashierDiscountLine] = []
     total_discounts = 0.0
@@ -596,6 +599,7 @@ def completed_payments(
         query = query.filter(CustomerOrder.cashier_id == cashier_id)
     if branch_id:
         query = query.filter(CustomerOrder.branch_id == branch_id)
+    query = apply_cashier_receipts_scope(query, current_user)
     orders = query.order_by(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at).desc()).all()
     enrich_orders(db, orders)
     return orders
@@ -611,6 +615,24 @@ def get_order(
     return get_order_or_404(db, order_id, current_user.restaurant_id)
 
 
+@router.post("/{order_id}/claim-cashier", response_model=OrderPublic)
+def claim_order_for_cashier(
+    order_id: str,
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_can_collect_cashier(current_user)
+    order = get_order_or_404(db, order_id, current_user.restaurant_id)
+    if order.status in PAID_STATUSES:
+        raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
+    assert_order_mutable_by_cashier(order, current_user)
+    if not order.assigned_cashier_id:
+        order.assigned_cashier_id = current_user.id
+        db.commit()
+        db.refresh(order)
+    return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+
 @router.post("/{order_id}/payment", response_model=OrderPublic)
 def validate_cashier_payment(
     order_id: str,
@@ -620,6 +642,7 @@ def validate_cashier_payment(
 ):
     assert_can_collect_cashier(current_user)
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
+    assert_order_mutable_by_cashier(order, current_user)
     if order.status in PAID_STATUSES:
         raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
     if order.payment_locked:
@@ -1238,6 +1261,35 @@ def assert_can_update_orders(user: User) -> None:
     ):
         return
     raise HTTPException(status_code=403, detail="Permission de mise à jour commandes requise")
+
+
+def apply_cashier_pending_scope(query, user: User):
+    """Caissière : commandes à encaisser non assignées + les siennes."""
+    if user.role not in {Role.CAISSE}:
+        return query
+    return query.filter(
+        or_(
+            CustomerOrder.assigned_cashier_id.is_(None),
+            CustomerOrder.assigned_cashier_id == user.id,
+        )
+    )
+
+
+def apply_cashier_receipts_scope(query, user: User):
+    """Caissière : uniquement ses encaissements."""
+    if user.role not in {Role.CAISSE}:
+        return query
+    return query.filter(CustomerOrder.cashier_id == user.id)
+
+
+def assert_order_mutable_by_cashier(order: CustomerOrder, user: User) -> None:
+    if user.role not in {Role.CAISSE}:
+        return
+    if order.assigned_cashier_id and order.assigned_cashier_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Cette commande est prise en charge par une autre caissière.",
+        )
 
 
 def assert_can_read_cashier(user: User) -> None:

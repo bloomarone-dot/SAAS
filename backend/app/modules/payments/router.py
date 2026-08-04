@@ -14,7 +14,7 @@ from app.tenancy import tenant_get_or_404
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.orders.models import CustomerOrder
-from app.modules.orders.router import settle_cash_payment
+from app.modules.orders.router import assert_order_mutable_by_cashier, settle_cash_payment
 from app.modules.payments.models import PaymentRequest, PaymentTransaction, PaymentWebhookEvent
 from app.modules.payments.mtn_service import (
     MtnPaymentError,
@@ -53,7 +53,7 @@ from app.modules.payments.service import (
     reject_payment_request,
     REQUESTABLE_STATUSES,
 )
-from app.modules.permissions.models import Permission
+from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
 from app.rate_limits import payment_rate_limit
 from app.security import decode_access_token, verify_hmac_sha256_signature
@@ -495,6 +495,19 @@ def list_payment_requests_endpoint(
 ):
     assert_permission(current_user, Permission.CASHIER_READ)
     requests = list_payment_requests(db, current_user.restaurant_id, status)
+    if current_user.role == Role.CAISSE and requests:
+        order_ids = [req.order_id for req in requests]
+        orders = (
+            db.query(CustomerOrder.id, CustomerOrder.assigned_cashier_id)
+            .filter(CustomerOrder.id.in_(order_ids))
+            .all()
+        )
+        allowed = {
+            row.id
+            for row in orders
+            if row.assigned_cashier_id is None or row.assigned_cashier_id == current_user.id
+        }
+        requests = [req for req in requests if req.order_id in allowed]
     numbers = _order_numbers(db, [req.order_id for req in requests])
     return [_request_out(req, numbers.get(req.order_id)) for req in requests]
 
@@ -521,6 +534,7 @@ async def validate_payment_request_endpoint(
     order = tenant_get_or_404(
         db, CustomerOrder, request_obj.order_id, current_user.restaurant_id, detail="Commande introuvable"
     )
+    assert_order_mutable_by_cashier(order, current_user)
 
     if request_obj.method == "CASH":
         if order.status in {"Payée", "Payee"}:

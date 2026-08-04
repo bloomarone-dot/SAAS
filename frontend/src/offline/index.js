@@ -39,6 +39,8 @@ export {
   loadCashierReportMerged,
   payLocalCashOrder,
   OFFLINE_CASH_METHODS,
+  scopeCashierReport,
+  claimLocalOrderForCashier,
 } from "@/offline/ops";
 
 export {

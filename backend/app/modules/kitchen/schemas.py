@@ -19,6 +19,8 @@ class KitchenTicketUpdateStatus(BaseModel):
 class KitchenTicketResponse(KitchenTicketBase):
     id: int
     status: KitchenStatus
+    assigned_cook_id: Optional[str] = None
+    assigned_cook_name: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     ready_at: Optional[datetime] = None

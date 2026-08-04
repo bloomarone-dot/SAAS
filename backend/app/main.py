@@ -885,6 +885,7 @@ def ensure_french_status_values() -> None:
                 "started_at": "DATETIME NULL",
                 "ready_at": "DATETIME NULL",
                 "served_at": "DATETIME NULL",
+                "assigned_cook_id": "VARCHAR(36) NULL",
             }.items():
                 if name not in kitchen_columns:
                     connection.execute(text(f"ALTER TABLE kitchen_tickets ADD COLUMN {name} {definition}"))

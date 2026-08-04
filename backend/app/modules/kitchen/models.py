@@ -18,6 +18,7 @@ class KitchenTicketModel(Base):
     item_name = Column(String(160), nullable=False)    # Nom du plat (ex: "Poulet DG")
     quantity = Column(Integer, default=1)
     notes = Column(String(255), nullable=True)         # ex: "Sans piment", "Bien cuit"
+    assigned_cook_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     status = Column(
         Enum(KitchenStatus, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
         default=KitchenStatus.EN_ATTENTE,

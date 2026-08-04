@@ -28,6 +28,8 @@ import {
   mirrorCashierReport,
   OFFLINE_CASH_METHODS,
   payLocalCashOrder,
+  scopeCashierReport,
+  claimLocalOrderForCashier,
 } from "@/offline";
 
 const paymentMethods = [
@@ -138,6 +140,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const [lastPaidOrder, setLastPaidOrder] = useState(null);
   const [loyaltyPreview, setLoyaltyPreview] = useState(null);
   const restaurantId = currentUser?.restaurant_id;
+  const cashierScopeId = adminReviewOnly ? null : currentUser?.id || null;
 
   useEffect(() => {
     setActiveTab(resolveCashierTab(activeView));
@@ -184,7 +187,7 @@ export function CaisseDashboard({ overrides = {} }) {
 
     async function applyLocal() {
       if (!restaurantId) return false;
-      const local = await loadCashierReportMerged(restaurantId, null);
+      const local = await loadCashierReportMerged(restaurantId, null, { cashierUserId: cashierScopeId });
       setReport(local);
       setSelectedOrderId((current) => current || local.pending_orders?.[0]?.id || "");
       setSelectedReceiptId((current) => current || local.receipts?.[0]?.id || "");
@@ -206,11 +209,12 @@ export function CaisseDashboard({ overrides = {} }) {
 
     try {
       const data = await orderApi.cashierReport(periodToApiDates(reportPeriod, reportCustomPeriod));
-      setReport(data);
-      setSelectedOrderId((current) => current || data.pending_orders?.[0]?.id || "");
-      setSelectedReceiptId((current) => current || data.receipts?.[0]?.id || "");
+      const scoped = scopeCashierReport(data, cashierScopeId);
+      setReport(scoped);
+      setSelectedOrderId((current) => current || scoped.pending_orders?.[0]?.id || "");
+      setSelectedReceiptId((current) => current || scoped.receipts?.[0]?.id || "");
       setOfflineHint("");
-      if (restaurantId) mirrorCashierReport(data, restaurantId).catch(() => {});
+      if (restaurantId) mirrorCashierReport(scoped, restaurantId).catch(() => {});
     } catch (error) {
       if (isNetworkError(error) && restaurantId) {
         try {
@@ -362,7 +366,19 @@ export function CaisseDashboard({ overrides = {} }) {
     return "";
   }
 
-  function openPaymentModal(order, request = null) {
+  async function openPaymentModal(order, request = null) {
+    if (!adminReviewOnly && cashierScopeId) {
+      try {
+        if (shouldPreferLocalData() || isLocalIdSafe(order.id)) {
+          await claimLocalOrderForCashier(order, restaurantId, currentUser);
+        } else {
+          await orderApi.claimForCashier(order.id);
+        }
+      } catch (error) {
+        setMessage(error.message || "Cette commande est déjà prise en charge par une autre caissière.");
+        return;
+      }
+    }
     setSelectedOrderId(order.id);
     setDiscount(order.discount_amount ? String(order.discount_amount) : "");
     setActivePaymentRequest(request);
@@ -545,11 +561,11 @@ export function CaisseDashboard({ overrides = {} }) {
     <PageContainer>
       <PageHeader
         eyebrow={adminReviewOnly ? "Administration" : "Caisse"}
-        title={adminReviewOnly ? "Suivi caisse" : "Espace caissière"}
+        title={adminReviewOnly ? "Suivi caisse" : "Mon espace caissière"}
         subtitle={
           adminReviewOnly
             ? "Consultez les paiements et validez uniquement les annulations de facture."
-            : `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""}. Encaissements organisés par serveur, un onglet par étape.`
+            : `Bienvenue${currentUser?.first_name ? `, ${currentUser.first_name}` : ""}. Vos commandes à encaisser et vos encaissements — les autres caissières ne voient pas votre activité.`
         }
         primaryAction={
           !adminReviewOnly && (
