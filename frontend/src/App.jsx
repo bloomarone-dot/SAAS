@@ -92,8 +92,9 @@ import {
   saveCachedBranding,
   saveCachedSession,
   warmupOfflineCache,
+  connectRestaurantRealtime,
 } from "@/offline";
-import { getApiBaseUrl, apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/core/api";
+import { getApiBaseUrl, resolveApiBaseUrl, isApiReachable, apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/core/api";
 import { getPublicHostKind, shouldResolveTenantFromHost, buildRestaurantTheme } from "@/core/tenant";
 
 const initialRestaurant = {
@@ -228,8 +229,9 @@ export default function App() {
   useEffect(() => {
     async function handleOnline() {
       setIsOnline(true);
+      await resolveApiBaseUrl({ force: true });
       clearEffectiveOffline();
-      const result = await flushOfflineQueue(apiBaseUrl);
+      const result = await flushOfflineQueue(getApiBaseUrl());
       refreshQueueState();
       if (result.synced > 0) {
         const conflictNote = result.conflicts ? ` (${result.conflicts} déjà à jour)` : "";
@@ -243,8 +245,13 @@ export default function App() {
       }
     }
 
-    function handleOffline() {
+    async function handleOffline() {
       setIsOnline(false);
+      await resolveApiBaseUrl({ force: true }).catch(() => {});
+      if (isApiReachable()) {
+        clearEffectiveOffline();
+        return;
+      }
       markEffectiveOffline("browser");
     }
 
@@ -265,6 +272,12 @@ export default function App() {
       window.removeEventListener("offline-queue-changed", refreshQueueState);
     };
   }, [apiBaseUrl, session?.role]);
+
+  useEffect(() => {
+    if (!session?.restaurant_id || !localStorage.getItem("access_token")) return undefined;
+    resolveApiBaseUrl({ force: true }).catch(() => {});
+    return connectRestaurantRealtime();
+  }, [session?.restaurant_id, session?.id]);
 
   useAutoRefresh(async () => {
     if (session?.role === "SUPERADMIN") await fetchRestaurants({ silent: true });

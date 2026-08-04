@@ -16,10 +16,15 @@ export {
   sortQueueForFlush,
 } from "@/offline/sync";
 
+import { resolveApiBaseUrl, isApiReachable, isLanApiReachable } from "@/config/api";
+
+export { resolveApiBaseUrl, isApiReachable, isLanApiReachable };
+
 const EFFECTIVE_OFFLINE_FLAG = "__bloomarEffectiveOffline";
 
-/** true si le navigateur est offline OU si une requête récente a prouvé l'absence de réseau. */
+/** true si le navigateur est offline ET qu'aucun serveur (cloud ou local Wi‑Fi) n'est joignable. */
 export function shouldPreferLocalData() {
+  if (typeof window !== "undefined" && window.__bloomarApiReachable === true) return false;
   if (typeof navigator !== "undefined" && !navigator.onLine) return true;
   if (typeof window !== "undefined" && window[EFFECTIVE_OFFLINE_FLAG]) return true;
   return false;
@@ -60,6 +65,12 @@ export function friendlyNetworkMessage(error, fallback = "Connexion indisponible
     return "Connexion indisponible. L'action sera possible dès que le réseau revient.";
   }
   return message || fallback;
+}
+
+/** Tente le serveur local Wi‑Fi avant de basculer en mode 100 % local (tablette isolée). */
+export async function preferLocalOpsAfterProbe() {
+  await resolveApiBaseUrl({ force: true });
+  return shouldPreferLocalData();
 }
 
 export function formatApiError(detail, fallback = "Action impossible: le serveur n'a pas fourni de détail.") {

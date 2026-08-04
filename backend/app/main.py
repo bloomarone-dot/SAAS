@@ -39,6 +39,8 @@ from app.security import hash_password
 from app.modules.kitchen.router import router as kitchen_router
 from app.modules.payments import router as payments
 from app.modules.payments.realtime import payment_connections
+from app.modules.realtime.manager import restaurant_connections
+from app.modules.realtime.router import router as realtime_router
 from app.modules.payments.service import reconciliation_loop
 from app.modules.loyalty import router as loyalty
 from app.modules.platform.service import subscription_enforcement_loop
@@ -177,6 +179,7 @@ def create_tables() -> None:
 @app.on_event("startup")
 async def start_background_tasks() -> None:
     await payment_connections.start()
+    await restaurant_connections.start()
     app.state.payment_reconciliation_task = asyncio.create_task(reconciliation_loop())
     app.state.subscription_enforcement_task = asyncio.create_task(subscription_enforcement_loop())
 
@@ -190,6 +193,7 @@ async def stop_background_tasks() -> None:
             with suppress(asyncio.CancelledError):
                 await task
     await payment_connections.stop()
+    await restaurant_connections.stop()
 
 
 def ensure_menu_category_columns() -> None:
@@ -1112,4 +1116,5 @@ app.include_router(platform.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(stock.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
+app.include_router(realtime_router, prefix="/api/v1")
 app.include_router(loyalty.router, prefix="/api/v1")

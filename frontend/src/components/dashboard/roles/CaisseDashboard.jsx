@@ -30,6 +30,8 @@ import {
   payLocalCashOrder,
   scopeCashierReport,
   claimLocalOrderForCashier,
+  onRestaurantRealtime,
+  isCashierRealtimeEvent,
 } from "@/offline";
 
 const paymentMethods = [
@@ -178,6 +180,14 @@ export function CaisseDashboard({ overrides = {} }) {
   }, [activeView]);
 
   useAutoRefresh(() => loadCashierReport({ silent: true }), 10000, [reportPeriod, reportCustomPeriod]);
+
+  useEffect(() => {
+    return onRestaurantRealtime((payload) => {
+      if (!isCashierRealtimeEvent(payload?.event)) return;
+      loadCashierReport({ silent: true });
+      loadPaymentRequests();
+    });
+  }, [reportPeriod, reportCustomPeriod]);
 
   async function loadCashierReport({ silent = false } = {}) {
     if (!silent) {

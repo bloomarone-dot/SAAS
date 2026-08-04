@@ -4,7 +4,7 @@ import { DashboardIcon } from "@/components/dashboard/icons";
 import { DashboardSection, ErrorState, LoadingState, PageContainer, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { isNetworkError, shouldPreferLocalData } from "@/utils/network";
-import { advanceLocalTicket, isLocalId, loadKitchenTicketsMerged, mirrorTicketsLocal } from "@/offline";
+import { advanceLocalTicket, isLocalId, loadKitchenTicketsMerged, mirrorTicketsLocal, onRestaurantRealtime, isKitchenRealtimeEvent } from "@/offline";
 import CategoriesPage from "../pages/CategoriesPage";
 import DishesPage from "../pages/DishesPage";
 import { kitchenApi } from "../services/kitchenApi";
@@ -102,6 +102,14 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
   }, [loadTickets, loadStats]);
 
   useAutoRefresh(loadTickets, 5000, [loadTickets]);
+
+  useEffect(() => {
+    return onRestaurantRealtime((payload) => {
+      if (!isKitchenRealtimeEvent(payload?.event)) return;
+      loadTickets();
+      loadStats();
+    });
+  }, [loadTickets, loadStats]);
 
   const pendingCount = useMemo(
     () => tickets.filter((ticket) => ticket.status === "En attente").length,

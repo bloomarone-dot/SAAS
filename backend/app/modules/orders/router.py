@@ -3,7 +3,7 @@ from app.modules.shared.models import utcnow
 from datetime import time
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
@@ -38,6 +38,7 @@ from app.modules.orders.schemas import (
     PublicOrderCreateIn,
 )
 from app.modules.permissions.models import Permission, Role
+from app.modules.realtime.manager import emit_restaurant_event
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockMovement, StockMovementType, StockRecipeIngredient
 from app.modules.stock.models import StockItem, StockItemPackaging, StockLocation
@@ -618,6 +619,7 @@ def get_order(
 @router.post("/{order_id}/claim-cashier", response_model=OrderPublic)
 def claim_order_for_cashier(
     order_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
@@ -630,6 +632,12 @@ def claim_order_for_cashier(
         order.assigned_cashier_id = current_user.id
         db.commit()
         db.refresh(order)
+        background_tasks.add_task(
+            emit_restaurant_event,
+            current_user.restaurant_id,
+            "cashier_updated",
+            order_id=order.id,
+        )
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
 
@@ -637,6 +645,7 @@ def claim_order_for_cashier(
 def validate_cashier_payment(
     order_id: str,
     payload: CashierPaymentIn,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
@@ -671,6 +680,12 @@ def validate_cashier_payment(
         pass
     db.commit()
     db.refresh(order)
+    background_tasks.add_task(
+        emit_restaurant_event,
+        current_user.restaurant_id,
+        "cashier_updated",
+        order_id=order.id,
+    )
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
 
@@ -750,6 +765,7 @@ def cancel_cashier_payment(
 @router.post("/{order_id}/send-to-kitchen", response_model=OrderPublic)
 def send_order_to_kitchen(
     order_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
@@ -858,6 +874,12 @@ def send_order_to_kitchen(
         )
         db.commit()
         db.refresh(order)
+        background_tasks.add_task(
+            emit_restaurant_event,
+            current_user.restaurant_id,
+            "cashier_updated",
+            order_id=order.id,
+        )
         return get_order_or_404(db, order.id, current_user.restaurant_id)
 
     if order.status == "Nouvelle":
@@ -892,6 +914,12 @@ def send_order_to_kitchen(
     )
     db.commit()
     db.refresh(order)
+    background_tasks.add_task(
+        emit_restaurant_event,
+        current_user.restaurant_id,
+        "kitchen_updated",
+        order_id=order.id,
+    )
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
 

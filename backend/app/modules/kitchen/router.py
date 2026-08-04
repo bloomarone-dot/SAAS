@@ -1,7 +1,7 @@
 from datetime import datetime
 from app.modules.shared.models import utcnow
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from typing import List
@@ -9,6 +9,7 @@ from app.tenancy import tenant_get_or_404
 from app.database import get_db
 from app.dependencies import assert_permission, has_permission, require_tenant_user
 from app.modules.notifications.service import notify
+from app.modules.realtime.manager import emit_restaurant_event
 from app.modules.orders.models import CustomerOrder
 from app.modules.permissions.models import Permission, Role
 from app.modules.users.models import User
@@ -118,6 +119,7 @@ def get_active_kitchen_tickets(
 def update_ticket_status(
     ticket_id: int,
     obj_in: KitchenTicketUpdateStatus,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
@@ -139,6 +141,20 @@ def update_ticket_status(
     sync_order_status_from_tickets(db, db_ticket.order_id)
     db.commit()
     db.refresh(db_ticket)
+    background_tasks.add_task(
+        emit_restaurant_event,
+        current_user.restaurant_id,
+        "kitchen_updated",
+        order_id=db_ticket.order_id,
+        ticket_id=db_ticket.id,
+    )
+    if obj_in.status == KitchenStatus.PRETE:
+        background_tasks.add_task(
+            emit_restaurant_event,
+            current_user.restaurant_id,
+            "cashier_updated",
+            order_id=db_ticket.order_id,
+        )
     return serialize_kitchen_ticket(db_ticket, db)
 
 

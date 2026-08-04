@@ -2,7 +2,7 @@
  * Couche API partagée (SaaS marketing, vitrine restaurant, dashboard).
  * Réexporte l'implémentation existante — pas de duplication.
  */
-export { getApiBaseUrl } from "@/config/api";
+export { getApiBaseUrl, getLanApiBaseUrl, setLanApiBaseUrl, resolveApiBaseUrl, isLanApiReachable, isApiReachable } from "@/config/api";
 export {
   apiFetch,
   apiFetchPublic,

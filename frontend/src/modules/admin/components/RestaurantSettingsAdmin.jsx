@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { PageHeader } from "@/modules/admin/components/AdminUi";
 import { apiFetch } from "@/config/http";
+import { getLanApiBaseUrl, invalidateApiProbe, setLanApiBaseUrl } from "@/config/api";
 import { cacheDeliveryAreas } from "@/utils/offlineCache";
 import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { validationFor } from "@/utils/validation";
@@ -53,12 +54,14 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
   const [isEditing, setIsEditing] = useState(false);
   const [deliveryAreas, setDeliveryAreas] = useState([]);
   const [areaForm, setAreaForm] = useState({ name: "", delivery_fee: "", average_delivery_minutes: "" });
+  const [lanApiUrl, setLanApiUrl] = useState("");
 
   const canUpdate = currentUser?.is_owner;
   const fieldsDisabled = !canUpdate || !isEditing || isLoading;
 
   useEffect(() => {
     loadSettings();
+    setLanApiUrl(getLanApiBaseUrl() || "");
   }, []);
 
   async function loadSettings() {
@@ -234,6 +237,8 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
       });
       setRestaurant(updated);
       setIsEditing(false);
+      setLanApiBaseUrl(lanApiUrl);
+      invalidateApiProbe();
       onThemeChange?.(buildRestaurantTheme(updated));
       onMessage("Informations du restaurant mises à jour.");
     } catch (error) {
@@ -338,6 +343,21 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
                   <Field name="timezone" label="Fuseau horaire" value={form.timezone} onChange={updateField} required disabled={fieldsDisabled} />
                 </div>
               </div>
+            </SettingsGroup>
+
+            <SettingsGroup title="Réseau local (tablettes)">
+              <p className="mb-3 text-sm font-medium text-slate-500">
+                Si Internet est coupé mais le Wi‑Fi du restaurant fonctionne, indiquez l&apos;adresse du serveur sur le réseau local
+                (ex. http://192.168.1.10:8085). Toutes les tablettes resteront synchronisées entre elles.
+              </p>
+              <Field
+                name="lan_api_url"
+                label="Adresse serveur local Wi‑Fi"
+                value={lanApiUrl}
+                onChange={(event) => setLanApiUrl(event.target.value)}
+                placeholder="http://192.168.1.10:8085"
+                disabled={fieldsDisabled}
+              />
             </SettingsGroup>
 
             <SettingsGroup title="Contacts & vente">

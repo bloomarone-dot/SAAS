@@ -5,7 +5,7 @@ import {
   markEffectiveOffline,
   shouldPreferLocalData,
 } from "@/utils/network";
-import { getApiBaseUrl } from "@/config/api";
+import { getApiBaseUrl, resolveApiBaseUrl } from "@/config/api";
 
 /** Clé localStorage du jeton JWT (inchangée — pas de migration cookies ici). */
 export const TOKEN_KEY = "access_token";
@@ -210,6 +210,11 @@ async function request(path, options = {}) {
 
   const token = auth ? getToken() : null;
   const { payload, headers: preparedHeaders } = prepareRequestBody({ body, headers, json });
+
+  if (auth && shouldPreferLocalData()) {
+    await resolveApiBaseUrl({ force: true });
+  }
+
   const url = `${getApiBaseUrl()}${path}`;
 
   let response;
@@ -274,6 +279,11 @@ async function request(path, options = {}) {
     }
     const data = await response.json().catch(() => null);
     throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
+  }
+
+  if (typeof window !== "undefined") {
+    window.__bloomarApiReachable = true;
+    window.__bloomarEffectiveOffline = false;
   }
 
   if (responseType === "text") {

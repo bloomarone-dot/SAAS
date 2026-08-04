@@ -44,6 +44,13 @@ export {
 } from "@/offline/ops";
 
 export {
+  connectRestaurantRealtime,
+  onRestaurantRealtime,
+  isKitchenRealtimeEvent,
+  isCashierRealtimeEvent,
+} from "@/offline/realtime";
+
+export {
   saveCachedSession,
   loadCachedSession,
   clearCachedSession,

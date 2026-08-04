@@ -11,7 +11,7 @@ import TableSessionModal from "./TableSessionModal";
 import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnapshot, saveServerSession } from "../utils/serverSessionStorage";
 import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { cacheMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
-import { enqueueOfflineAction, isNetworkError, shouldPreferLocalData } from "@/utils/network";
+import { enqueueOfflineAction, isNetworkError, preferLocalOpsAfterProbe, shouldPreferLocalData } from "@/utils/network";
 import {
   buildServerReportText,
   downloadTextFile,
@@ -564,7 +564,8 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       );
     }
 
-    if (isLocalId(session.orderId) || shouldPreferLocalData()) {
+    const useLocalOnly = isLocalId(session.orderId) || await preferLocalOpsAfterProbe();
+    if (useLocalOnly) {
       try {
         await sendLocal();
       } catch (err) {
@@ -663,7 +664,8 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       setMessage("Commande clôturée localement. Sync à la reconnexion — paiement en caisse possible.");
     }
 
-    if (isLocalId(session.orderId) || shouldPreferLocalData()) {
+    const useLocalClose = isLocalId(session.orderId) || await preferLocalOpsAfterProbe();
+    if (useLocalClose) {
       try {
         await closeLocal();
       } catch (err) {
