@@ -1,4 +1,10 @@
 import {
+  idbGet,
+  idbPut,
+  STORES,
+} from "@/offline/db";
+import {
+  initOfflineFoundation,
   loadCatalogSnapshot,
   loadDeliveryAreasSnapshot,
   loadTablesSnapshot,
@@ -10,6 +16,8 @@ import {
 const MENU_KEY = "offline_menu_cache";
 const TABLES_KEY = "offline_tables_cache";
 const AREAS_KEY = "offline_delivery_areas_cache";
+const STAFF_KEY = "offline_staff_users_cache";
+const META_KEY = "offline_restaurant_meta_cache";
 
 function read(key) {
   try {
@@ -144,4 +152,69 @@ export async function getCachedDeliveryAreasAsync(restaurantId) {
   if (!snapshot) return null;
   write(AREAS_KEY, restaurantId, snapshot.areas);
   return snapshot.areas;
+}
+
+export function cacheStaffUsers(restaurantId, users) {
+  if (!restaurantId || !Array.isArray(users)) return;
+  write(STAFF_KEY, restaurantId, users);
+  initOfflineFoundation()
+    .then(() =>
+      idbPut(STORES.meta, {
+        key: `staff_users:${restaurantId}`,
+        users,
+        savedAt: new Date().toISOString(),
+      }),
+    )
+    .catch(() => {});
+}
+
+export async function getCachedStaffUsersAsync(restaurantId) {
+  const data = read(STAFF_KEY);
+  if (data && data.restaurantId === restaurantId) {
+    return data.payload;
+  }
+  try {
+    await initOfflineFoundation();
+    const row = await idbGet(STORES.meta, `staff_users:${restaurantId}`);
+    if (!row?.users) return null;
+    write(STAFF_KEY, restaurantId, row.users);
+    return row.users;
+  } catch {
+    return null;
+  }
+}
+
+/** Branding + paramètres restaurant (fusion partielle). */
+export function cacheRestaurantMeta(restaurantId, patch = {}) {
+  if (!restaurantId || !patch) return;
+  const current = read(META_KEY);
+  const prev =
+    current && current.restaurantId === restaurantId && current.payload ? current.payload : {};
+  const next = { ...prev, ...patch };
+  write(META_KEY, restaurantId, next);
+  initOfflineFoundation()
+    .then(() =>
+      idbPut(STORES.meta, {
+        key: `restaurant_meta:${restaurantId}`,
+        meta: next,
+        savedAt: new Date().toISOString(),
+      }),
+    )
+    .catch(() => {});
+}
+
+export async function getCachedRestaurantMetaAsync(restaurantId) {
+  const data = read(META_KEY);
+  if (data && data.restaurantId === restaurantId) {
+    return data.payload;
+  }
+  try {
+    await initOfflineFoundation();
+    const row = await idbGet(STORES.meta, `restaurant_meta:${restaurantId}`);
+    if (!row?.meta) return null;
+    write(META_KEY, restaurantId, row.meta);
+    return row.meta;
+  } catch {
+    return null;
+  }
 }

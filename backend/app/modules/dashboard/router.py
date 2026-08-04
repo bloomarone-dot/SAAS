@@ -406,6 +406,7 @@ def daily_report(
         "date": now.date().isoformat(),
         "generated_at": now.isoformat(),
         "restaurant_name": restaurant.name if restaurant else "Restaurant",
+        "owner_whatsapp": (restaurant.whatsapp_phone or restaurant.phone) if restaurant else None,
         "kpis": {
             "revenue": round(revenue, 2),
             "profit": round(profit, 2),

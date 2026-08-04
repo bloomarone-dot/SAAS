@@ -31,6 +31,7 @@ export {
   updateLocalOrderItems,
   sendLocalOrderToKitchen,
   advanceLocalTicket,
+  closeLocalOrderForBill,
   markLocalOrderServed,
   loadKitchenTicketsMerged,
   removeLocalTicket,
@@ -39,6 +40,18 @@ export {
   payLocalCashOrder,
   OFFLINE_CASH_METHODS,
 } from "@/offline/ops";
+
+export {
+  saveCachedSession,
+  loadCachedSession,
+  clearCachedSession,
+  isAccessTokenUsable,
+  saveCachedBranding,
+  loadCachedBranding,
+  clearCachedBranding,
+} from "@/offline/sessionCache";
+
+export { warmupOfflineCache } from "@/offline/warmup";
 
 export {
   flushOfflineQueue,

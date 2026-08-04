@@ -3,6 +3,12 @@ import { useEffect, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { apiFetch } from "@/config/http";
 import { AdminFormModal } from "@/modules/admin/components/AdminUi";
+import {
+  buildDailyReportText,
+  downloadTextFile,
+  shareReportOnWhatsApp,
+  toCsv,
+} from "@/utils/roleReportShare";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
@@ -144,6 +150,47 @@ export function DailyReportModal({ open, onClose, branchId = "" }) {
 
   const kpis = report?.kpis ?? {};
 
+  function shareOnWhatsApp() {
+    if (!report) return;
+    const phone = report.owner_whatsapp || "";
+    if (!phone) {
+      window.alert(
+        "Numéro WhatsApp du patron manquant. Renseignez-le dans Paramètres restaurant → WhatsApp du patron.",
+      );
+      return;
+    }
+    shareReportOnWhatsApp(buildDailyReportText(report), phone);
+  }
+
+  function exportCsv() {
+    if (!report) return;
+    const k = report.kpis || {};
+    const rows = [
+      ["Indicateur", "Valeur"],
+      ["Restaurant", report.restaurant_name],
+      ["Date", report.date],
+      ["Chiffre d'affaires", k.revenue],
+      ["Commandes", k.orders_count],
+      ["Ticket moyen", k.average_ticket],
+      ["Bénéfice estimé", k.profit],
+      ["Marge %", k.margin_rate],
+      ["Réductions", k.total_discounts],
+      ["Repas", k.meal_revenue],
+      ["Boissons", k.drink_revenue],
+      ["vs hier %", report.comparison?.variation_pct],
+      [],
+      ["Mode de paiement", "Montant", "Part %"],
+      ...(report.payment_methods || []).map((row) => [row.method, row.amount, row.share]),
+      [],
+      ["Produit", "Qté", "CA"],
+      ...(report.top_products || []).map((row) => [row.name, row.quantity, row.revenue]),
+      [],
+      ["Employé", "CA", "Commandes"],
+      ...(report.employee_performance || []).map((row) => [row.name, row.revenue, row.orders]),
+    ];
+    downloadTextFile(`rapport-journee-${report.date || new Date().toISOString().slice(0, 10)}.csv`, `\uFEFF${toCsv(rows)}`);
+  }
+
   return (
     <AdminFormModal
       open={open}
@@ -155,6 +202,14 @@ export function DailyReportModal({ open, onClose, branchId = "" }) {
         <>
           <button type="button" onClick={onClose} className="lte-btn lte-btn-default">
             Fermer
+          </button>
+          <button type="button" disabled={!report} onClick={exportCsv} className="lte-btn lte-btn-default">
+            <DashboardIcon name="Download" size={16} />
+            Exporter CSV
+          </button>
+          <button type="button" disabled={!report} onClick={shareOnWhatsApp} className="lte-btn lte-btn-default">
+            <DashboardIcon name="Phone" size={16} />
+            Envoyer au patron
           </button>
           <button type="button" disabled={!report} onClick={() => printDailyReport(report)} className="lte-btn lte-btn-primary">
             <DashboardIcon name="ReceiptText" size={16} />
@@ -292,7 +347,10 @@ export function DailyReportModal({ open, onClose, branchId = "" }) {
             </section>
           )}
 
-          <p className="text-xs font-medium text-slate-400">Généré le {formatDateTime(report.generated_at)}</p>
+          <p className="text-xs font-medium text-slate-400">
+            Généré le {formatDateTime(report.generated_at)}. « Envoyer au patron » ouvre WhatsApp avec le rapport prêt pour
+            le numéro configuré dans Paramètres restaurant.
+          </p>
         </div>
       )}
     </AdminFormModal>

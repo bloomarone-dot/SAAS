@@ -12,7 +12,8 @@ import {
   getCachedDeliveryAreasAsync,
   getCachedMenuCatalogAsync,
 } from "@/utils/offlineCache";
-import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
+import { enqueueOfflineAction, isNetworkError, shouldPreferLocalData } from "@/utils/network";
+import { listLocalOrders } from "@/offline/store";
 
 const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
 const KITCHEN_SEND_STATUSES = new Set(["Nouvelle", "Acceptée", "Acceptee", "En préparation", "En preparation"]);
@@ -88,6 +89,24 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
   }, [restaurantId]);
 
   async function loadAreas() {
+    async function applyCached() {
+      const cached = restaurantId ? await getCachedDeliveryAreasAsync(restaurantId) : null;
+      if (cached?.length) {
+        setAreas([...cached].sort((a, b) => a.name.localeCompare(b.name, "fr")));
+        setUsingOfflineCatalog(true);
+        onMessage?.("Quartiers chargés depuis la mémoire locale (hors ligne).");
+        return true;
+      }
+      setAreas([]);
+      onMessage?.("Aucun quartier en mémoire. Connectez-vous une fois pour les mémoriser.");
+      return false;
+    }
+
+    if (shouldPreferLocalData()) {
+      await applyCached();
+      return;
+    }
+
     try {
       const data = await orderApi.listDeliveryAreas();
       const sorted = data.sort((a, b) => a.name.localeCompare(b.name, "fr"));
@@ -95,27 +114,43 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
       if (restaurantId) cacheDeliveryAreas(restaurantId, sorted);
       setUsingOfflineCatalog(false);
     } catch {
-      const cached = restaurantId ? await getCachedDeliveryAreasAsync(restaurantId) : null;
-      if (cached?.length) {
-        setAreas([...cached].sort((a, b) => a.name.localeCompare(b.name, "fr")));
-        setUsingOfflineCatalog(true);
-        onMessage?.("Quartiers chargés depuis la mémoire locale (hors ligne).");
-      } else {
-        setAreas([]);
-        onMessage?.("Aucun quartier en mémoire. Connectez-vous une fois pour les mémoriser.");
-      }
+      await applyCached();
     }
   }
 
   async function loadDeliveries() {
+    async function applyLocal() {
+      if (!restaurantId) {
+        setOrders([]);
+        return;
+      }
+      const local = await listLocalOrders(restaurantId);
+      const deliveries = local
+        .filter((order) => String(order.fulfillment_type || "") === "Livraison")
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+      setOrders(deliveries);
+      if (deliveries.length) {
+        onMessage?.("Livraisons locales affichées (hors ligne).");
+      }
+    }
+
+    if (shouldPreferLocalData()) {
+      await applyLocal();
+      return;
+    }
+
     try {
       const data = await orderApi.list({ fulfillment_type: "Livraison", limit: 200 });
       const rows = Array.isArray(data) ? data : [];
       const sorted = rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       setOrders(sorted);
     } catch (error) {
-      onMessage?.(error.message || "Impossible de charger les livraisons.");
-      setOrders([]);
+      if (isNetworkError(error)) {
+        await applyLocal();
+      } else {
+        onMessage?.(error.message || "Impossible de charger les livraisons.");
+        setOrders([]);
+      }
     }
   }
 
@@ -127,6 +162,28 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
 
   async function loadMenu() {
     if (!restaurantId) return;
+
+    async function applyCached() {
+      const cached = await getCachedMenuCatalogAsync(restaurantId);
+      if (cached) {
+        setCategories(cached.categories || []);
+        setDishes(cached.dishes || []);
+        setUsingOfflineCatalog(true);
+        onMessage?.("Menu chargé depuis la mémoire locale (hors ligne).");
+        return true;
+      }
+      return false;
+    }
+
+    if (shouldPreferLocalData()) {
+      const ok = await applyCached();
+      if (!ok) {
+        setCategories([]);
+        setDishes([]);
+      }
+      return;
+    }
+
     try {
       const fetchedCategories = await menuApi.getCategories(restaurantId);
       const groups = await Promise.all(
@@ -140,13 +197,8 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
       setDishes(nextDishes);
       cacheMenuCatalog(restaurantId, nextCategories, nextDishes);
     } catch {
-      const cached = await getCachedMenuCatalogAsync(restaurantId);
-      if (cached) {
-        setCategories(cached.categories || []);
-        setDishes(cached.dishes || []);
-        setUsingOfflineCatalog(true);
-        onMessage?.("Menu chargé depuis la mémoire locale (hors ligne).");
-      } else {
+      const ok = await applyCached();
+      if (!ok) {
         setCategories([]);
         setDishes([]);
         onMessage?.("Aucun menu en mémoire. Connectez-vous une fois pour le mémoriser.");

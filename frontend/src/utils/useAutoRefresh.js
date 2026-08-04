@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { shouldPreferLocalData } from "@/utils/network";
 
 export function useAutoRefresh(callback, intervalMs, dependencies = []) {
   useEffect(() => {
@@ -7,7 +8,7 @@ export function useAutoRefresh(callback, intervalMs, dependencies = []) {
     let cancelled = false;
 
     async function refresh() {
-      if (cancelled || document.hidden || !navigator.onLine) return;
+      if (cancelled || document.hidden || shouldPreferLocalData()) return;
       await callback();
     }
 

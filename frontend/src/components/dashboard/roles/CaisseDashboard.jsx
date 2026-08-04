@@ -12,7 +12,9 @@ import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
 import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
 import { getApiBaseUrl } from "@/config/api";
 import { apiFetch } from "@/config/http";
-import { isNetworkError } from "@/utils/network";
+import { isNetworkError, shouldPreferLocalData } from "@/utils/network";
+import { loadCachedBranding } from "@/offline/sessionCache";
+import { getCachedRestaurantMetaAsync } from "@/utils/offlineCache";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFilterBar";
@@ -182,6 +184,29 @@ export function CaisseDashboard({ overrides = {} }) {
       setIsLoading(true);
       setMessage("");
     }
+
+    async function applyLocal() {
+      if (!restaurantId) return false;
+      const local = await loadCashierReportMerged(restaurantId, null);
+      setReport(local);
+      setSelectedOrderId((current) => current || local.pending_orders?.[0]?.id || "");
+      setSelectedReceiptId((current) => current || local.receipts?.[0]?.id || "");
+      setOfflineHint("Mode hors ligne : caisse locale (espèces / carte uniquement).");
+      if (!silent) setMessage("");
+      return true;
+    }
+
+    if (shouldPreferLocalData() && restaurantId) {
+      try {
+        await applyLocal();
+      } catch {
+        if (!silent) setMessage("Impossible de charger la caisse locale.");
+      } finally {
+        if (!silent) setIsLoading(false);
+      }
+      return;
+    }
+
     try {
       const data = await orderApi.cashierReport(periodToApiDates(reportPeriod, reportCustomPeriod));
       setReport(data);
@@ -192,12 +217,7 @@ export function CaisseDashboard({ overrides = {} }) {
     } catch (error) {
       if (isNetworkError(error) && restaurantId) {
         try {
-          const local = await loadCashierReportMerged(restaurantId, null);
-          setReport(local);
-          setSelectedOrderId((current) => current || local.pending_orders?.[0]?.id || "");
-          setSelectedReceiptId((current) => current || local.receipts?.[0]?.id || "");
-          setOfflineHint("Mode hors ligne : caisse locale (espèces / carte uniquement).");
-          if (!silent) setMessage("");
+          await applyLocal();
         } catch {
           if (!silent) setMessage(error.message || "Impossible de charger la caisse.");
         }
@@ -210,16 +230,31 @@ export function CaisseDashboard({ overrides = {} }) {
   }
 
   async function loadRestaurant() {
+    if (shouldPreferLocalData() && restaurantId) {
+      const cached = loadCachedBranding(restaurantId);
+      const meta = await getCachedRestaurantMetaAsync(restaurantId);
+      setRestaurant(cached || meta?.branding || meta?.settings || null);
+      return;
+    }
+
     try {
       // /me exige RESTAURANT_SETTINGS_READ (souvent absent pour la caisse).
       // /me/branding est accessible à tout le personnel tenant (nom + logo reçu).
       setRestaurant(await apiFetch("/api/v1/restaurants/me/branding", {
         fallback: "Impossible de charger les informations du restaurant.",
+        timeout: 5_000,
       }));
-    } catch {
+    } catch (error) {
+      if (isNetworkError(error) && restaurantId) {
+        const cached = loadCachedBranding(restaurantId);
+        const meta = await getCachedRestaurantMetaAsync(restaurantId);
+        setRestaurant(cached || meta?.branding || meta?.settings || null);
+        return;
+      }
       try {
         setRestaurant(await apiFetch("/api/v1/restaurants/me", {
           fallback: "Impossible de charger les informations du restaurant.",
+          timeout: 5_000,
         }));
       } catch {
         setRestaurant(null);
@@ -393,13 +428,13 @@ export function CaisseDashboard({ overrides = {} }) {
       setActiveTab("receipts");
     }
 
-    if (isMobileMoney && (!navigator.onLine || isLocalIdSafe(selectedOrder.id))) {
+    if (isMobileMoney && (shouldPreferLocalData() || isLocalIdSafe(selectedOrder.id))) {
       setMessage("Le Mobile Money nécessite une connexion réseau.");
       setIsLoading(false);
       return;
     }
 
-    if (!navigator.onLine || isLocalIdSafe(selectedOrder.id)) {
+    if (shouldPreferLocalData() || isLocalIdSafe(selectedOrder.id)) {
       try {
         await settleOffline();
       } catch (error) {
@@ -798,7 +833,7 @@ export function CaisseDashboard({ overrides = {} }) {
                   </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-3">
                     {paymentMethods.map((method) => {
-                      const mobileBlocked = method.label === "Mobile Money" && (!navigator.onLine || Boolean(offlineHint));
+                      const mobileBlocked = method.label === "Mobile Money" && (shouldPreferLocalData() || Boolean(offlineHint));
                       return (
                       <button
                         key={method.label}

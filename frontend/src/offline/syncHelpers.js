@@ -12,6 +12,7 @@ export const TYPE_PRIORITY = {
   kitchen_status: 40,
   kitchen_status_local: 40,
   order_status: 50,
+  close_order: 45,
   cash_payment: 60,
   http: 70,
 };

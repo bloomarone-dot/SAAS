@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { DashboardSection, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
-import { isNetworkError } from "@/utils/network";
+import { isNetworkError, shouldPreferLocalData } from "@/utils/network";
 import { advanceLocalTicket, isLocalId, loadKitchenTicketsMerged, mirrorTicketsLocal } from "@/offline";
 import { kitchenApi } from "../services/kitchenApi";
 import { formatMinutes, ticketCurrentStageMinutes, ticketStageLines } from "../utils/kitchenTiming";
@@ -25,7 +25,7 @@ export default function KitchenDisplay({ filter = "orders", restaurantId = null 
     async function loadTickets() {
       if (document.hidden) return;
       try {
-        if (!navigator.onLine && restaurantId) {
+        if (shouldPreferLocalData() && restaurantId) {
           const local = await loadKitchenTicketsMerged(restaurantId, []);
           if (mounted) {
             setTickets(local.filter((ticket) => ticket.status !== "Servie"));
@@ -94,7 +94,7 @@ export default function KitchenDisplay({ filter = "orders", restaurantId = null 
   async function advance(ticket) {
     const status = nextStatus[ticket.status];
     if (!status) return;
-    if (isLocalId(ticket.id) || !navigator.onLine) {
+    if (isLocalId(ticket.id) || shouldPreferLocalData()) {
       try {
         await advanceLocalTicket(ticket, status, restaurantId);
         setTickets((current) => current

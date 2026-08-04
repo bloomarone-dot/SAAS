@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { DashboardSection, ErrorState, LoadingState, PageContainer, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
-import { isNetworkError } from "@/utils/network";
+import { isNetworkError, shouldPreferLocalData } from "@/utils/network";
 import { advanceLocalTicket, isLocalId, loadKitchenTicketsMerged, mirrorTicketsLocal } from "@/offline";
 import CategoriesPage from "../pages/CategoriesPage";
 import DishesPage from "../pages/DishesPage";
@@ -50,6 +50,21 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
   const [offlineHint, setOfflineHint] = useState("");
 
   const loadTickets = useCallback(async () => {
+    async function applyLocal() {
+      if (!restaurantId) return false;
+      const local = await loadKitchenTicketsMerged(restaurantId, []);
+      setTickets(local.filter((ticket) => ticket.status !== "Servie"));
+      setOfflineHint("Mode hors ligne : tickets cuisine locaux.");
+      setError("");
+      return true;
+    }
+
+    if (shouldPreferLocalData() && restaurantId) {
+      await applyLocal();
+      setLoading(false);
+      return;
+    }
+
     try {
       const remote = await kitchenApi.getActiveTickets();
       if (restaurantId) {
@@ -63,10 +78,7 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
       setOfflineHint("");
     } catch (err) {
       if (restaurantId && isNetworkError(err)) {
-        const local = await loadKitchenTicketsMerged(restaurantId, []);
-        setTickets(local.filter((ticket) => ticket.status !== "Servie"));
-        setOfflineHint("Mode hors ligne : tickets cuisine locaux.");
-        setError("");
+        await applyLocal();
       } else {
         setError(err.message || "Impossible de charger la cuisine.");
       }
@@ -106,7 +118,7 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
   async function advanceTicket(ticket, nextStatus) {
     setBusyId(String(ticket.id));
     setError("");
-    if (isLocalId(ticket.id) || !navigator.onLine) {
+    if (isLocalId(ticket.id) || shouldPreferLocalData()) {
       try {
         await advanceLocalTicket(ticket, nextStatus, restaurantId);
         setTickets((current) =>

@@ -71,8 +71,28 @@ const AccountingOperations = lazyNamed(
 );
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
-import { clearOfflineQueue, flushOfflineQueue, friendlyNetworkMessage, getOfflineQueueStats, discardFailedOfflineActions, retryFailedOfflineActions } from "@/utils/network";
-import { initOfflineFoundation } from "@/offline";
+import {
+  clearEffectiveOffline,
+  clearOfflineQueue,
+  flushOfflineQueue,
+  friendlyNetworkMessage,
+  getOfflineQueueStats,
+  discardFailedOfflineActions,
+  retryFailedOfflineActions,
+  isNetworkError,
+  markEffectiveOffline,
+} from "@/utils/network";
+import {
+  clearCachedBranding,
+  clearCachedSession,
+  initOfflineFoundation,
+  isAccessTokenUsable,
+  loadCachedBranding,
+  loadCachedSession,
+  saveCachedBranding,
+  saveCachedSession,
+  warmupOfflineCache,
+} from "@/offline";
 import { getApiBaseUrl, apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/core/api";
 import { getPublicHostKind, shouldResolveTenantFromHost, buildRestaurantTheme } from "@/core/tenant";
 
@@ -155,30 +175,60 @@ export default function App() {
     const token = localStorage.getItem("access_token");
     if (!token) return;
 
-    apiFetch("/api/v1/auth/me")
-      .then((user) => {
-        if (!isSessionAllowedOnCurrentHost(user)) {
-          rejectWrongHostSession();
+    function openWithUser(user, { offline = false } = {}) {
+      if (!isSessionAllowedOnCurrentHost(user)) {
+        rejectWrongHostSession();
+        return;
+      }
+      saveCachedSession(user);
+      const routeView = viewFromPath(user);
+      setSession(user);
+      setActiveView(routeView);
+      const nextPath = pushAppRoute(user, routeView, true);
+      setCurrentPath(nextPath);
+      if (offline) {
+        markEffectiveOffline("auth_me");
+        setMessage("Mode hors ligne : session locale restaurée.");
+        const branding = loadCachedBranding(user.restaurant_id);
+        if (branding) setRestaurantTheme(buildRestaurantTheme(branding));
+        return;
+      }
+      if (user.role === "SUPERADMIN") fetchRestaurants();
+      if (user.role === "ADMIN") fetchAdminSummary();
+      if (user.restaurant_id) {
+        fetchRestaurantTheme(user.restaurant_id);
+        warmupOfflineCache(user.restaurant_id).catch(() => {});
+      }
+    }
+
+    apiFetch("/api/v1/auth/me", {
+      fallback: "Impossible de vérifier la session.",
+      timeout: 4_000,
+    })
+      .then((user) => openWithUser(user, { offline: false }))
+      .catch((error) => {
+        // P0.1 : erreur réseau ≠ logout. 401 réel uniquement via SESSION_EXPIRED_EVENT.
+        if (isNetworkError(error) && isAccessTokenUsable(token)) {
+          const cached = loadCachedSession();
+          if (cached) {
+            openWithUser(cached, { offline: true });
+            return;
+          }
+          setMessage("Hors ligne : reconnectez-vous une fois en ligne pour mémoriser la session.");
           return;
         }
-        const routeView = viewFromPath(user);
-        setSession(user);
-        setActiveView(routeView);
-        const nextPath = pushAppRoute(user, routeView, true);
-        setCurrentPath(nextPath);
-        if (user.role === "SUPERADMIN") fetchRestaurants();
-        if (user.role === "ADMIN") fetchAdminSummary();
-        if (user.restaurant_id) fetchRestaurantTheme();
-      })
-      .catch(() => {
-        clearToken();
-        if (shouldShowLoginForPath()) setShowLogin(true);
+        if (!isNetworkError(error)) {
+          clearToken();
+          clearCachedSession();
+          if (shouldShowLoginForPath()) setShowLogin(true);
+        }
       });
   }, [apiBaseUrl]);
 
   useEffect(() => {
     async function handleOnline() {
       setIsOnline(true);
+      clearEffectiveOffline();
       const result = await flushOfflineQueue(apiBaseUrl);
       refreshQueueState();
       if (result.synced > 0) {
@@ -188,10 +238,14 @@ export default function App() {
         setMessage(`${result.failed} action(s) en échec — réessayez ou ignorez-les.`);
       }
       if (session?.role === "ADMIN") fetchAdminSummary();
+      if (session?.restaurant_id) {
+        warmupOfflineCache(session.restaurant_id).catch(() => {});
+      }
     }
 
     function handleOffline() {
       setIsOnline(false);
+      markEffectiveOffline("browser");
     }
 
     function refreshQueueState() {
@@ -314,14 +368,18 @@ export default function App() {
     });
   }
 
-  async function fetchRestaurantTheme() {
+  async function fetchRestaurantTheme(restaurantId = session?.restaurant_id) {
     try {
       const restaurant = await apiFetch("/api/v1/restaurants/me/branding", {
         fallback: "Impossible de charger le thème du restaurant.",
+        timeout: 5_000,
       });
       setRestaurantTheme(buildRestaurantTheme(restaurant));
+      const id = restaurant?.id || restaurantId;
+      if (id) saveCachedBranding(id, restaurant);
     } catch {
-      // Theme loading should never block dashboard usage.
+      const cached = loadCachedBranding(restaurantId);
+      if (cached) setRestaurantTheme(buildRestaurantTheme(cached));
     }
   }
 
@@ -353,7 +411,9 @@ export default function App() {
       rejectWrongHostSession();
       return;
     }
+    clearEffectiveOffline();
     setToken(data.access_token);
+    saveCachedSession(data.user);
     setSession(data.user);
     setActiveView("dashboard");
     setViewHistory([]);
@@ -365,8 +425,14 @@ export default function App() {
     if (data.user.role === "ADMIN") fetchAdminSummary();
     if (data.restaurant_branding) {
       setRestaurantTheme(buildRestaurantTheme(data.restaurant_branding));
+      if (data.user.restaurant_id) {
+        saveCachedBranding(data.user.restaurant_id, data.restaurant_branding);
+      }
     } else if (data.user.restaurant_id) {
-      fetchRestaurantTheme();
+      fetchRestaurantTheme(data.user.restaurant_id);
+    }
+    if (data.user.restaurant_id) {
+      warmupOfflineCache(data.user.restaurant_id).catch(() => {});
     }
   }
 
@@ -378,6 +444,8 @@ export default function App() {
 
   function rejectWrongHostSession() {
     clearToken();
+    clearCachedSession();
+    clearCachedBranding();
     setSession(null);
     setShowLogin(true);
     setMessage(
@@ -438,6 +506,9 @@ export default function App() {
 
   function logout({ expired = false } = {}) {
     clearToken();
+    clearCachedSession();
+    clearCachedBranding();
+    clearEffectiveOffline();
     setSession(null);
     setRestaurants([]);
     setRestaurantTheme(null);

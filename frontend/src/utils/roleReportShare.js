@@ -28,7 +28,11 @@ export function toCsv(rows) {
     .join("\n");
 }
 
-/** Ouvre WhatsApp Web/App avec le texte du rapport (optionnellement vers un numéro). */
+/**
+ * Ouvre WhatsApp Web/App avec le texte du rapport.
+ * Avec numéro : ouvre directement la conversation (ex. patron).
+ * Sans numéro : WhatsApp s’ouvre avec le message prérempli à envoyer au contact choisi.
+ */
 export function shareReportOnWhatsApp(text, phone = "") {
   const message = String(text || "").trim();
   if (!message) return;
@@ -36,6 +40,81 @@ export function shareReportOnWhatsApp(text, phone = "") {
   const target = digits ? `https://wa.me/${digits.startsWith("237") ? digits : `237${digits}`}` : "https://wa.me/";
   const url = `${target}?text=${encodeURIComponent(message)}`;
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function moneyFr(value) {
+  return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
+}
+
+function formatVariationFr(value) {
+  if (value == null) return "—";
+  const number = Number(value);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
+}
+
+/** Texte prêt à coller / envoyer dans le groupe WhatsApp de l’entreprise. */
+export function buildDailyReportText(report) {
+  if (!report) return "";
+  const kpis = report.kpis || {};
+  const dateLabel = report.date
+    ? new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(
+        new Date(`${report.date}T12:00:00`),
+      )
+    : "Aujourd'hui";
+
+  const lines = [
+    `*Rapport de la journée*`,
+    `${report.restaurant_name || "Restaurant"}`,
+    dateLabel,
+    "",
+    `CA : ${moneyFr(kpis.revenue)}`,
+    `Commandes : ${kpis.orders_count ?? 0}`,
+    `Ticket moyen : ${moneyFr(kpis.average_ticket)}`,
+    `Bénéfice estimé : ${moneyFr(kpis.profit)}`,
+    `Marge : ${Number(kpis.margin_rate || 0).toFixed(1)} %`,
+    `Réductions : -${moneyFr(kpis.total_discounts)} (${kpis.discounted_orders_count || 0} cmd)`,
+    `vs hier (même heure) : ${formatVariationFr(report.comparison?.variation_pct)}`,
+    "",
+    `Repas : ${moneyFr(kpis.meal_revenue)}`,
+    `Boissons : ${moneyFr(kpis.drink_revenue)}`,
+  ];
+
+  const payments = report.payment_methods || [];
+  if (payments.length) {
+    lines.push("", "*Modes de paiement*");
+    for (const row of payments) {
+      lines.push(`• ${row.method} : ${moneyFr(row.amount)} (${row.share}%)`);
+    }
+  }
+
+  const products = (report.top_products || []).slice(0, 8);
+  if (products.length) {
+    lines.push("", "*Meilleures ventes*");
+    for (const row of products) {
+      lines.push(`• ${row.name} × ${row.quantity} — ${moneyFr(row.revenue)}`);
+    }
+  }
+
+  const team = (report.employee_performance || []).slice(0, 8);
+  if (team.length) {
+    lines.push("", "*Équipe*");
+    for (const row of team) {
+      lines.push(`• ${row.name} — ${moneyFr(row.revenue)} (${row.orders} cmd)`);
+    }
+  }
+
+  const alerts = (report.stock_alerts || []).slice(0, 5);
+  if (alerts.length) {
+    lines.push("", "*Alertes stock*");
+    for (const row of alerts) {
+      const label = row.name || row.product_name || "Article";
+      lines.push(`• ${label} (${row.current_stock ?? "?"} / min ${row.minimum_stock ?? "?"})`);
+    }
+  }
+
+  lines.push("", `_Généré automatiquement — Bloomar_`);
+  return lines.join("\n");
 }
 
 export function printHtmlReport(html, title = "Rapport") {

@@ -343,7 +343,14 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
             <SettingsGroup title="Contacts & vente">
               <div className="grid gap-4 md:grid-cols-2">
                 <Field name="phone" label="Téléphone" value={form.phone} onChange={updateField} disabled={fieldsDisabled} />
-                <Field name="whatsapp_phone" label="WhatsApp" value={form.whatsapp_phone} onChange={updateField} disabled={fieldsDisabled} />
+                <Field
+                  name="whatsapp_phone"
+                  label="WhatsApp du patron"
+                  value={form.whatsapp_phone}
+                  onChange={updateField}
+                  disabled={fieldsDisabled}
+                  placeholder="Ex. 6XX XXX XXX"
+                />
                 <Field name="email" label="Email public" type="email" value={form.email} onChange={updateField} disabled={fieldsDisabled} />
                 <Field name="website_url" label="Site web" value={form.website_url} onChange={updateField} disabled={fieldsDisabled} />
                 <Field name="opening_hours" label="Horaires d'ouverture" value={form.opening_hours} onChange={updateField} placeholder="Ex: Lun-Dim 09:00 - 22:00" disabled={fieldsDisabled} />

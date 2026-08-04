@@ -132,14 +132,17 @@ function resolveOrderId(action, idMap) {
 }
 
 export function isNetworkError(error) {
+  if (error?.isNetworkError) return true;
   const message = String(error?.message || error || "");
   return (
-    !navigator.onLine
+    (typeof navigator !== "undefined" && !navigator.onLine)
     || message.includes("Failed to fetch")
     || message.includes("NetworkError")
     || message.includes("Connexion indisponible")
     || message.includes("pris trop de temps")
     || /timeout/i.test(message)
+    || message.includes("Load failed")
+    || message.includes("Network request failed")
   );
 }
 
@@ -309,6 +312,20 @@ async function runAction(action, { apiFetch, apiFetchPublic, idMap }) {
     return;
   }
 
+  if (type === "close_order") {
+    const orderId = resolveOrderId(action, idMap);
+    if (!orderId) {
+      const err = new Error("Commande locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    await apiFetch(`/api/v1/orders/${orderId}/close`, {
+      method: "POST",
+      fallback: action.errorMessage || "Clôture commande impossible.",
+    });
+    return;
+  }
+
   for (const request of action.requests ?? []) {
     const path = rewritePath(request.path, idMap);
     if (path.includes("local_")) {
@@ -368,6 +385,7 @@ export async function flushOfflineQueue(apiBaseUrl) {
     const { apiFetch, apiFetchPublic } = await import("@/config/http");
     const idMap = await loadIdMap();
     const queue = dedupeQueue(rawQueue);
+    const queueIdsAtStart = new Set(queue.map((action) => action.id));
     const remaining = [];
     let synced = 0;
     let conflicts = 0;
@@ -445,12 +463,19 @@ export async function flushOfflineQueue(apiBaseUrl) {
     }
 
     await saveIdMap(idMap);
-    persistSyncQueue(remaining);
+    // Conserves les actions enqueued pendant le flush (évite perte P0 race).
+    const latest = readOfflineQueue();
+    const remainingIds = new Set(remaining.map((action) => action.id));
+    const enqueuedDuringFlush = latest.filter(
+      (action) => !queueIdsAtStart.has(action.id) && !remainingIds.has(action.id),
+    );
+    const nextQueue = dedupeQueue([...remaining, ...enqueuedDuringFlush]);
+    persistSyncQueue(nextQueue);
 
     const result = {
       synced,
-      remaining: remaining.filter((a) => a.status !== "failed").length,
-      failed: remaining.filter((a) => a.status === "failed").length,
+      remaining: nextQueue.filter((a) => a.status !== "failed").length,
+      failed: nextQueue.filter((a) => a.status === "failed").length,
       conflicts,
       idMap,
     };

@@ -16,9 +16,47 @@ export {
   sortQueueForFlush,
 } from "@/offline/sync";
 
+const EFFECTIVE_OFFLINE_FLAG = "__bloomarEffectiveOffline";
+
+/** true si le navigateur est offline OU si une requête récente a prouvé l'absence de réseau. */
+export function shouldPreferLocalData() {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return true;
+  if (typeof window !== "undefined" && window[EFFECTIVE_OFFLINE_FLAG]) return true;
+  return false;
+}
+
+export function markEffectiveOffline(reason = "network") {
+  if (typeof window === "undefined") return;
+  if (window[EFFECTIVE_OFFLINE_FLAG]) return;
+  window[EFFECTIVE_OFFLINE_FLAG] = true;
+  window.dispatchEvent(new CustomEvent("offline-effective", { detail: { reason } }));
+}
+
+export function clearEffectiveOffline() {
+  if (typeof window === "undefined") return;
+  window[EFFECTIVE_OFFLINE_FLAG] = false;
+}
+
+export function isNetworkLikeMessage(message) {
+  const text = String(message || "");
+  return (
+    text.includes("Failed to fetch")
+    || text.includes("NetworkError")
+    || text.includes("Connexion indisponible")
+    || text.includes("pris trop de temps")
+    || /timeout/i.test(text)
+    || text.includes("Load failed")
+    || text.includes("Network request failed")
+  );
+}
+
 export function friendlyNetworkMessage(error, fallback = "Connexion indisponible. Réessayez dans quelques instants.") {
   const message = String(error?.message || error || "");
-  if (!navigator.onLine || message.includes("Failed to fetch") || message.includes("NetworkError")) {
+  if (
+    (typeof navigator !== "undefined" && !navigator.onLine)
+    || isNetworkLikeMessage(message)
+  ) {
+    markEffectiveOffline("fetch");
     return "Connexion indisponible. L'action sera possible dès que le réseau revient.";
   }
   return message || fallback;

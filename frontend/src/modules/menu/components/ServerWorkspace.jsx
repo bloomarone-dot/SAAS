@@ -11,7 +11,7 @@ import TableSessionModal from "./TableSessionModal";
 import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnapshot, saveServerSession } from "../utils/serverSessionStorage";
 import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { cacheMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
-import { enqueueOfflineAction, isNetworkError } from "@/utils/network";
+import { enqueueOfflineAction, isNetworkError, shouldPreferLocalData } from "@/utils/network";
 import {
   buildServerReportText,
   downloadTextFile,
@@ -21,6 +21,7 @@ import {
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { formatMinutes, orderKitchenTimingDetails, orderKitchenTimingLabel } from "../utils/kitchenTiming";
 import {
+  closeLocalOrderForBill,
   getLocalOrder,
   isLocalId,
   markLocalOrderServed,
@@ -151,6 +152,24 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
   const loadMenu = useCallback(async () => {
     if (!restaurantId) return;
+
+    async function applyCached(notice) {
+      const cached = await getCachedMenuCatalogAsync(restaurantId);
+      if (cached) {
+        setCategories((cached.categories || []).filter((item) => item.is_active !== false));
+        setDishes((cached.dishes || []).filter((dish) => dish.is_available !== false));
+        if (notice) setMessage(notice);
+        return true;
+      }
+      return false;
+    }
+
+    if (shouldPreferLocalData()) {
+      const ok = await applyCached("Menu chargé depuis la mémoire locale (hors ligne).");
+      if (!ok) setError("Impossible de charger le menu. Connectez-vous une fois pour le mémoriser.");
+      return;
+    }
+
     try {
       const fetchedCategories = await menuApi.getCategories(restaurantId);
       const groups = await Promise.all(
@@ -164,14 +183,8 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       setDishes(nextDishes);
       cacheMenuCatalog(restaurantId, nextCategories, nextDishes);
     } catch {
-      const cached = await getCachedMenuCatalogAsync(restaurantId);
-      if (cached) {
-        setCategories((cached.categories || []).filter((item) => item.is_active !== false));
-        setDishes((cached.dishes || []).filter((dish) => dish.is_available !== false));
-        setMessage("Menu chargé depuis la mémoire locale (hors ligne).");
-      } else {
-        setError("Impossible de charger le menu. Connectez-vous une fois pour le mémoriser.");
-      }
+      const ok = await applyCached("Menu chargé depuis la mémoire locale (hors ligne).");
+      if (!ok) setError("Impossible de charger le menu. Connectez-vous une fois pour le mémoriser.");
     }
   }, [restaurantId]);
 
@@ -551,7 +564,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       );
     }
 
-    if (isLocalId(session.orderId) || !navigator.onLine) {
+    if (isLocalId(session.orderId) || shouldPreferLocalData()) {
       try {
         await sendLocal();
       } catch (err) {
@@ -637,13 +650,46 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     if (!session?.orderId) return;
     setBusy("close");
     setError("");
+
+    async function closeLocal() {
+      const base = order || (await getLocalOrder(session.orderId)) || { id: session.orderId };
+      const updated = await closeLocalOrderForBill(
+        { ...base, restaurantId, restaurant_id: restaurantId },
+        restaurantId,
+      );
+      setOrder(updated);
+      if (currentUser?.id) saveOrderSnapshot(currentUser.id, updated);
+      setMenuMode(false);
+      setMessage("Commande clôturée localement. Sync à la reconnexion — paiement en caisse possible.");
+    }
+
+    if (isLocalId(session.orderId) || shouldPreferLocalData()) {
+      try {
+        await closeLocal();
+      } catch (err) {
+        setError(err.message || "Clôture locale impossible.");
+      } finally {
+        setBusy("");
+      }
+      return;
+    }
+
     try {
       const updated = await orderApi.close(session.orderId);
       setOrder(updated);
+      if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
       setMenuMode(false);
       setMessage("Commande clôturée. Vous pouvez demander le paiement en caisse.");
     } catch (err) {
-      setError(err.message || "Clôture impossible.");
+      if (isNetworkError(err)) {
+        try {
+          await closeLocal();
+        } catch (localErr) {
+          setError(localErr.message || "Clôture locale impossible.");
+        }
+      } else {
+        setError(err.message || "Clôture impossible.");
+      }
     } finally {
       setBusy("");
     }

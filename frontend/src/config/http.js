@@ -1,4 +1,10 @@
-import { formatApiError, friendlyNetworkMessage } from "@/utils/network";
+import {
+  formatApiError,
+  friendlyNetworkMessage,
+  isNetworkLikeMessage,
+  markEffectiveOffline,
+  shouldPreferLocalData,
+} from "@/utils/network";
 import { getApiBaseUrl } from "@/config/api";
 
 /** Clé localStorage du jeton JWT (inchangée — pas de migration cookies ici). */
@@ -7,8 +13,11 @@ export const TOKEN_KEY = "access_token";
 /** Événement DOM émis par apiFetch sur HTTP 401 pour déclencher la déconnexion. */
 export const SESSION_EXPIRED_EVENT = "session-expired";
 
-/** Délai par défaut avant abandon d'une requête (30 s). Surchargeable via `{ timeout }`. */
-export const DEFAULT_TIMEOUT_MS = 30_000;
+/** Délai par défaut online (réseau instable : bascule rapide, pas 30 s). */
+export const DEFAULT_TIMEOUT_MS = 8_000;
+
+/** Délai court lorsque hors ligne / offline effectif (P0.4). */
+export const OFFLINE_TIMEOUT_MS = 2_500;
 
 const REFRESH_PATH = "/api/v1/auth/refresh";
 
@@ -139,11 +148,17 @@ export async function refreshAccessToken() {
         DEFAULT_TIMEOUT_MS,
       );
     } catch (error) {
-      throw new Error(friendlyNetworkMessage(error, "Impossible de renouveler la session."));
+      const networkError = new Error(
+        friendlyNetworkMessage(error, "Impossible de renouveler la session."),
+      );
+      networkError.isNetworkError = true;
+      throw networkError;
     }
 
     if (!response.ok) {
-      throw new Error("Session expirée, veuillez vous reconnecter.");
+      const authError = new Error("Session expirée, veuillez vous reconnecter.");
+      authError.isAuthError = true;
+      throw authError;
     }
 
     const data = await response.json().catch(() => null);
@@ -181,10 +196,17 @@ async function request(path, options = {}) {
     fallback = "Action impossible: le serveur n'a pas fourni de détail.",
     auth = true,
     responseType = "json",
-    timeout = DEFAULT_TIMEOUT_MS,
+    timeout,
     _retry = false,
     ...fetchOptions
   } = options;
+
+  const resolvedTimeout =
+    typeof timeout === "number"
+      ? timeout
+      : shouldPreferLocalData()
+        ? OFFLINE_TIMEOUT_MS
+        : DEFAULT_TIMEOUT_MS;
 
   const token = auth ? getToken() : null;
   const { payload, headers: preparedHeaders } = prepareRequestBody({ body, headers, json });
@@ -203,10 +225,13 @@ async function request(path, options = {}) {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       },
-      timeout,
+      resolvedTimeout,
     );
   } catch (error) {
-    throw new Error(friendlyNetworkMessage(error, fallback));
+    markEffectiveOffline("apiFetch");
+    const networkError = new Error(friendlyNetworkMessage(error, fallback));
+    networkError.isNetworkError = true;
+    throw networkError;
   }
 
   if (auth && response.status === 401) {
@@ -214,7 +239,16 @@ async function request(path, options = {}) {
     if (canRefresh) {
       try {
         await refreshAccessToken();
-      } catch {
+      } catch (error) {
+        // P0.1 : une erreur réseau sur le refresh ne doit jamais logout.
+        if (error?.isNetworkError || isNetworkLikeMessage(error?.message)) {
+          markEffectiveOffline("refresh");
+          const networkError = new Error(
+            friendlyNetworkMessage(error, "Connexion indisponible. Session locale conservée."),
+          );
+          networkError.isNetworkError = true;
+          throw networkError;
+        }
         handleUnauthorized();
       }
       return request(path, {
@@ -225,7 +259,7 @@ async function request(path, options = {}) {
         fallback,
         auth,
         responseType,
-        timeout,
+        timeout: resolvedTimeout,
         _retry: true,
       });
     }

@@ -407,6 +407,45 @@ export async function advanceLocalTicket(ticket, nextStatus, restaurantId) {
   return updated;
 }
 
+/** Clôture locale pour addition / passage caisse (P0.5). */
+export async function closeLocalOrderForBill(order, restaurantId) {
+  await initOfflineFoundation();
+  const now = nowIso();
+  const nextOrder = {
+    ...order,
+    is_closed: true,
+    closed_at: now,
+    updated_at: now,
+    updatedAt: now,
+  };
+  await upsertLocalOrder({
+    ...nextOrder,
+    restaurantId: restaurantId || order.restaurantId || order.restaurant_id,
+  });
+
+  if (!isLocalId(order.id)) {
+    enqueueOfflineAction({
+      type: "close_order",
+      label: `Clôture ${order.order_number || order.id}`,
+      localOrderId: order.id,
+      requests: [{
+        path: `/api/v1/orders/${order.id}/close`,
+        method: "POST",
+        requiresAuth: true,
+      }],
+    });
+  } else {
+    enqueueOfflineAction({
+      type: "close_order",
+      label: `Clôture ${order.order_number || order.id}`,
+      localOrderId: order.id,
+      requests: [],
+    });
+  }
+
+  return nextOrder;
+}
+
 export async function markLocalOrderServed(order, restaurantId) {
   const now = nowIso();
   const nextOrder = {
