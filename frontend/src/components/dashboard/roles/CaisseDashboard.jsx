@@ -8,8 +8,6 @@ import { CashierReportAnalytics } from "@/modules/orders/components/CashierRepor
 import { InvoiceHistoryPanel } from "@/modules/orders/components/InvoiceHistoryPanel";
 import { CashDrawerSessionPanel } from "@/modules/orders/components/CashDrawerSession";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
-import { MtnMoneyPayment } from "@/modules/orders/components/MtnMoneyPayment";
-import { OrangeMoneyPayment } from "@/modules/orders/components/OrangeMoneyPayment";
 import { getApiBaseUrl } from "@/config/api";
 import { apiFetch } from "@/config/http";
 import { isNetworkError, shouldPreferLocalData } from "@/utils/network";
@@ -121,7 +119,6 @@ export function CaisseDashboard({ overrides = {} }) {
   const [selectedReceiptId, setSelectedReceiptId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Espèces");
   const [mobileOperator, setMobileOperator] = useState("MTN");
-  const [mobilePaymentOrder, setMobilePaymentOrder] = useState(null);
   const [discount, setDiscount] = useState("");
   const [promoCode, setPromoCode] = useState("");
   const [search, setSearch] = useState("");
@@ -394,6 +391,12 @@ export function CaisseDashboard({ overrides = {} }) {
     }
   }
 
+  function resolveMobileMoneyLabel() {
+    if (activePaymentRequest?.method === "ORANGE") return "Orange Money";
+    if (activePaymentRequest?.method === "MTN") return "MTN Mobile Money";
+    return mobileOperator === "ORANGE" ? "Orange Money" : "MTN Mobile Money";
+  }
+
   async function validatePayment() {
     if (!selectedOrder) return;
     if (!methodChosen || !paymentMethod) {
@@ -403,15 +406,16 @@ export function CaisseDashboard({ overrides = {} }) {
     setIsLoading(true);
     setMessage("");
     const discountAmount = Number(discount || selectedOrder.discount_amount || 0);
-    const payload = { payment_method: paymentMethod, discount_amount: discountAmount };
     const isMobileMoney = paymentMethod === "Mobile Money";
+    const actualMethod = isMobileMoney ? resolveMobileMoneyLabel() : paymentMethod;
+    const payload = { payment_method: actualMethod, discount_amount: discountAmount };
 
     async function settleOffline() {
-      if (!OFFLINE_CASH_METHODS.has(paymentMethod)) {
-        throw new Error("Le Mobile Money nécessite une connexion réseau.");
+      if (!OFFLINE_CASH_METHODS.has(actualMethod)) {
+        throw new Error("Mode de paiement non pris en charge hors ligne.");
       }
       const result = await payLocalCashOrder(selectedOrder, {
-        payment_method: paymentMethod,
+        payment_method: actualMethod,
         discount_amount: discountAmount,
         restaurantId,
         cashier: currentUser,
@@ -423,15 +427,9 @@ export function CaisseDashboard({ overrides = {} }) {
       setActivePaymentRequest(null);
       setLastPaidOrder(result.order);
       setOfflineHint("Paiement enregistré localement. Sync à la reconnexion.");
-      setMessage(`Paiement local validé pour ${result.order.order_number}. Consultez l'historique ou imprimez le reçu.`);
+      setMessage(`Paiement local validé pour ${result.order.order_number} · ${actualMethod}.`);
       setShowPaymentModal(false);
       setActiveTab("receipts");
-    }
-
-    if (isMobileMoney && (shouldPreferLocalData() || isLocalIdSafe(selectedOrder.id))) {
-      setMessage("Le Mobile Money nécessite une connexion réseau.");
-      setIsLoading(false);
-      return;
     }
 
     if (shouldPreferLocalData() || isLocalIdSafe(selectedOrder.id)) {
@@ -446,45 +444,18 @@ export function CaisseDashboard({ overrides = {} }) {
     }
 
     try {
-      // Demande serveur Mobile Money : lancer le push via l'API demandes.
-      if (
-        isMobileMoney
-        && activePaymentRequest
-        && (activePaymentRequest.method === "ORANGE" || activePaymentRequest.method === "MTN")
-      ) {
-        setMobileOperator(activePaymentRequest.method === "ORANGE" ? "ORANGE" : "MTN");
-        const result = await paymentApi.validateRequest(activePaymentRequest.id);
-        setMessage(result.message || "Push Mobile Money envoyé au client.");
-        await Promise.all([loadPaymentRequests(), loadCashierReport({ silent: true })]);
-        setShowPaymentModal(false);
-        setActivePaymentRequest(null);
-        setIsLoading(false);
-        return;
-      }
-
-      if (isMobileMoney) {
-        const prepared = await orderApi.update(selectedOrder.id, {
-          payment_method: mobileOperator === "ORANGE" ? "Orange Money" : "MTN Mobile Money",
-          discount_amount: discountAmount,
-        });
-        setMobilePaymentOrder(prepared);
-        setIsLoading(false);
-        return;
-      }
-
-      // Espèces / Carte : toujours via /payment pour tracer le mode choisi.
       const paid = await orderApi.validatePayment(selectedOrder.id, payload);
       setDiscount("");
       setSelectedOrderId("");
       setSelectedReceiptId(paid.id);
       setActivePaymentRequest(null);
       setLastPaidOrder(paid);
-      setMessage(`Paiement validé pour ${paid.order_number} · ${paid.payment_method || paymentMethod}. Trace enregistrée.`);
+      setMessage(`Paiement validé pour ${paid.order_number} · ${paid.payment_method || actualMethod}.`);
       await Promise.all([loadPaymentRequests(), loadCashierReport()]);
       setShowPaymentModal(false);
       setActiveTab("receipts");
     } catch (error) {
-      if (!isMobileMoney && isNetworkError(error)) {
+      if (isNetworkError(error)) {
         try {
           await settleOffline();
         } catch (localErr) {
@@ -797,9 +768,7 @@ export function CaisseDashboard({ overrides = {} }) {
               >
                 {selectedOrder?.payment_locked
                   ? "Paiement en attente"
-                  : paymentMethod === "Mobile Money"
-                    ? "Envoyer le Push USSD"
-                    : "Valider le paiement"}
+                  : "Valider le paiement"}
               </button>
             )}
           </>
@@ -832,13 +801,10 @@ export function CaisseDashboard({ overrides = {} }) {
                     Vérifiez puis sélectionnez le mode avant de valider. L&apos;impression se fait après validation.
                   </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                    {paymentMethods.map((method) => {
-                      const mobileBlocked = method.label === "Mobile Money" && (shouldPreferLocalData() || Boolean(offlineHint));
-                      return (
+                    {paymentMethods.map((method) => (
                       <button
                         key={method.label}
                         type="button"
-                        disabled={mobileBlocked}
                         onClick={() => {
                           setPaymentMethod(method.label);
                           setMethodChosen(true);
@@ -847,13 +813,12 @@ export function CaisseDashboard({ overrides = {} }) {
                           methodChosen && paymentMethod === method.label
                             ? "border-emerald-600 bg-emerald-50 text-emerald-800"
                             : "border-slate-200 text-slate-700"
-                        } ${mobileBlocked ? "cursor-not-allowed opacity-50" : ""}`}
+                        }`}
                       >
                         <DashboardIcon name={method.icon} size={18} />
                         {method.label}
                       </button>
-                      );
-                    })}
+                    ))}
                   </div>
                   {!methodChosen && (
                     <p className="mt-2 text-xs font-bold text-amber-700">Sélectionnez un mode de paiement pour activer la validation.</p>
@@ -862,6 +827,9 @@ export function CaisseDashboard({ overrides = {} }) {
                 {paymentMethod === "Mobile Money" && (
                   <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
                     <p className="text-sm font-black text-slate-950">Opérateur Mobile Money</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-600">
+                      Vérifiez le dépôt reçu sur le téléphone, puis validez. Aucun push USSD n&apos;est envoyé.
+                    </p>
                     <select
                       value={mobileOperator}
                       onChange={(event) => setMobileOperator(event.target.value)}
@@ -954,38 +922,6 @@ export function CaisseDashboard({ overrides = {} }) {
           </div>
         </div>
       </AdminFormModal>
-
-      {mobilePaymentOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="w-full max-w-lg">
-            {mobileOperator === "ORANGE" ? (
-              <OrangeMoneyPayment
-                apiBaseUrl={getApiBaseUrl()}
-                order={mobilePaymentOrder}
-                onSuccess={async () => {
-                  setMessage(`Paiement confirmé pour ${mobilePaymentOrder.order_number}.`);
-                  setLastPaidOrder(mobilePaymentOrder);
-                  setActiveTab("receipts");
-                  await Promise.all([loadCashierReport(), loadPaymentRequests()]);
-                }}
-                onClose={() => setMobilePaymentOrder(null)}
-              />
-            ) : (
-              <MtnMoneyPayment
-                apiBaseUrl={getApiBaseUrl()}
-                order={mobilePaymentOrder}
-                onSuccess={async () => {
-                  setMessage(`Paiement confirmé pour ${mobilePaymentOrder.order_number}.`);
-                  setLastPaidOrder(mobilePaymentOrder);
-                  setActiveTab("receipts");
-                  await Promise.all([loadCashierReport(), loadPaymentRequests()]);
-                }}
-                onClose={() => setMobilePaymentOrder(null)}
-              />
-            )}
-          </div>
-        </div>
-      )}
     </PageContainer>
   );
 }

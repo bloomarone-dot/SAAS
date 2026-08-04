@@ -545,41 +545,36 @@ async def validate_payment_request_endpoint(
             message="Encaissement espèces validé.",
         )
 
-    provider = _METHOD_PROVIDER[request_obj.method]
-    if provider == "ORANGE_CM" and not is_orange_configured():
-        raise HTTPException(status_code=503, detail="Paiement Orange Money non configuré")
-    if provider == "MTN_CM" and not is_mtn_configured():
-        raise HTTPException(status_code=503, detail="Paiement MTN Mobile Money non configuré")
+    if request_obj.method in {"ORANGE", "MTN"}:
+        method_label = "Orange Money" if request_obj.method == "ORANGE" else "MTN Mobile Money"
+        if order.status in {"Payée", "Payee"}:
+            raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
+        if order.payment_locked or order.status == "PENDING_PAYMENT":
+            raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
+        if not getattr(order, "is_closed", False) and order.status not in REQUESTABLE_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail="La caisse ne peut encaisser que les commandes fermées, prêtes, servies ou livrées",
+            )
+        settle_cash_payment(db, order, current_user, method_label)
+        request_obj.status = "VALIDATED"
+        request_obj.validated_by_id = current_user.id
+        notify_request_owner(
+            db,
+            request_obj,
+            order.order_number,
+            "Paiement encaissé",
+            f"La caisse a encaissé la commande {order.order_number} ({method_label}).",
+        )
+        db.commit()
+        await _broadcast_request(request_obj, "payment_request_validated")
+        return PaymentRequestActionOut(
+            request_id=request_obj.id,
+            status="VALIDATED",
+            message=f"Encaissement {method_label} validé.",
+        )
 
-    tx, _result = await _initiate(
-        provider=provider,
-        order_id=request_obj.order_id,
-        payer_msisdn=request_obj.payer_msisdn,
-        request=request,
-        current_user=current_user,
-        db=db,
-    )
-    request_obj.status = "VALIDATED"
-    request_obj.validated_by_id = current_user.id
-    request_obj.transaction_id = tx.id
-    notify_request_owner(
-        db, request_obj, order.order_number,
-        "Paiement lancé",
-        f"La caisse a lancé le paiement {request_obj.method} de la commande {order.order_number}. "
-        "Le client reçoit la demande de confirmation.",
-    )
-    db.commit()
-    await _broadcast_request(request_obj, "payment_request_validated")
-    return PaymentRequestActionOut(
-        request_id=request_obj.id,
-        status=tx.status,
-        transaction_id=tx.id,
-        message=(
-            "Push envoyé au client. En attente de confirmation."
-            if tx.status == "PENDING"
-            else tx.failure_reason or "Échec du paiement"
-        ),
-    )
+    raise HTTPException(status_code=400, detail="Mode de paiement non pris en charge")
 
 
 @router.post("/requests/{request_id}/reject", response_model=PaymentRequestActionOut)

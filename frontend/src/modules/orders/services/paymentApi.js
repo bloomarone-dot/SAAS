@@ -15,7 +15,7 @@ export const paymentApi = {
   listRequests: (status = "PENDING") =>
     request(`/api/v1/payments/requests?status=${encodeURIComponent(status)}`),
 
-  // Caisse : valide une demande → lance le paiement (push USSD) ou encaisse l'espèce.
+  // Caisse : valide une demande → encaisse (espèces ou dépôt Orange/MTN enregistré manuellement).
   validateRequest: (requestId) =>
     request(`/api/v1/payments/requests/${requestId}/validate`, {
       method: "POST",

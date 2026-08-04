@@ -533,7 +533,7 @@ export async function removeLocalTicket(ticketId) {
 
 const CASHIER_PENDING_STATUSES = new Set(["Prête", "Prete", "Livrée", "Livree", "PENDING_PAYMENT"]);
 const CASHIER_PAID_STATUSES = new Set(["Payée", "Payee"]);
-const OFFLINE_CASH_METHODS = new Set(["Espèces", "Carte"]);
+const OFFLINE_CASH_METHODS = new Set(["Espèces", "Carte", "Orange Money", "MTN Mobile Money"]);
 
 function emptyCashierReport() {
   return {
@@ -655,7 +655,7 @@ export async function loadCashierReportMerged(restaurantId, remoteReport = null)
 }
 
 /**
- * Encaissement local Espèces / Carte uniquement (pas de Mobile Money hors ligne).
+ * Encaissement local (espèces, carte, dépôt Orange/MTN enregistré manuellement).
  */
 export async function payLocalCashOrder(order, {
   payment_method = "Espèces",
@@ -665,7 +665,7 @@ export async function payLocalCashOrder(order, {
 } = {}) {
   const method = String(payment_method || "Espèces").trim() || "Espèces";
   if (!OFFLINE_CASH_METHODS.has(method)) {
-    throw new Error("Le Mobile Money nécessite une connexion réseau.");
+    throw new Error("Mode de paiement non pris en charge hors ligne.");
   }
   if (!order?.id) throw new Error("Commande introuvable.");
   const status = normalizeCashierStatus(order.status);
