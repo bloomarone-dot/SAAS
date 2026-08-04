@@ -17,6 +17,7 @@ import {
 } from "@/offline/store";
 import { idbDelete, idbGet, STORES } from "@/offline/db";
 import { cacheTables } from "@/utils/offlineCache";
+import { KITCHEN_ENABLED } from "@/config/features";
 
 export function newLocalId(prefix = "local") {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
@@ -291,6 +292,42 @@ export async function updateLocalOrderItems(order, itemsPayload, dishesById = {}
 
 export async function sendLocalOrderToKitchen(order, restaurantId, dishesById = {}) {
   const items = (order.items || []).filter((item) => item.sale_channel !== "EMBALLAGE");
+  const createdAt = nowIso();
+
+  if (!KITCHEN_ENABLED) {
+    const kitchenItems = items.filter((item) => {
+      const dish = dishesById[item.menu_item_id];
+      if (dish) return dish.requires_kitchen !== false && String(dish.sale_channel || "").toUpperCase() !== "BOISSON";
+      return item.requires_kitchen !== false && item.sale_channel !== "BOISSON";
+    });
+    const drinksOnly = items.length > 0 && kitchenItems.length === 0;
+    const nextOrder = {
+      ...order,
+      status: drinksOnly ? "Prête" : order.status === "Nouvelle" ? "Acceptée" : order.status,
+      is_closed: drinksOnly ? true : order.is_closed,
+      closed_at: drinksOnly ? createdAt : order.closed_at,
+      updated_at: createdAt,
+      updatedAt: createdAt,
+    };
+    await upsertLocalOrder({
+      ...nextOrder,
+      restaurantId: restaurantId || order.restaurantId || order.restaurant_id,
+    });
+    if (!isLocalId(order.id)) {
+      enqueueOfflineAction({
+        type: "send_to_kitchen",
+        label: `Confirmation ${order.order_number || order.id}`,
+        localOrderId: order.id,
+        requests: [{
+          path: `/api/v1/orders/${order.id}/send-to-kitchen`,
+          method: "POST",
+          requiresAuth: true,
+        }],
+      });
+    }
+    return { order: nextOrder, tickets: [] };
+  }
+
   const kitchenItems = items.filter((item) => {
     const dish = dishesById[item.menu_item_id];
     if (dish) return dishNeedsKitchen(dish);

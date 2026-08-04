@@ -14,6 +14,7 @@ import {
 } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError, shouldPreferLocalData } from "@/utils/network";
 import { listLocalOrders } from "@/offline/store";
+import { KITCHEN_ENABLED } from "@/config/features";
 import { scopeOrdersForCashier } from "@/offline";
 
 const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
@@ -365,7 +366,9 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
       onMessage?.(
         drinksReady
           ? `Commande ${order.order_number} : boissons uniquement — prête à encaisser.`
-          : `Commande ${order.order_number} envoyée en cuisine.`,
+          : KITCHEN_ENABLED
+            ? `Commande ${order.order_number} envoyée en cuisine.`
+            : `Commande ${order.order_number} confirmée.`,
       );
       setOrders((current) =>
         current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
@@ -378,7 +381,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
   }
 
   function renderOrderCard(order, showKitchenAction = true) {
-    const canSendToKitchen = showKitchenAction && KITCHEN_SEND_STATUSES.has(order.status) && !order.is_closed;
+    const canConfirm = showKitchenAction && KITCHEN_SEND_STATUSES.has(order.status) && !order.is_closed;
     const itemsLabel = (order.items || []).length
       ? order.items.map((item) => `${item.quantity}x ${item.name}`).join(", ")
       : "Aucun plat listé";
@@ -402,14 +405,18 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
           <p className="line-clamp-2">{itemsLabel}</p>
           <p>{money(order.total_amount)} · {formatDateTime(order.created_at)}</p>
         </div>
-        {canSendToKitchen && (
+        {canConfirm && (
           <button
             type="button"
             disabled={kitchenBusyId === order.id}
             onClick={() => sendOrderToKitchen(order)}
             className="lte-btn lte-btn-primary lte-btn-sm mt-3 w-full"
           >
-            {kitchenBusyId === order.id ? "Envoi…" : "Envoyer en cuisine"}
+            {kitchenBusyId === order.id
+              ? "Confirmation…"
+              : KITCHEN_ENABLED
+                ? "Envoyer en cuisine"
+                : "Confirmer la commande"}
           </button>
         )}
       </article>

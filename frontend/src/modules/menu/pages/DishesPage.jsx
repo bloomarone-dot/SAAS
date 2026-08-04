@@ -4,6 +4,7 @@ import { DashboardIcon } from "@/components/dashboard/icons";
 import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { orderApi } from "@/modules/orders/services/orderApi";
+import { KITCHEN_ENABLED } from "@/config/features";
 import { formatFcfa, parseFcfa } from "@/utils/money";
 import { cacheMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
 import { menuApi } from "../services/menuApi";
@@ -255,9 +256,9 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
       const updated = await orderApi.sendToKitchen(activeOrderId);
       setActiveOrder(updated);
       setError("");
-      setNotice("Commande envoyée en cuisine.");
+      setNotice(KITCHEN_ENABLED ? "Commande envoyée en cuisine." : "Commande confirmée.");
     } catch (err) {
-      setError(err.message || "Envoi en cuisine impossible.");
+      setError(err.message || (KITCHEN_ENABLED ? "Envoi en cuisine impossible." : "Confirmation impossible."));
     }
   }
 
@@ -267,7 +268,11 @@ export default function DishesPage({ restaurantId, role, activeOrderId, showCrea
     <AdminPage
       eyebrow={role === "CUISINE" ? "Cuisine" : "Plats"}
       title={createOnly ? "Créer un plat" : "Gestion des plats"}
-      subtitle={activeOrderId ? "Ajoutez les plats à la commande de table puis envoyez-les en cuisine." : createOnly ? "Renseignez les informations du plat à ajouter à la carte." : "Gérez votre carte, les tarifs, la disponibilité et les performances des plats."}
+      subtitle={activeOrderId
+        ? (KITCHEN_ENABLED
+          ? "Ajoutez les plats à la commande de table puis envoyez-les en cuisine."
+          : "Ajoutez les plats à la commande de table puis confirmez la commande.")
+        : createOnly ? "Renseignez les informations du plat à ajouter à la carte." : "Gérez votre carte, les tarifs, la disponibilité et les performances des plats."}
       action={!createOnly && (
         <div className="flex flex-wrap gap-3">
           {!activeOrderId && (
@@ -490,10 +495,11 @@ function OrderCart({ order, onQuantityChange, onSendToKitchen }) {
 
   const visibleItems = order.items.filter((item) => item.sale_channel !== "EMBALLAGE");
   const subtotal = visibleItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
+  const confirmLabel = KITCHEN_ENABLED ? "Envoyer en cuisine" : "Confirmer la commande";
   return (
     <AdminCard
       title={`Commande ${order.order_number}`}
-      action={<PrimaryAction icon="ChefHat" onClick={onSendToKitchen} disabled={!order.items.length}>Envoyer en cuisine</PrimaryAction>}
+      action={<PrimaryAction icon="ChefHat" onClick={onSendToKitchen} disabled={!order.items.length}>{confirmLabel}</PrimaryAction>}
     >
       <div className="grid gap-4 lg:grid-cols-[1fr_220px]">
         <div className="divide-y divide-slate-100">

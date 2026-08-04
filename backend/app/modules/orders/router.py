@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
+from app.features import kitchen_enabled
 from app.dependencies import has_permission, require_tenant_user
 from app.rate_limits import public_order_rate_limit
 from app.modules.orders.cashier_analytics import build_cashier_analytics, build_network_analytics
@@ -764,6 +765,113 @@ def cancel_cashier_payment(
     return get_order_or_404(db, order.id, current_user.restaurant_id)
 
 
+def _order_drinks_only(order: CustomerOrder, db: Session) -> bool:
+    kitchen_items = [item for item in order.items if item.sale_channel != "EMBALLAGE"]
+    if not kitchen_items:
+        return False
+    skipped_bar = 0
+    for item in kitchen_items:
+        dish = (
+            db.query(MenuItem)
+            .filter(MenuItem.id == item.menu_item_id, MenuItem.restaurant_id == order.restaurant_id)
+            .one_or_none()
+            if item.menu_item_id
+            else None
+        )
+        category = (
+            db.query(MenuCategory)
+            .filter(MenuCategory.id == dish.category_id, MenuCategory.restaurant_id == order.restaurant_id)
+            .one_or_none()
+            if dish and dish.category_id
+            else None
+        )
+        if dish is not None:
+            needs_kitchen = (
+                dish.requires_kitchen
+                if dish.requires_kitchen is not None
+                else requires_kitchen_preparation(
+                    item.name,
+                    dish.description,
+                    category.name if category else None,
+                    category.description if category else None,
+                    sale_channel=item.sale_channel or dish.sale_channel,
+                )
+            )
+        else:
+            needs_kitchen = requires_kitchen_preparation(
+                item.name,
+                sale_channel=item.sale_channel or "REPAS",
+            )
+        if not needs_kitchen:
+            skipped_bar += 1
+    return skipped_bar == len(kitchen_items)
+
+
+def _confirm_order_without_kitchen(
+    db: Session,
+    order: CustomerOrder,
+    current_user: User,
+    background_tasks: BackgroundTasks,
+) -> OrderPublic:
+    """Confirme une commande sans passage cuisine (serveur / caissière gère le service)."""
+    previous_status = order.status
+    drinks_only = _order_drinks_only(order, db)
+
+    if drinks_only:
+        order.status = "Prête"
+        order.is_closed = True
+        order.closed_at = utcnow()
+        order.closed_by_id = current_user.id
+        notify(
+            db,
+            restaurant_id=current_user.restaurant_id,
+            role=Role.CAISSE.value,
+            title="Boissons à encaisser",
+            message=f"{order.order_number} : boissons uniquement — paiement immédiat ({order.total_amount} FCFA).",
+            category="order",
+            link="unpaid-orders",
+        )
+        log_action(
+            db,
+            current_user,
+            "order.drinks_ready_for_payment",
+            "order",
+            order.id,
+            f"Commande boissons {order.order_number} prête à encaisser",
+            {"previous_status": previous_status, "new_status": order.status, "kitchen_disabled": True},
+        )
+        db.commit()
+        db.refresh(order)
+        background_tasks.add_task(
+            emit_restaurant_event,
+            current_user.restaurant_id,
+            "cashier_updated",
+            order_id=order.id,
+        )
+        return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+    if order.status == "Nouvelle":
+        order.status = "Acceptée"
+    log_action(
+        db,
+        current_user,
+        "order.confirm_service",
+        "order",
+        order.id,
+        f"Commande {order.order_number} confirmée (sans cuisine)",
+        {"previous_status": previous_status, "new_status": order.status, "kitchen_disabled": True},
+    )
+    db.commit()
+    db.refresh(order)
+    background_tasks.add_task(
+        emit_restaurant_event,
+        current_user.restaurant_id,
+        "cashier_updated",
+        order_id=order.id,
+    )
+    return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+
 @router.post("/{order_id}/send-to-kitchen", response_model=OrderPublic)
 def send_order_to_kitchen(
     order_id: str,
@@ -774,9 +882,12 @@ def send_order_to_kitchen(
     assert_can_update_orders(current_user)
     order = get_order_or_404(db, order_id, current_user.restaurant_id)
     if not order.items:
-        raise HTTPException(status_code=400, detail="Ajoutez au moins un plat avant d'envoyer en cuisine")
+        raise HTTPException(status_code=400, detail="Ajoutez au moins un plat avant de confirmer la commande")
     if order.status in PAID_STATUSES or order.status == "Annulée":
-        raise HTTPException(status_code=400, detail="Cette commande ne peut plus être envoyée en cuisine")
+        raise HTTPException(status_code=400, detail="Cette commande ne peut plus être modifiée")
+
+    if not kitchen_enabled():
+        return _confirm_order_without_kitchen(db, order, current_user, background_tasks)
 
     existing_quantities: dict[str, int] = {}
     tickets = db.query(KitchenTicketModel).filter(KitchenTicketModel.order_id == order.id).all()

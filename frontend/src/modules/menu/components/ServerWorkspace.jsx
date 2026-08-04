@@ -29,6 +29,7 @@ import {
   sendLocalOrderToKitchen,
   updateLocalOrderItems,
 } from "@/offline";
+import { KITCHEN_ENABLED } from "@/config/features";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
 const PAID_STATUSES = ["Payée", "Payee", "Annulée", "Annulee"];
@@ -73,13 +74,20 @@ function isDrinksOnlyOrder(order, dishes = []) {
   });
 }
 
-const STEPS = [
-  { key: "table", label: "Table" },
-  { key: "order", label: "Commande" },
-  { key: "kitchen", label: "Cuisine" },
-  { key: "serve", label: "Service" },
-  { key: "payment", label: "Paiement" },
-];
+const STEPS = KITCHEN_ENABLED
+  ? [
+      { key: "table", label: "Table" },
+      { key: "order", label: "Commande" },
+      { key: "kitchen", label: "Cuisine" },
+      { key: "serve", label: "Service" },
+      { key: "payment", label: "Paiement" },
+    ]
+  : [
+      { key: "table", label: "Table" },
+      { key: "order", label: "Commande" },
+      { key: "serve", label: "Service" },
+      { key: "payment", label: "Paiement" },
+    ];
 
 function formatMsisdn(raw) {
   return String(raw || "")
@@ -93,8 +101,9 @@ function activeStep(order) {
   if (isPaid(order.status)) return "payment";
   if (canPayOrder(order) && order.is_closed) return "payment";
   if (isServedStatus(order.status)) return "serve";
-  if (isReadyStatus(order.status)) return "serve";
-  if (["En préparation", "Acceptée"].includes(normalizeStatus(order.status))) return "kitchen";
+  if (KITCHEN_ENABLED && isReadyStatus(order.status)) return "serve";
+  if (KITCHEN_ENABLED && ["En préparation", "Acceptée"].includes(normalizeStatus(order.status))) return "kitchen";
+  if (!KITCHEN_ENABLED && ["Acceptée", "En préparation"].includes(normalizeStatus(order.status))) return "serve";
   return "order";
 }
 
@@ -375,7 +384,12 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const isServed = isServedStatus(order?.status);
   const drinksOnly = isDrinksOnlyOrder(order, dishes);
   const canRequestPayment = canPayOrder(order);
-  const waitingKitchen = !drinksOnly && ["En préparation", "Acceptée"].includes(orderStatus) && !isReady && !isServed;
+  const waitingKitchen = KITCHEN_ENABLED && !drinksOnly && ["En préparation", "Acceptée"].includes(orderStatus) && !isReady && !isServed;
+  const canMarkServed = !drinksOnly && !isServed && (
+    KITCHEN_ENABLED
+      ? isReady && !(order?.is_closed && isReady)
+      : ["Acceptée", "En préparation"].includes(orderStatus)
+  );
 
   function openOrder(orderId, tableName, tableRoom, tableId = null) {
     const nextSession = {
@@ -559,8 +573,8 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       }
       setMessage(
         isLocalId(session.orderId)
-          ? "Commande envoyée en cuisine locale. Sync à la reconnexion."
-          : "Connexion instable. L'envoi cuisine sera synchronisé automatiquement.",
+          ? (KITCHEN_ENABLED ? "Commande envoyée en cuisine locale. Sync à la reconnexion." : "Commande confirmée localement. Sync à la reconnexion.")
+          : (KITCHEN_ENABLED ? "Connexion instable. L'envoi cuisine sera synchronisé automatiquement." : "Connexion instable. La confirmation sera synchronisée."),
       );
     }
 
@@ -585,7 +599,9 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
         setMessage("Boissons confirmées — paiement immédiat demandé à la caisse.");
         setPaymentOrder(updated);
       } else {
-        setMessage("Commande envoyée en cuisine. Attendez la notification « prête ».");
+        setMessage(KITCHEN_ENABLED
+          ? "Commande envoyée en cuisine. Attendez la notification « prête »."
+          : "Commande confirmée. Servez le client puis marquez « servie ».");
       }
     } catch (err) {
       if (isNetworkError(err)) {
@@ -872,6 +888,8 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
             menuMode={menuMode}
             canEditOrder={canEditOrder}
             canSendKitchen={canSendKitchen}
+            canMarkServed={canMarkServed}
+            kitchenEnabled={KITCHEN_ENABLED}
             drinksOnly={drinksOnly}
             isReady={isReady}
             isServed={isServed}
@@ -1069,6 +1087,8 @@ function OrderPanel({
   menuMode,
   canEditOrder,
   canSendKitchen,
+  canMarkServed = false,
+  kitchenEnabled = true,
   drinksOnly = false,
   isReady,
   isServed,
@@ -1108,6 +1128,12 @@ function OrderPanel({
             <p className="mt-1 font-black text-amber-950">{orderKitchenTimingLabel(order)}</p>
           )}
         </div>
+      )}
+
+      {!kitchenEnabled && ["Acceptée", "En préparation"].includes(orderStatus) && !isServed && (
+        <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+          Commande confirmée : servez le client à table, puis marquez « servie » et demandez le paiement à la caisse.
+        </p>
       )}
 
       {drinksOnly && canEditOrder && (
@@ -1179,7 +1205,9 @@ function OrderPanel({
               ? "Confirmation…"
               : drinksOnly
                 ? "Confirmer et demander le paiement"
-                : "Envoyer en cuisine"}
+                : kitchenEnabled
+                  ? "Envoyer en cuisine"
+                  : "Confirmer la commande"}
           </button>
         )}
 
@@ -1196,7 +1224,7 @@ function OrderPanel({
           </button>
         )}
 
-        {isReady && !isServed && !drinksOnly && !(order?.is_closed && isReady) && (
+        {canMarkServed && (
           <button type="button" onClick={onMarkServed} disabled={busy === "served"} className="lte-btn lte-btn-default w-full">
             <DashboardIcon name="CheckCircle2" size={16} />
             {busy === "served" ? "Validation…" : "Marquer comme servie"}

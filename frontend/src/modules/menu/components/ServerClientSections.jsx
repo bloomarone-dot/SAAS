@@ -4,6 +4,7 @@ import { DashboardIcon } from "@/components/dashboard/icons";
 import { EmptyState, PageHeader, StatCard } from "@/modules/admin/components/AdminUi";
 import DishesPage from "@/modules/menu/pages/DishesPage";
 import { orderApi } from "@/modules/orders/services/orderApi";
+import { KITCHEN_ENABLED } from "@/config/features";
 import { paymentApi } from "@/modules/orders/services/paymentApi";
 import { tableApi } from "@/modules/menu/services/tableApi";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
@@ -315,7 +316,9 @@ export function ServerOrderWorkspace({ restaurantId, role, view }) {
     try {
       if (action === "send-kitchen") {
         await orderApi.sendToKitchen(order.id);
-        setMessage(`Commande ${order.order_number} envoyée en cuisine.`);
+        setMessage(KITCHEN_ENABLED
+          ? `Commande ${order.order_number} envoyée en cuisine.`
+          : `Commande ${order.order_number} confirmée.`);
       }
       if (action === "served") {
         await orderApi.updateStatus(order.id, "Livrée");
@@ -399,13 +402,17 @@ function getOrderWorkspaceConfig(view) {
       empty: "Aucune commande trouvée.",
     },
     "send-kitchen": {
-      title: "Envoyer cuisine",
-      subtitle: "Envoyez en cuisine les commandes composées par les serveuses.",
+      title: KITCHEN_ENABLED ? "Envoyer cuisine" : "Confirmer commandes",
+      subtitle: KITCHEN_ENABLED
+        ? "Envoyez en cuisine les commandes composées par les serveuses."
+        : "Confirmez les commandes composées par les serveuses.",
       icon: "ChefHat",
       filter: (order) => ["Nouvelle", "Acceptée"].includes(order.status) && Number(order.items?.length || 0) > 0,
       action: "send-kitchen",
-      actionLabel: "Envoyer en cuisine",
-      empty: "Aucune commande prête à envoyer en cuisine.",
+      actionLabel: KITCHEN_ENABLED ? "Envoyer en cuisine" : "Confirmer la commande",
+      empty: KITCHEN_ENABLED
+        ? "Aucune commande prête à envoyer en cuisine."
+        : "Aucune commande prête à confirmer.",
     },
     "ready-notifications": {
       title: "Commandes prêtes",

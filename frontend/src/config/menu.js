@@ -1,5 +1,6 @@
 // Configuration centrale du menu React. Les pages consomment ce fichier pour
 // afficher les entrees autorisees selon le role, le statut owner et les droits.
+import { KITCHEN_ENABLED } from "@/config/features";
 export const ROLES = {
   SUPERADMIN: "SUPERADMIN",
   ADMIN: "ADMIN",
@@ -123,6 +124,7 @@ export function getMenuForUser(user) {
   const userPermissions = new Set(user.permissions ?? []);
 
   return MENU_ITEMS.filter((item) => {
+    if (!KITCHEN_ENABLED && item.key === "service.kitchen") return false;
     if (!item.roles.includes(user.role)) return false;
     if (item.ownerOnly && !user.is_owner) return false;
     if (user.is_owner) return true;
