@@ -41,6 +41,7 @@ export {
   OFFLINE_CASH_METHODS,
   scopeCashierReport,
   claimLocalOrderForCashier,
+  scopeOrdersForCashier,
 } from "@/offline/ops";
 
 export {

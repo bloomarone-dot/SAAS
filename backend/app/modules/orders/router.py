@@ -4,7 +4,7 @@ from datetime import time
 from decimal import Decimal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.dependencies import has_permission, require_tenant_user
@@ -239,6 +239,8 @@ def list_orders(
         query = query.filter(CustomerOrder.fulfillment_type == fulfillment_type)
     if server_id:
         query = query.filter(CustomerOrder.server_id == server_id)
+    if current_user.role == Role.CAISSE:
+        query = apply_cashier_order_visibility_scope(query, current_user)
     orders = query.order_by(CustomerOrder.created_at.desc()).limit(limit).all()
     enrich_orders(db, orders)
     return orders
@@ -1291,16 +1293,30 @@ def assert_can_update_orders(user: User) -> None:
     raise HTTPException(status_code=403, detail="Permission de mise à jour commandes requise")
 
 
-def apply_cashier_pending_scope(query, user: User):
-    """Caissière : commandes à encaisser non assignées + les siennes."""
+def apply_cashier_order_visibility_scope(query, user: User):
+    """Caissière : commandes salle (file commune) + livraisons qu'elle a créées ou prises."""
     if user.role not in {Role.CAISSE}:
         return query
     return query.filter(
         or_(
-            CustomerOrder.assigned_cashier_id.is_(None),
             CustomerOrder.assigned_cashier_id == user.id,
+            and_(
+                CustomerOrder.assigned_cashier_id.is_(None),
+                or_(
+                    CustomerOrder.fulfillment_type != "Livraison",
+                    CustomerOrder.created_by_cashier_id.is_(None),
+                    CustomerOrder.created_by_cashier_id == user.id,
+                ),
+            ),
         )
     )
+
+
+def apply_cashier_pending_scope(query, user: User):
+    """Caissière : commandes à encaisser non assignées (hors livraisons collègues) + les siennes."""
+    if user.role not in {Role.CAISSE}:
+        return query
+    return apply_cashier_order_visibility_scope(query, user)
 
 
 def apply_cashier_receipts_scope(query, user: User):
@@ -1317,6 +1333,16 @@ def assert_order_mutable_by_cashier(order: CustomerOrder, user: User) -> None:
         raise HTTPException(
             status_code=403,
             detail="Cette commande est prise en charge par une autre caissière.",
+        )
+    if (
+        not order.assigned_cashier_id
+        and order.fulfillment_type == "Livraison"
+        and order.created_by_cashier_id
+        and order.created_by_cashier_id != user.id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Cette livraison appartient à une autre caissière.",
         )
 
 

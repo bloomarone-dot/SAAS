@@ -535,7 +535,9 @@ export async function loadKitchenTicketsMerged(restaurantId, remoteTickets = [],
 
 function ticketVisibleToCook(ticket, cookUserId) {
   const assigned = ticket.assigned_cook_id ?? ticket.assignedCookId ?? null;
-  return !assigned || assigned === cookUserId;
+  const status = String(ticket.status || "");
+  if (status === "En attente") return !assigned || assigned === cookUserId;
+  return assigned === cookUserId;
 }
 
 export async function removeLocalTicket(ticketId) {
@@ -578,12 +580,22 @@ function cashierNameOf(user) {
 
 function orderVisibleToCashier(order, cashierUserId, { pending = false } = {}) {
   if (!cashierUserId) return true;
-  if (pending) {
-    const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
-    return !assigned || assigned === cashierUserId;
-  }
+  const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
+  const createdBy = order.created_by_cashier_id ?? order.createdByCashierId ?? null;
+  const isDelivery = String(order.fulfillment_type || "") === "Livraison";
+
+  if (assigned === cashierUserId) return true;
+  if (assigned) return false;
+  if (isDelivery && createdBy && createdBy !== cashierUserId) return false;
+  if (pending) return true;
+
   const cashier = order.cashier_id ?? order.cashierId ?? null;
   return cashier === cashierUserId;
+}
+
+export function scopeOrdersForCashier(orders, cashierUserId) {
+  if (!cashierUserId || !orders?.length) return orders || [];
+  return orders.filter((order) => orderVisibleToCashier(order, cashierUserId, { pending: true }));
 }
 
 export function scopeCashierReport(report, cashierUserId) {

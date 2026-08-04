@@ -14,6 +14,7 @@ import {
 } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError, shouldPreferLocalData } from "@/utils/network";
 import { listLocalOrders } from "@/offline/store";
+import { scopeOrdersForCashier } from "@/offline";
 
 const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
 const KITCHEN_SEND_STATUSES = new Set(["Nouvelle", "Acceptée", "Acceptee", "En préparation", "En preparation"]);
@@ -55,7 +56,7 @@ function buildCartLines(cart, dishes) {
   });
 }
 
-export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
+export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cashierScopeId = null }) {
   const [areas, setAreas] = useState([]);
   const [orders, setOrders] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -118,6 +119,10 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
     }
   }
 
+  function applyCashierScope(rows) {
+    return scopeOrdersForCashier(rows, cashierScopeId);
+  }
+
   async function loadDeliveries() {
     async function applyLocal() {
       if (!restaurantId) {
@@ -125,8 +130,9 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
         return;
       }
       const local = await listLocalOrders(restaurantId);
-      const deliveries = local
-        .filter((order) => String(order.fulfillment_type || "") === "Livraison")
+      const deliveries = applyCashierScope(
+        local.filter((order) => String(order.fulfillment_type || "") === "Livraison"),
+      )
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       setOrders(deliveries);
       if (deliveries.length) {
@@ -141,7 +147,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage }) {
 
     try {
       const data = await orderApi.list({ fulfillment_type: "Livraison", limit: 200 });
-      const rows = Array.isArray(data) ? data : [];
+      const rows = applyCashierScope(Array.isArray(data) ? data : []);
       const sorted = rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       setOrders(sorted);
     } catch (error) {

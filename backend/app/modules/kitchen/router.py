@@ -2,7 +2,7 @@ from datetime import datetime
 from app.modules.shared.models import utcnow
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 from typing import List
 from app.tenancy import tenant_get_or_404
@@ -67,16 +67,34 @@ def serialize_kitchen_ticket(ticket: KitchenTicketModel, db: Session) -> dict:
     }
 
 
-def apply_kitchen_staff_scope(query, user: User):
-    """Cuisinier : nouveautés non assignées + ses propres tickets."""
+def apply_kitchen_queue_scope(query, user: User):
+    """Cuisinier : nouveautés (file commune) + uniquement ses tickets en cours."""
     if user.role not in {Role.CUISINE}:
         return query
     return query.filter(
         or_(
-            KitchenTicketModel.assigned_cook_id.is_(None),
+            and_(
+                KitchenTicketModel.status == KitchenStatus.EN_ATTENTE,
+                or_(
+                    KitchenTicketModel.assigned_cook_id.is_(None),
+                    KitchenTicketModel.assigned_cook_id == user.id,
+                ),
+            ),
             KitchenTicketModel.assigned_cook_id == user.id,
         )
     )
+
+
+def apply_kitchen_stats_scope(query, user: User):
+    """Cuisinier : statistiques du mois strictement personnelles."""
+    if user.role not in {Role.CUISINE}:
+        return query
+    return query.filter(KitchenTicketModel.assigned_cook_id == user.id)
+
+
+def apply_kitchen_staff_scope(query, user: User):
+    """Alias file cuisine (rétrocompatibilité)."""
+    return apply_kitchen_queue_scope(query, user)
 
 
 def assert_ticket_mutable_by_cook(ticket: KitchenTicketModel, user: User, new_status: KitchenStatus) -> None:
@@ -110,7 +128,7 @@ def get_active_kitchen_tickets(
         .filter(~CustomerOrder.status.in_({"Annulée", "Annulee", "Archivée", "Archivee"}))
         .filter(KitchenTicketModel.status != KitchenStatus.SERVIE)
     )
-    query = apply_kitchen_staff_scope(query, current_user)
+    query = apply_kitchen_queue_scope(query, current_user)
     tickets = query.order_by(KitchenTicketModel.created_at.asc()).all()
     return [serialize_kitchen_ticket(ticket, db) for ticket in tickets]
 
@@ -180,7 +198,7 @@ def kitchen_month_stats(
             *active_orders,
         )
     )
-    base = apply_kitchen_staff_scope(base, current_user)
+    base = apply_kitchen_stats_scope(base, current_user)
     total_query = (
         db.query(func.coalesce(func.sum(KitchenTicketModel.quantity), 0))
         .select_from(KitchenTicketModel)
@@ -192,8 +210,22 @@ def kitchen_month_stats(
             *active_orders,
         )
     )
-    total_query = apply_kitchen_staff_scope(total_query, current_user)
+    total_query = apply_kitchen_stats_scope(total_query, current_user)
     total_dishes = total_query.scalar()
+    today_start = datetime(now.year, now.month, now.day, tzinfo=now.tzinfo)
+    ready_today_query = (
+        db.query(func.coalesce(func.sum(KitchenTicketModel.quantity), 0))
+        .select_from(KitchenTicketModel)
+        .join(CustomerOrder, CustomerOrder.id == KitchenTicketModel.order_id)
+        .filter(
+            CustomerOrder.restaurant_id == current_user.restaurant_id,
+            KitchenTicketModel.status.in_([KitchenStatus.PRETE, KitchenStatus.SERVIE]),
+            func.coalesce(KitchenTicketModel.ready_at, KitchenTicketModel.served_at, KitchenTicketModel.created_at) >= today_start,
+            *active_orders,
+        )
+    )
+    ready_today_query = apply_kitchen_stats_scope(ready_today_query, current_user)
+    ready_today = int(ready_today_query.scalar() or 0)
     rows = (
         base.with_entities(
             KitchenTicketModel.item_name,
@@ -207,6 +239,7 @@ def kitchen_month_stats(
     return {
         "month": month_start.strftime("%Y-%m"),
         "total_dishes": int(total_dishes or 0),
+        "ready_today": ready_today,
         "top_items": [{"name": name, "quantity": int(qty or 0)} for name, qty in rows],
     }
 

@@ -498,15 +498,24 @@ def list_payment_requests_endpoint(
     if current_user.role == Role.CAISSE and requests:
         order_ids = [req.order_id for req in requests]
         orders = (
-            db.query(CustomerOrder.id, CustomerOrder.assigned_cashier_id)
+            db.query(
+                CustomerOrder.id,
+                CustomerOrder.assigned_cashier_id,
+                CustomerOrder.created_by_cashier_id,
+                CustomerOrder.fulfillment_type,
+            )
             .filter(CustomerOrder.id.in_(order_ids))
             .all()
         )
-        allowed = {
-            row.id
-            for row in orders
-            if row.assigned_cashier_id is None or row.assigned_cashier_id == current_user.id
-        }
+        allowed = set()
+        for row in orders:
+            if row.assigned_cashier_id == current_user.id:
+                allowed.add(row.id)
+                continue
+            if row.assigned_cashier_id is not None:
+                continue
+            if row.fulfillment_type != "Livraison" or row.created_by_cashier_id is None or row.created_by_cashier_id == current_user.id:
+                allowed.add(row.id)
         requests = [req for req in requests if req.order_id in allowed]
     numbers = _order_numbers(db, [req.order_id for req in requests])
     return [_request_out(req, numbers.get(req.order_id)) for req in requests]

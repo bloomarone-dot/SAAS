@@ -683,6 +683,7 @@ export function CaisseDashboard({ overrides = {} }) {
         <DeliveryCashierPanel
           restaurantId={currentUser?.restaurant_id}
           currentUser={currentUser}
+          cashierScopeId={cashierScopeId}
           onMessage={setMessage}
         />
       )}
@@ -962,7 +963,14 @@ function PendingOrdersByStaff({ groups, onSelect, compact = false }) {
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
             <div className="flex items-center gap-2">
               <DashboardIcon name="User" size={16} className="text-emerald-700" />
-              <p className="text-sm font-black text-slate-900">{staffName}</p>
+              <div>
+                <p className="text-sm font-black text-slate-900">{staffName}</p>
+                {orders[0] && (
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                    {orderTakerRole(orders[0])}
+                  </p>
+                )}
+              </div>
             </div>
             <SmallMeta>{orders.length} commande(s)</SmallMeta>
           </div>

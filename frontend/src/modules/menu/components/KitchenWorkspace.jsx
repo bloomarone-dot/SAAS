@@ -257,14 +257,14 @@ export default function KitchenWorkspace({ restaurantId, currentUser, role = "CU
       ) : (
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Nouvelles commandes" value={pendingCount.toLocaleString("fr-FR")} trend="À lancer" icon="ChefHat" tone={pendingCount ? "warning" : "success"} />
-            <StatCard label="En préparation" value={preparingCount.toLocaleString("fr-FR")} trend="En cours" icon="Clock3" tone="info" />
-            <StatCard label="Prêtes" value={readyCount.toLocaleString("fr-FR")} trend="À servir" icon="CheckCircle2" tone="success" />
-            <StatCard label="Plats ce mois" value={Number(monthStats?.total_dishes || 0).toLocaleString("fr-FR")} trend={monthStats?.month || "Mois courant"} icon="UtensilsCrossed" tone="default" />
+            <StatCard label="Mes nouvelles commandes" value={pendingCount.toLocaleString("fr-FR")} trend="À lancer" icon="ChefHat" tone={pendingCount ? "warning" : "success"} />
+            <StatCard label="Mes plats en préparation" value={preparingCount.toLocaleString("fr-FR")} trend="En cours" icon="Clock3" tone="info" />
+            <StatCard label="Mes plats prêts" value={readyCount.toLocaleString("fr-FR")} trend="Aujourd'hui" icon="CheckCircle2" tone="success" />
+            <StatCard label="Mes plats ce mois" value={Number(monthStats?.total_dishes || 0).toLocaleString("fr-FR")} trend={monthStats?.month || "Mois courant"} icon="UtensilsCrossed" tone="default" />
           </div>
 
           {monthStats?.top_items?.length > 0 && (
-            <DashboardSection title="Plats les plus préparés" description={`Synthèse du mois ${monthStats.month}`}>
+            <DashboardSection title="Mes plats les plus préparés" description={`Votre synthèse du mois ${monthStats.month}${monthStats.ready_today ? ` · ${monthStats.ready_today} prêt(s) aujourd'hui` : ""}`}>
               <div className="flex flex-wrap gap-2">
                 {monthStats.top_items.slice(0, 8).map((item) => (
                   <span
