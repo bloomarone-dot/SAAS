@@ -334,7 +334,6 @@ export async function sendLocalOrderToKitchen(order, restaurantId, dishesById = 
     return item.requires_kitchen !== false && item.sale_channel !== "BOISSON";
   });
 
-  const createdAt = nowIso();
   const tickets = [];
   for (const item of kitchenItems) {
     const ticket = {
