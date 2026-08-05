@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { PageHeader } from "@/modules/admin/components/AdminUi";
@@ -28,6 +28,7 @@ import {
   mirrorOrderLocal,
   sendLocalOrderToKitchen,
   updateLocalOrderItems,
+  listLocalOrders,
 } from "@/offline";
 import { KITCHEN_ENABLED } from "@/config/features";
 
@@ -44,6 +45,21 @@ function normalizeStatus(status) {
 
 function isPaid(status) {
   return PAID_STATUSES.includes(normalizeStatus(status));
+}
+
+function isActiveServerOrder(order) {
+  if (!order) return false;
+  const status = normalizeStatus(order.status);
+  return !isPaid(status) && !["Annulée", "Annulee"].includes(status);
+}
+
+function orderStatusBadge(order) {
+  const status = normalizeStatus(order?.status);
+  if (status === "Prête") return { label: "Prête", tone: "ready" };
+  if (["Livrée", "Servie"].includes(status)) return { label: "Servie", tone: "served" };
+  if (["En préparation", "Acceptée"].includes(status)) return { label: "Cuisine", tone: "kitchen" };
+  if (order?.is_closed) return { label: "Addition", tone: "bill" };
+  return { label: status || "Nouvelle", tone: "default" };
 }
 
 function isReadyStatus(status) {
@@ -123,7 +139,55 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [readyAlert, setReadyAlert] = useState(false);
   const [dailyStats, setDailyStats] = useState(null);
+  const [activeOrders, setActiveOrders] = useState([]);
   const [resuming, setResuming] = useState(true);
+  const autoResumeRef = useRef(true);
+
+  const loadActiveOrders = useCallback(async () => {
+    if (!currentUser?.id) return [];
+    const mergeById = new Map();
+
+    async function applyLocal() {
+      if (!restaurantId) return;
+      const local = await listLocalOrders(restaurantId);
+      local
+        .filter(
+          (item) =>
+            isActiveServerOrder(item)
+            && (item.server_id === currentUser.id || !item.server_id),
+        )
+        .forEach((item) => mergeById.set(String(item.id), item));
+    }
+
+    if (shouldPreferLocalData()) {
+      await applyLocal();
+      const rows = [...mergeById.values()].sort(
+        (a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at),
+      );
+      setActiveOrders(rows);
+      return rows;
+    }
+
+    try {
+      const orders = await orderApi.list({ server_id: currentUser.id, limit: 100 });
+      orders
+        .filter((item) => item.server_id === currentUser.id && isActiveServerOrder(item))
+        .forEach((item) => mergeById.set(String(item.id), item));
+      await applyLocal();
+      const rows = [...mergeById.values()].sort(
+        (a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at),
+      );
+      setActiveOrders(rows);
+      return rows;
+    } catch {
+      await applyLocal();
+      const rows = [...mergeById.values()].sort(
+        (a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at),
+      );
+      setActiveOrders(rows);
+      return rows;
+    }
+  }, [currentUser?.id, restaurantId]);
 
   const loadOrder = useCallback(async (orderId) => {
     if (!orderId) return;
@@ -208,10 +272,20 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
   useAutoRefresh(() => {
     if (session?.orderId) loadOrder(session.orderId);
-  }, session?.orderId ? 5000 : 0, [session?.orderId, loadOrder]);
+    loadActiveOrders();
+  }, currentUser?.id ? 8000 : 0, [session?.orderId, loadOrder, loadActiveOrders, currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    loadActiveOrders();
+  }, [currentUser?.id, loadActiveOrders]);
 
   useEffect(() => {
     if (session || !currentUser?.id) {
+      setResuming(false);
+      return;
+    }
+    if (!autoResumeRef.current) {
       setResuming(false);
       return;
     }
@@ -391,6 +465,16 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       : ["Acceptée", "En préparation"].includes(orderStatus)
   );
 
+  function switchToOrder(orderRow) {
+    if (!orderRow?.id) return;
+    openOrder(
+      orderRow.id,
+      orderRow.table_name || orderRow.tableName || "—",
+      orderRow.table_room || orderRow.tableRoom || "Rez-de-chaussée",
+      orderRow.table_id || orderRow.tableId || null,
+    );
+  }
+
   function openOrder(orderId, tableName, tableRoom, tableId = null) {
     const nextSession = {
       orderId,
@@ -407,15 +491,16 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     if (currentUser?.id) {
       saveServerSession(currentUser.id, { ...nextSession, menuMode: true });
     }
+    loadActiveOrders();
   }
 
-  function backToTables() {
-    clearServerSession();
+  function openTablePicker() {
+    autoResumeRef.current = false;
     setSession(null);
     setOrder(null);
     setSelectedTable(null);
     setMenuMode(true);
-    setMessage("");
+    setMessage("Choisissez une table pour une nouvelle commande, ou reprenez une commande ci-dessus.");
     setError("");
     setReadyAlert(false);
   }
@@ -544,11 +629,22 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   }, [session, menuMode, currentUser?.id]);
 
   useEffect(() => {
-    if (!order || !currentUser?.id) return;
-    if (isPaid(order.status)) {
-      clearServerSession();
-    }
-  }, [order?.status, order?.id, currentUser?.id]);
+    if (!order || !currentUser?.id || !session?.orderId) return;
+    if (!isPaid(order.status)) return;
+    clearServerSession();
+    autoResumeRef.current = false;
+    loadActiveOrders().then((rows) => {
+      const remaining = rows.filter((item) => String(item.id) !== String(order.id));
+      if (remaining.length > 0) {
+        switchToOrder(remaining[0]);
+        setMessage("Commande payée. Passez à la commande suivante.");
+      } else {
+        setSession(null);
+        setOrder(null);
+        setMessage("Commande payée. Vous pouvez prendre une nouvelle commande.");
+      }
+    });
+  }, [order?.status, order?.id, session?.orderId, currentUser?.id, loadActiveOrders]);
 
   async function sendToKitchen() {
     if (!session?.orderId) return;
@@ -751,7 +847,11 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       <PageHeader
         eyebrow="Service"
         title={session ? `${session.tableRoom} · Table ${session.tableName}` : "Choisissez une table"}
-        subtitle={session ? "Gérez la commande active, l’envoi cuisine et la demande de paiement." : "Ouvrez ou reprenez une table pour démarrer la prise de commande."}
+        subtitle={
+          session
+            ? "Gérez cette commande ou basculez vers une autre via la barre ci-dessous."
+            : "Plusieurs commandes en parallèle : ouvrez une table ou reprenez une commande en cours."
+        }
         secondaryActions={
           <>
             <button type="button" onClick={exportServerReport} className="lte-btn lte-btn-default">
@@ -764,17 +864,24 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
             </button>
           </>
         }
-        primaryAction={session ? (
+        primaryAction={(
             <button
               type="button"
-              onClick={backToTables}
+              onClick={openTablePicker}
               className="lte-btn lte-btn-default"
             >
-              <DashboardIcon name="ChevronDown" size={16} className="rotate-90" />
-              Changer de table
+              <DashboardIcon name="Plus" size={16} />
+              Nouvelle commande
             </button>
-          ) : null}
+          )}
         meta={<StepBar current={currentStep} />}
+      />
+
+      <ServerActiveOrdersBar
+        orders={activeOrders}
+        currentOrderId={session?.orderId}
+        onSelect={switchToOrder}
+        onNewOrder={openTablePicker}
       />
 
       {(message || error || readyAlert) && (
@@ -1025,6 +1132,58 @@ function MenuPanel({
             </button>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ServerActiveOrdersBar({ orders, currentOrderId, onSelect, onNewOrder }) {
+  if (!orders?.length) return null;
+
+  const toneClass = {
+    ready: "border-emerald-300 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-400",
+    served: "border-sky-200 bg-sky-50 text-sky-900",
+    kitchen: "border-amber-200 bg-amber-50 text-amber-900",
+    bill: "border-violet-200 bg-violet-50 text-violet-900",
+    default: "border-slate-200 bg-white text-slate-800",
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-slate-500">Mes commandes en cours</p>
+          <p className="text-xs font-semibold text-slate-500">
+            {orders.length} commande(s) active(s) — touchez une carte pour la gérer
+          </p>
+        </div>
+        <button type="button" onClick={onNewOrder} className="lte-btn lte-btn-primary lte-btn-sm">
+          <DashboardIcon name="Plus" size={15} />
+          Nouvelle table
+        </button>
+      </div>
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {orders.map((orderRow) => {
+          const selected = String(orderRow.id) === String(currentOrderId);
+          const badge = orderStatusBadge(orderRow);
+          const tableLabel = orderRow.table_name || orderRow.tableName || "Table";
+          return (
+            <button
+              key={orderRow.id}
+              type="button"
+              onClick={() => onSelect(orderRow)}
+              className={`min-w-[170px] shrink-0 rounded-xl border px-3 py-2 text-left transition ${
+                selected
+                  ? "border-[var(--dashboard-primary)] bg-[#fff4ed] ring-2 ring-[var(--dashboard-primary)]/30"
+                  : toneClass[badge.tone] || toneClass.default
+              }`}
+            >
+              <p className="text-sm font-black">{tableLabel}</p>
+              <p className="text-xs font-semibold opacity-80">{orderRow.order_number || `#${String(orderRow.id).slice(0, 8)}`}</p>
+              <p className="mt-1 text-[11px] font-black uppercase">{badge.label}</p>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
