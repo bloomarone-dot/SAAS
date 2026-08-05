@@ -26,6 +26,8 @@ export {
   createLocalTable,
   remapLocalTableId,
   createLocalTableOrder,
+  createLocalCashierDelivery,
+  validateLocalDeliveryPayment,
   getLocalOrder,
   remapLocalOrderId,
   updateLocalOrderItems,

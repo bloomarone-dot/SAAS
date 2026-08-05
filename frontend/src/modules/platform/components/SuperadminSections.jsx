@@ -9,6 +9,15 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
   const [selectedOwner, setSelectedOwner] = useState(null);
   const [isLoadingOwner, setIsLoadingOwner] = useState(false);
   const [ownerPassword, setOwnerPassword] = useState("");
+  const [editingOwner, setEditingOwner] = useState(false);
+  const [ownerForm, setOwnerForm] = useState({
+    first_name: "",
+    last_name: "",
+    username: "",
+    email: "",
+    phone: "",
+    is_active: true,
+  });
   const owners = useMemo(
     () =>
       restaurants.map((restaurant) => ({
@@ -44,8 +53,44 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
     setIsLoadingOwner(true);
     try {
       const detail = await platformApi(`/api/v1/restaurants/${owner.restaurantId}`);
-      setSelectedOwner(detail.owner ? { ...detail.owner, restaurant: detail.restaurant } : { restaurant: detail.restaurant });
+      const nextOwner = detail.owner ? { ...detail.owner, restaurant: detail.restaurant } : { restaurant: detail.restaurant };
+      setSelectedOwner(nextOwner);
+      setOwnerForm({
+        first_name: nextOwner.first_name || "",
+        last_name: nextOwner.last_name || "",
+        username: nextOwner.username || "",
+        email: nextOwner.email || "",
+        phone: nextOwner.phone || "",
+        is_active: nextOwner.is_active !== false,
+      });
+      setEditingOwner(false);
       setOwnerPassword("");
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoadingOwner(false);
+    }
+  }
+
+  async function saveOwner(event) {
+    event.preventDefault();
+    if (!selectedOwner?.id) return;
+    setIsLoadingOwner(true);
+    try {
+      const updated = await platformApi(`/api/v1/platform/users/${selectedOwner.id}`, {
+        method: "PATCH",
+        body: {
+          first_name: ownerForm.first_name.trim(),
+          last_name: ownerForm.last_name.trim(),
+          username: ownerForm.username.trim(),
+          email: ownerForm.email.trim() || null,
+          phone: ownerForm.phone.trim() || null,
+          is_active: ownerForm.is_active,
+        },
+      });
+      setSelectedOwner((current) => ({ ...current, ...updated }));
+      setEditingOwner(false);
+      onMessage("Propriétaire mis à jour.");
     } catch (error) {
       onMessage(error.message);
     } finally {
@@ -132,15 +177,46 @@ export function SuperadminOwners({ apiBaseUrl, restaurants, onMessage }) {
         </DataTable>
 
         <div className="border border-slate-200 bg-white p-5">
-          <h2 className="font-black text-[#07133d]">Détail propriétaire</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-black text-[#07133d]">Détail propriétaire</h2>
+            {selectedOwner?.id && (
+              <button
+                type="button"
+                onClick={() => setEditingOwner((value) => !value)}
+                className="text-xs font-black uppercase text-[#07133d] underline-offset-2 hover:underline"
+              >
+                {editingOwner ? "Annuler" : "Modifier"}
+              </button>
+            )}
+          </div>
           {selectedOwner ? (
             <div className="mt-5 space-y-3">
-              <DetailLine label="Nom" value={`${selectedOwner.first_name ?? "-"} ${selectedOwner.last_name ?? ""}`} />
-              <DetailLine label="Utilisateur" value={selectedOwner.username ?? "-"} />
-              <DetailLine label="Email" value={selectedOwner.email ?? "Non renseigné"} />
-              <DetailLine label="Téléphone" value={selectedOwner.phone ?? "-"} />
-              <DetailLine label="Restaurant" value={selectedOwner.restaurant?.name ?? "-"} />
-              <DetailLine label="Statut" value={selectedOwner.is_active ? "Actif" : "Inactif"} />
+              {editingOwner && selectedOwner.id ? (
+                <form onSubmit={saveOwner} className="space-y-3">
+                  <TextField label="Prénom" value={ownerForm.first_name} onChange={(value) => setOwnerForm((c) => ({ ...c, first_name: value }))} required />
+                  <TextField label="Nom" value={ownerForm.last_name} onChange={(value) => setOwnerForm((c) => ({ ...c, last_name: value }))} required />
+                  <TextField label="Utilisateur" value={ownerForm.username} onChange={(value) => setOwnerForm((c) => ({ ...c, username: value }))} required />
+                  <TextField label="Email" value={ownerForm.email} onChange={(value) => setOwnerForm((c) => ({ ...c, email: value }))} />
+                  <TextField label="Téléphone" value={ownerForm.phone} onChange={(value) => setOwnerForm((c) => ({ ...c, phone: value }))} />
+                  <ToggleField label="Compte actif" checked={ownerForm.is_active} onChange={(value) => setOwnerForm((c) => ({ ...c, is_active: value }))} />
+                  <button
+                    type="submit"
+                    disabled={isLoadingOwner}
+                    className="inline-flex h-10 w-full items-center justify-center bg-[#07133d] px-4 text-xs font-black text-white hover:bg-[#172554] disabled:opacity-60"
+                  >
+                    Enregistrer
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <DetailLine label="Nom" value={`${selectedOwner.first_name ?? "-"} ${selectedOwner.last_name ?? ""}`} />
+                  <DetailLine label="Utilisateur" value={selectedOwner.username ?? "-"} />
+                  <DetailLine label="Email" value={selectedOwner.email ?? "Non renseigné"} />
+                  <DetailLine label="Téléphone" value={selectedOwner.phone ?? "-"} />
+                  <DetailLine label="Restaurant" value={selectedOwner.restaurant?.name ?? "-"} />
+                  <DetailLine label="Statut" value={selectedOwner.is_active ? "Actif" : "Inactif"} />
+                </>
+              )}
               {selectedOwner.id && (
                 <form onSubmit={resetOwnerPassword} className="border-t border-slate-200 pt-4">
                   <label className="block">
@@ -191,6 +267,15 @@ export function SuperadminRestaurantDetail({
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [ownerPassword, setOwnerPassword] = useState("");
+  const [editingOwner, setEditingOwner] = useState(false);
+  const [ownerEditForm, setOwnerEditForm] = useState({
+    first_name: "",
+    last_name: "",
+    username: "",
+    email: "",
+    phone: "",
+    is_active: true,
+  });
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "created_at", direction: "desc" });
   const [editing, setEditing] = useState(false);
@@ -225,7 +310,17 @@ export function SuperadminRestaurantDetail({
       setDetail(data);
       setOwnerPassword("");
       setEditing(false);
+      setEditingOwner(false);
       const r = data.restaurant;
+      const owner = data.owner;
+      setOwnerEditForm({
+        first_name: owner?.first_name || "",
+        last_name: owner?.last_name || "",
+        username: owner?.username || "",
+        email: owner?.email || "",
+        phone: owner?.phone || "",
+        is_active: owner?.is_active !== false,
+      });
       setEditForm({
         name: r.name || "",
         subdomain: r.subdomain || "",
@@ -312,6 +407,32 @@ export function SuperadminRestaurantDetail({
     status: (restaurant) => Number(restaurant.is_active),
     created_at: (restaurant) => restaurant.created_at,
   });
+
+  async function saveDetailOwner(event) {
+    event.preventDefault();
+    if (!detail?.owner?.id) return;
+    setIsLoading(true);
+    try {
+      const updated = await platformApi(`/api/v1/platform/users/${detail.owner.id}`, {
+        method: "PATCH",
+        body: {
+          first_name: ownerEditForm.first_name.trim(),
+          last_name: ownerEditForm.last_name.trim(),
+          username: ownerEditForm.username.trim(),
+          email: ownerEditForm.email.trim() || null,
+          phone: ownerEditForm.phone.trim() || null,
+          is_active: ownerEditForm.is_active,
+        },
+      });
+      setDetail((current) => ({ ...current, owner: { ...current.owner, ...updated } }));
+      setEditingOwner(false);
+      onMessage("Propriétaire mis à jour.");
+    } catch (error) {
+      onMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   async function resetDetailOwnerPassword(event) {
     event.preventDefault();
@@ -452,6 +573,8 @@ export function SuperadminRestaurantDetail({
                 <DetailLine label="Nom" value={detail.restaurant.name} />
                 <DetailLine label="Slug" value={detail.restaurant.slug} />
                 <DetailLine label="Sous-domaine" value={detail.restaurant.subdomain ? `${detail.restaurant.subdomain}.bloomarone.com` : "-"} />
+                <DetailLine label="Accès local (dev)" value={detail.restaurant.subdomain ? `http://${detail.restaurant.subdomain}.localhost:5173` : "-"} />
+                <DetailLine label="Accès local (chemin)" value={detail.restaurant.slug ? `/restaurant/${detail.restaurant.slug}/login` : "-"} />
                 <DetailLine label="Domaine personnalisé" value={detail.restaurant.custom_domain ?? "-"} />
                 <DetailLine label="Téléphone 1" value={detail.restaurant.phone ?? "-"} />
                 <DetailLine label="Téléphone 2" value={detail.restaurant.whatsapp_phone ?? "-"} />
@@ -462,11 +585,38 @@ export function SuperadminRestaurantDetail({
             )}
           </SettingsPanel>
           <SettingsPanel title="Propriétaire">
-            <DetailLine label="Nom" value={detail.owner ? `${detail.owner.first_name} ${detail.owner.last_name}` : "-"} />
-            <DetailLine label="Utilisateur" value={detail.owner?.username ?? "-"} />
-            <DetailLine label="Email" value={detail.owner?.email ?? "Non renseigné"} />
-            <DetailLine label="Téléphone" value={detail.owner?.phone ?? "-"} />
-            <DetailLine label="Compte" value={detail.owner?.is_active ? "Actif" : "Inactif"} />
+            <div className="mb-3 flex items-center justify-end">
+              {detail.owner?.id && (
+                <button
+                  type="button"
+                  onClick={() => setEditingOwner((value) => !value)}
+                  className="text-xs font-black uppercase text-[#07133d] underline-offset-2 hover:underline"
+                >
+                  {editingOwner ? "Annuler" : "Modifier"}
+                </button>
+              )}
+            </div>
+            {editingOwner && detail.owner?.id ? (
+              <form onSubmit={saveDetailOwner} className="space-y-3">
+                <TextField label="Prénom" value={ownerEditForm.first_name} onChange={(value) => setOwnerEditForm((c) => ({ ...c, first_name: value }))} required />
+                <TextField label="Nom" value={ownerEditForm.last_name} onChange={(value) => setOwnerEditForm((c) => ({ ...c, last_name: value }))} required />
+                <TextField label="Utilisateur" value={ownerEditForm.username} onChange={(value) => setOwnerEditForm((c) => ({ ...c, username: value }))} required />
+                <TextField label="Email" value={ownerEditForm.email} onChange={(value) => setOwnerEditForm((c) => ({ ...c, email: value }))} />
+                <TextField label="Téléphone" value={ownerEditForm.phone} onChange={(value) => setOwnerEditForm((c) => ({ ...c, phone: value }))} />
+                <ToggleField label="Compte actif" checked={ownerEditForm.is_active} onChange={(value) => setOwnerEditForm((c) => ({ ...c, is_active: value }))} />
+                <button type="submit" disabled={isLoading} className="inline-flex h-10 w-full items-center justify-center bg-[#07133d] px-4 text-xs font-black text-white hover:bg-[#172554] disabled:opacity-60">
+                  Enregistrer
+                </button>
+              </form>
+            ) : (
+              <>
+                <DetailLine label="Nom" value={detail.owner ? `${detail.owner.first_name} ${detail.owner.last_name}` : "-"} />
+                <DetailLine label="Utilisateur" value={detail.owner?.username ?? "-"} />
+                <DetailLine label="Email" value={detail.owner?.email ?? "Non renseigné"} />
+                <DetailLine label="Téléphone" value={detail.owner?.phone ?? "-"} />
+                <DetailLine label="Compte" value={detail.owner?.is_active ? "Actif" : "Inactif"} />
+              </>
+            )}
             {detail.owner?.id && (
               <form onSubmit={resetDetailOwnerPassword} className="border-t border-slate-200 pt-4">
                 <label className="block">

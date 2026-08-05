@@ -37,9 +37,16 @@ def clean_host(host: str | None) -> str:
 
 
 def extract_subdomain(host: str) -> str | None:
+    """Extrait le sous-domaine tenant depuis le host (prod ou dev *.localhost)."""
+    if host.endswith(".localhost"):
+        subdomain = host[: -len(".localhost")].strip(".")
+        if subdomain and "." not in subdomain and subdomain not in RESERVED_SUBDOMAINS:
+            return subdomain
     if not host.endswith(f".{BASE_DOMAIN}"):
         return None
     subdomain = host[: -(len(BASE_DOMAIN) + 1)].strip(".")
     if not subdomain or "." in subdomain:
+        return None
+    if subdomain in RESERVED_SUBDOMAINS:
         return None
     return subdomain

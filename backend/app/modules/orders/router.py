@@ -179,7 +179,7 @@ def create_cashier_delivery(
         payment_method=payload.payment_method,
         delivery_area_id=delivery_area.id,
         delivery_fee=delivery_fee,
-        status="Nouvelle",
+        status="Prête" if not kitchen_enabled() else "Nouvelle",
     )
     for dish in dishes:
         quantity = quantities[dish.id]
@@ -838,6 +838,27 @@ def _confirm_order_without_kitchen(
             "order",
             order.id,
             f"Commande boissons {order.order_number} prête à encaisser",
+            {"previous_status": previous_status, "new_status": order.status, "kitchen_disabled": True},
+        )
+        db.commit()
+        db.refresh(order)
+        background_tasks.add_task(
+            emit_restaurant_event,
+            current_user.restaurant_id,
+            "cashier_updated",
+            order_id=order.id,
+        )
+        return get_order_or_404(db, order.id, current_user.restaurant_id)
+
+    if order.fulfillment_type == "Livraison":
+        order.status = "Prête"
+        log_action(
+            db,
+            current_user,
+            "order.delivery_ready_for_payment",
+            "order",
+            order.id,
+            f"Livraison {order.order_number} en attente de paiement client",
             {"previous_status": previous_status, "new_status": order.status, "kitchen_disabled": True},
         )
         db.commit()

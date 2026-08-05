@@ -226,6 +226,28 @@ async function runAction(action, { apiFetch, apiFetchPublic, idMap }) {
     return;
   }
 
+  if (type === "create_cashier_delivery") {
+    const body = action.requests?.[0]?.body || action.payload;
+    const result = await apiFetch("/api/v1/orders/cashier-delivery", {
+      method: "POST",
+      body,
+      fallback: action.errorMessage || "Création livraison impossible.",
+    });
+    const serverOrderId = result?.id;
+    if (!serverOrderId) throw new Error("Création livraison : id serveur manquant.");
+    if (action.localOrderId) {
+      idMap[action.localOrderId] = serverOrderId;
+      try {
+        const { remapLocalOrderId, mirrorOrderLocal } = await import("@/offline/ops");
+        await remapLocalOrderId(action.localOrderId, serverOrderId, action.restaurantId);
+        await mirrorOrderLocal(result, action.restaurantId);
+      } catch {
+        // best effort
+      }
+    }
+    return;
+  }
+
   if (type === "update_order_items") {
     const orderId = resolveOrderId(action, idMap);
     if (!orderId) {

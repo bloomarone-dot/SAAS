@@ -12,13 +12,19 @@ import {
   getCachedDeliveryAreasAsync,
   getCachedMenuCatalogAsync,
 } from "@/utils/offlineCache";
-import { enqueueOfflineAction, isNetworkError, shouldPreferLocalData } from "@/utils/network";
+import { isNetworkError, shouldPreferLocalData } from "@/utils/network";
 import { listLocalOrders } from "@/offline/store";
 import { KITCHEN_ENABLED } from "@/config/features";
-import { scopeOrdersForCashier } from "@/offline";
+import {
+  createLocalCashierDelivery,
+  mirrorOrderLocal,
+  scopeOrdersForCashier,
+  validateLocalDeliveryPayment,
+} from "@/offline";
 
 const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
 const KITCHEN_SEND_STATUSES = new Set(["Nouvelle", "Acceptée", "Acceptee", "En préparation", "En preparation"]);
+const DELIVERY_PAYABLE_STATUSES = new Set(["Prête", "Prete", "Livrée", "Livree", "Nouvelle"]);
 
 const PAYMENT_OPTIONS = [
   "Paiement avant livraison",
@@ -78,6 +84,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [letterFilter, setLetterFilter] = useState("ALL");
   const [kitchenBusyId, setKitchenBusyId] = useState("");
+  const [paymentBusyId, setPaymentBusyId] = useState("");
   const [feeDraft, setFeeDraft] = useState("");
   const [feeBusy, setFeeBusy] = useState(false);
   const [usingOfflineCatalog, setUsingOfflineCatalog] = useState(false);
@@ -330,31 +337,63 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
     setBusy(true);
     try {
       const created = await orderApi.createCashierDelivery(payload);
-      onMessage?.(`Livraison ${created.order_number} enregistrée. Envoyez-la en cuisine quand vous êtes prêt.`);
+      if (restaurantId) mirrorOrderLocal(created, restaurantId).catch(() => {});
+      onMessage?.(
+        KITCHEN_ENABLED
+          ? `Livraison ${created.order_number} enregistrée. Envoyez-la en cuisine quand vous êtes prêt.`
+          : `Livraison ${created.order_number} enregistrée. Attendez le paiement client puis validez.`,
+      );
       setShowForm(false);
       resetForm();
-      await loadDeliveries();
+      setOrders((current) => [created, ...current.filter((item) => item.id !== created.id)]);
     } catch (error) {
       if (isNetworkError(error)) {
-        enqueueOfflineAction({
-          label: `Livraison ${form.customer_phone}`,
-          requests: [
-            {
-              path: "/api/v1/orders/cashier-delivery",
-              method: "POST",
-              requiresAuth: true,
-              body: payload,
-            },
-          ],
+        const localOrder = await createLocalCashierDelivery({
+          restaurantId,
+          payload,
+          cartLines,
+          selectedArea,
+          deliveryFee,
+          total,
+          currentUser,
         });
-        onMessage?.("Connexion indisponible. La livraison sera synchronisée dès que le réseau revient.");
+        onMessage?.("Connexion indisponible. Livraison enregistrée localement — sync automatique à la reconnexion.");
         setShowForm(false);
         resetForm();
+        setOrders((current) => [localOrder, ...current]);
       } else {
         onMessage?.(error.message || "Création de la livraison impossible.");
       }
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function validateDeliveryPayment(order) {
+    const method = order.payment_method || "Espèces";
+    setPaymentBusyId(order.id);
+    try {
+      const paid = await orderApi.validatePayment(order.id, {
+        payment_method: method,
+        discount_amount: 0,
+      });
+      if (restaurantId) mirrorOrderLocal(paid, restaurantId).catch(() => {});
+      onMessage?.(`Paiement validé pour ${paid.order_number} · ${method}.`);
+      setOrders((current) => current.map((item) => (item.id === paid.id ? { ...item, ...paid } : item)));
+    } catch (error) {
+      if (isNetworkError(error)) {
+        try {
+          const paid = await validateLocalDeliveryPayment(order, method, currentUser);
+          onMessage?.(`Paiement enregistré localement pour ${order.order_number}. Sync à la reconnexion.`);
+          setOrders((current) => current.map((item) => (item.id === order.id ? { ...item, ...paid } : item)));
+        } catch (localErr) {
+          onMessage?.(localErr.message || "Validation locale impossible.");
+        }
+      } else {
+        onMessage?.(error.message || "Validation du paiement impossible.");
+      }
+    } finally {
+      setPaymentBusyId("");
     }
   }
 
@@ -380,8 +419,11 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
     }
   }
 
-  function renderOrderCard(order, showKitchenAction = true) {
-    const canConfirm = showKitchenAction && KITCHEN_SEND_STATUSES.has(order.status) && !order.is_closed;
+  function renderOrderCard(order, showActions = true) {
+    const canSendKitchen = showActions && KITCHEN_ENABLED && KITCHEN_SEND_STATUSES.has(order.status) && !order.is_closed;
+    const canValidatePayment = showActions
+      && !CLOSED_STATUSES.has(order.status)
+      && DELIVERY_PAYABLE_STATUSES.has(order.status);
     const itemsLabel = (order.items || []).length
       ? order.items.map((item) => `${item.quantity}x ${item.name}`).join(", ")
       : "Aucun plat listé";
@@ -405,19 +447,30 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
           <p className="line-clamp-2">{itemsLabel}</p>
           <p>{money(order.total_amount)} · {formatDateTime(order.created_at)}</p>
         </div>
-        {canConfirm && (
+        {canSendKitchen && (
           <button
             type="button"
             disabled={kitchenBusyId === order.id}
             onClick={() => sendOrderToKitchen(order)}
+            className="lte-btn lte-btn-default lte-btn-sm mt-3 w-full"
+          >
+            {kitchenBusyId === order.id ? "Envoi…" : "Envoyer en cuisine"}
+          </button>
+        )}
+        {canValidatePayment && (
+          <button
+            type="button"
+            disabled={paymentBusyId === order.id}
+            onClick={() => validateDeliveryPayment(order)}
             className="lte-btn lte-btn-primary lte-btn-sm mt-3 w-full"
           >
-            {kitchenBusyId === order.id
-              ? "Confirmation…"
-              : KITCHEN_ENABLED
-                ? "Envoyer en cuisine"
-                : "Confirmer la commande"}
+            {paymentBusyId === order.id ? "Validation…" : "Valider le paiement client"}
           </button>
+        )}
+        {!KITCHEN_ENABLED && showActions && !CLOSED_STATUSES.has(order.status) && order.status === "Nouvelle" && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+            En attente — validez dès réception du paiement client ({order.payment_method}).
+          </p>
         )}
       </article>
     );

@@ -1238,14 +1238,14 @@ function OrderPanel({
           </button>
         )}
 
-        {(isServed || isReady) && canEditOrder && (
+        {(isServed || isReady || (!kitchenEnabled && ["Acceptée", "En préparation"].includes(orderStatus))) && canEditOrder && (
           <button type="button" onClick={onCompleteOrder} className="lte-btn lte-btn-default w-full">
             <DashboardIcon name="UtensilsCrossed" size={16} />
             Compléter la commande
           </button>
         )}
 
-        {canEditOrder && !order?.is_closed && (isServed || isReady) && (
+        {canEditOrder && !order?.is_closed && (isServed || isReady || (!kitchenEnabled && ["Acceptée", "En préparation"].includes(orderStatus))) && (
           <button
             type="button"
             onClick={onCloseForBill}

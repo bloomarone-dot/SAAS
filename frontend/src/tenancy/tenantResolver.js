@@ -40,6 +40,13 @@ export function getPublicHostKind(hostname = window.location.hostname) {
 
 export function extractRestaurantSubdomain(hostname = window.location.hostname) {
   const host = normalizeHost(hostname);
+  if (host.endsWith(".localhost")) {
+    const subdomain = host.slice(0, -".localhost".length);
+    if (subdomain && !subdomain.includes(".") && !RESERVED_SUBDOMAINS.has(subdomain)) {
+      return subdomain;
+    }
+    return null;
+  }
   const { baseDomain } = getTenantConfig();
   if (!host.endsWith(`.${baseDomain}`)) return null;
   const subdomain = host.slice(0, -(baseDomain.length + 1));
@@ -49,6 +56,7 @@ export function extractRestaurantSubdomain(hostname = window.location.hostname) 
 
 export function shouldResolveTenantFromHost(hostname = window.location.hostname) {
   const host = normalizeHost(hostname);
-  if (isPlatformHost(host) || isSaasHost(host) || isLocalHost(host)) return false;
+  if (isPlatformHost(host) || isSaasHost(host)) return false;
+  if (isLocalHost(host)) return false;
   return Boolean(extractRestaurantSubdomain(host));
 }

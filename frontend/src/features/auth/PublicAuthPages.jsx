@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChefHat, Clock, CreditCard, Eye, EyeOff, LogIn, MapPin, MessageCircle, Minus, Phone, Plus, Search, ShieldCheck, ShoppingCart, Sparkles, Star, Store, Trash2, Truck, Utensils } from "lucide-react";
 import { TenantThemeProvider } from "@/tenancy/TenantProvider";
+import { extractRestaurantSubdomain } from "@/tenancy/tenantResolver";
 import { apiFetchPublic } from "@/config/http";
 import { initAos } from "@/utils/aos";
 import { normalizePublicRestaurant } from "@/utils/restaurantTheme";
@@ -267,10 +268,16 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
 
   useEffect(() => {
     const host = window.location.hostname;
-    apiFetchPublic(`/api/v1/public/tenant/resolve?host=${encodeURIComponent(host)}`, {
-      fallback: "Restaurant introuvable",
-    })
-      .then((data) => {
+    const subdomain = extractRestaurantSubdomain(host);
+    const resolveQuery = subdomain
+      ? `host=${encodeURIComponent(host)}&subdomain=${encodeURIComponent(subdomain)}`
+      : `host=${encodeURIComponent(host)}`;
+
+    async function loadTenant() {
+      try {
+        const data = await apiFetchPublic(`/api/v1/public/tenant/resolve?${resolveQuery}`, {
+          fallback: "Restaurant introuvable",
+        });
         if (!data?.restaurant) {
           setTenant(data);
           return;
@@ -279,8 +286,29 @@ export function TenantPublicRouter({ apiBaseUrl, currentPath, onAuthenticated })
           ...data,
           restaurant: normalizePublicRestaurant(data.restaurant),
         });
-      })
-      .catch(() => setTenant(null));
+      } catch {
+        if (!subdomain) {
+          setTenant(null);
+          return;
+        }
+        try {
+          const pub = await apiFetchPublic(`/api/v1/restaurants/public/${encodeURIComponent(subdomain)}`, {
+            fallback: "Restaurant introuvable",
+          });
+          setTenant({
+            type: "restaurant",
+            host,
+            subdomain,
+            status: "active",
+            restaurant: normalizePublicRestaurant(pub),
+          });
+        } catch {
+          setTenant(null);
+        }
+      }
+    }
+
+    loadTenant();
   }, []);
 
   if (tenant === undefined) {
@@ -1031,10 +1059,16 @@ function PublicState({ title, text, actionLabel, onAction }) {
 }
 
 function RestaurantNotFoundPage() {
+  const host = typeof window !== "undefined" ? window.location.hostname : "";
+  const slugHint = extractRestaurantSubdomain(host);
   return (
     <PublicState
       title="Restaurant introuvable"
-      text="Aucun restaurant actif ne correspond à ce sous-domaine. Vérifiez l’adresse ou contactez l’administrateur."
+      text={
+        slugHint
+          ? `Aucun restaurant actif ne correspond à « ${slugHint} ». Vérifiez le sous-domaine dans l'admin (slug / sous-domaine) ou essayez : /restaurant/${slugHint}/login`
+          : "Aucun restaurant actif ne correspond à cette adresse. En local, utilisez http://VOTRE-SLUG.localhost:5173 ou http://localhost:5173/restaurant/VOTRE-SLUG/login"
+      }
     />
   );
 }

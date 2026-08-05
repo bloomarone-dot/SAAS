@@ -211,6 +211,97 @@ export async function createLocalTableOrder({
   return order;
 }
 
+export async function createLocalCashierDelivery({
+  restaurantId,
+  payload,
+  cartLines,
+  selectedArea,
+  deliveryFee,
+  total,
+  currentUser,
+}) {
+  await initOfflineFoundation();
+  const id = newLocalId("local_order");
+  const createdAt = nowIso();
+  const order = {
+    id,
+    restaurantId,
+    restaurant_id: restaurantId,
+    order_number: `LOC-LIV-${String(Date.now()).slice(-6)}`,
+    customer_name: payload.customer_name,
+    customer_phone: payload.customer_phone,
+    customer_address: payload.customer_address || null,
+    delivery_area_id: payload.delivery_area_id,
+    delivery_area_name: selectedArea?.name || null,
+    payment_method: payload.payment_method,
+    notes: payload.notes || null,
+    fulfillment_type: "Livraison",
+    status: KITCHEN_ENABLED ? "Nouvelle" : "Prête",
+    created_by_cashier_id: currentUser?.id || null,
+    cashier_id: currentUser?.id || null,
+    items: cartLines.map((line) => ({
+      menu_item_id: line.menu_item_id,
+      name: line.name,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      line_total: line.line_total,
+    })),
+    delivery_fee: deliveryFee,
+    total_amount: total,
+    discount_amount: 0,
+    is_closed: false,
+    created_at: createdAt,
+    updated_at: createdAt,
+    updatedAt: createdAt,
+    _local: true,
+  };
+  await upsertLocalOrder(order);
+  enqueueOfflineAction({
+    type: "create_cashier_delivery",
+    label: `Livraison ${payload.customer_phone}`,
+    localOrderId: id,
+    restaurantId,
+    requests: [{
+      path: "/api/v1/orders/cashier-delivery",
+      method: "POST",
+      requiresAuth: true,
+      body: payload,
+    }],
+  });
+  return order;
+}
+
+export async function validateLocalDeliveryPayment(order, paymentMethod, currentUser) {
+  await initOfflineFoundation();
+  const createdAt = nowIso();
+  const nextOrder = {
+    ...order,
+    status: "Payée",
+    payment_method: paymentMethod,
+    paid_at: createdAt,
+    cashier_id: currentUser?.id || order.cashier_id,
+    updated_at: createdAt,
+    updatedAt: createdAt,
+  };
+  await upsertLocalOrder({
+    ...nextOrder,
+    restaurantId: order.restaurantId || order.restaurant_id,
+  });
+  enqueueOfflineAction({
+    type: "cash_payment",
+    label: `Paiement ${order.order_number || order.id}`,
+    localOrderId: order.id,
+    payload: { payment_method: paymentMethod, discount_amount: 0 },
+    requests: [{
+      path: `/api/v1/orders/${order.id}/payment`,
+      method: "POST",
+      requiresAuth: true,
+      body: { payment_method: paymentMethod, discount_amount: 0 },
+    }],
+  });
+  return nextOrder;
+}
+
 export async function getLocalOrder(orderId) {
   if (!orderId) return null;
   try {

@@ -22,6 +22,7 @@ from app.modules.platform.schemas import (
     PlatformSettingsPublic,
     PlatformSettingsUpdateIn,
     PlatformUserPasswordResetIn,
+    PlatformUserUpdateIn,
     SubscriptionPublic,
     SubscriptionUpdateIn,
 )
@@ -385,6 +386,63 @@ def get_settings(
     db: Session = Depends(get_db),
 ):
     return read_settings(db)
+
+
+@router.patch("/users/{user_id}", response_model=dict)
+def update_platform_user(
+    user_id: str,
+    payload: PlatformUserUpdateIn,
+    current_user: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if user.role == Role.SUPERADMIN:
+        raise HTTPException(status_code=400, detail="Ce compte plateforme ne peut pas etre modifie ici")
+    if not user.is_owner and user.role != Role.ADMIN:
+        raise HTTPException(status_code=400, detail="Seuls les comptes propriétaires peuvent être modifiés ici")
+
+    username = payload.username.strip()
+    email = (payload.email or "").lower().strip() or None
+    if username != user.username:
+        conflict = db.query(User).filter(User.username == username, User.id != user.id).one_or_none()
+        if conflict:
+            raise HTTPException(status_code=409, detail="Ce nom d'utilisateur est déjà utilisé")
+    if email and email != (user.email or ""):
+        conflict = db.query(User).filter(User.email == email, User.id != user.id).one_or_none()
+        if conflict:
+            raise HTTPException(status_code=409, detail="Cet email est déjà utilisé")
+
+    user.first_name = payload.first_name.strip()
+    user.last_name = payload.last_name.strip()
+    user.username = username
+    user.email = email
+    user.phone = payload.phone.strip() if payload.phone else None
+    user.is_active = payload.is_active
+    if not payload.is_active:
+        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
+    log_action(
+        db,
+        current_user,
+        "platform.owner.update",
+        "user",
+        user.id,
+        f"Propriétaire {user.username} mis à jour",
+        {"restaurant_id": user.restaurant_id, "is_active": user.is_active},
+    )
+    db.commit()
+    db.refresh(user)
+    return {
+        "id": user.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "username": user.username,
+        "email": user.email,
+        "phone": user.phone,
+        "is_active": user.is_active,
+        "restaurant_id": user.restaurant_id,
+    }
 
 
 @router.patch("/users/{user_id}/password")

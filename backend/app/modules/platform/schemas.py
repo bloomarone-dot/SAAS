@@ -68,6 +68,15 @@ class PlatformUserPasswordResetIn(BaseModel):
         return validate_password_strength(value)
 
 
+class PlatformUserUpdateIn(BaseModel):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    username: str = Field(min_length=2, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=191)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    is_active: bool = True
+
+
 class PlatformSettingsPublic(BaseModel):
     platform_name: str
     support_email: str
