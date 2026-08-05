@@ -7,6 +7,7 @@ import { getLanApiBaseUrl, invalidateApiProbe, setLanApiBaseUrl } from "@/config
 import { cacheDeliveryAreas } from "@/utils/offlineCache";
 import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { validationFor } from "@/utils/validation";
+import { PERMISSIONS } from "@/config/menu";
 
 const emptySettings = {
   name: "",
@@ -56,7 +57,11 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
   const [areaForm, setAreaForm] = useState({ name: "", delivery_fee: "", average_delivery_minutes: "" });
   const [lanApiUrl, setLanApiUrl] = useState("");
 
-  const canUpdate = currentUser?.is_owner;
+  const canUpdate = Boolean(
+    currentUser?.is_owner
+    || currentUser?.role === "ADMIN"
+    || (currentUser?.permissions ?? []).includes(PERMISSIONS.RESTAURANT_SETTINGS_UPDATE),
+  );
   const fieldsDisabled = !canUpdate || !isEditing || isLoading;
 
   useEffect(() => {
@@ -283,7 +288,7 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
 
       {!canUpdate && (
         <div className="border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-700">
-          Seul le propriétaire du restaurant peut modifier ces paramètres.
+          Vous n&apos;avez pas la permission de modifier les paramètres du restaurant. Contactez l&apos;administrateur.
         </div>
       )}
 

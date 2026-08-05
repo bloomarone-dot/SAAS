@@ -56,8 +56,7 @@ export const MENU_ITEMS = [
     path: "/app/settings",
     icon: "Settings",
     roles: [ROLES.ADMIN],
-    ownerOnly: true,
-    permissions: [PERMISSIONS.RESTAURANT_SETTINGS_READ],
+    permissions: [PERMISSIONS.RESTAURANT_SETTINGS_READ, PERMISSIONS.RESTAURANT_SETTINGS_UPDATE],
   },
   {
     key: "restaurant.branches",

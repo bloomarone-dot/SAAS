@@ -1239,7 +1239,6 @@ function EmptyState({ text }) {
 }
 
 function receiptHtml(order, restaurant, currentUser) {
-  const VAT_RATE = 0.1925;
   const currency = restaurant?.currency || "XAF";
   const receiptMoney = (value) => {
     const amount = Number(value || 0).toLocaleString("fr-FR");
@@ -1264,8 +1263,6 @@ function receiptHtml(order, restaurant, currentUser) {
   const items = order.items ?? [];
   const subtotal = items.reduce((total, item) => total + Number(item.line_total || 0), 0);
   const totalTtc = Number(order.total_amount || 0);
-  const totalHt = totalTtc / (1 + VAT_RATE);
-  const totalTva = totalTtc - totalHt;
   const printCount = Number(order.print_count || 1);
   const receiptNumber = `${order.order_number}-${String(printCount).padStart(3, "0")}`;
   const rows = items.map((item) => `
@@ -1401,9 +1398,7 @@ function receiptHtml(order, restaurant, currentUser) {
             <div class="summary-row"><span>Sous-total articles</span><span>${receiptMoney(subtotal)}</span></div>
             ${Number(order.discount_amount || 0) > 0 ? `<div class="summary-row"><span>Remise</span><span>-${receiptMoney(order.discount_amount)}</span></div>` : ""}
             ${Number(order.delivery_fee || 0) > 0 ? `<div class="summary-row"><span>Livraison</span><span>${receiptMoney(order.delivery_fee)}</span></div>` : ""}
-            <div class="summary-row"><span>Total HT</span><span>${receiptMoney(totalHt)}</span></div>
-            <div class="summary-row"><span>TVA (19,25 %)</span><span>${receiptMoney(totalTva)}</span></div>
-            <div class="summary-row total"><span>TOTAL TTC</span><span>${receiptMoney(totalTtc)}</span></div>
+            <div class="summary-row total"><span>TOTAL</span><span>${receiptMoney(totalTtc)}</span></div>
           </div>
           <div class="footer">
             <p><strong>Merci pour votre visite.</strong></p>

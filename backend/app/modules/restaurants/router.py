@@ -595,8 +595,6 @@ def update_my_restaurant_settings(
 ):
     """Met a jour les informations de personnalisation du restaurant."""
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
-    if not current_user.is_owner:
-        raise HTTPException(status_code=403, detail="Seul le proprietaire peut configurer le restaurant")
 
     restaurant = db.get(Restaurant, current_user.restaurant_id)
     if not restaurant:
@@ -619,8 +617,6 @@ async def upload_my_restaurant_logo(
 ):
     """Importe un logo et met a jour l'URL du logo du restaurant."""
     assert_permission(current_user, Permission.RESTAURANT_SETTINGS_UPDATE)
-    if not current_user.is_owner:
-        raise HTTPException(status_code=403, detail="Seul le proprietaire peut configurer le restaurant")
 
     restaurant = db.get(Restaurant, current_user.restaurant_id)
     if not restaurant:
