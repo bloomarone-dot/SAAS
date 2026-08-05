@@ -66,6 +66,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[Role, set[Permission]] = {
     Role.MANAGER: {
         Permission.BRANCH_READ,
         Permission.USER_READ,
+        Permission.USER_UPDATE,
         Permission.SERVICE_READ,
         Permission.SERVICE_UPDATE,
         Permission.KITCHEN_READ,

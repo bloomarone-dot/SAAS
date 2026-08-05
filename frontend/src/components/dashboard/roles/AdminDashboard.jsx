@@ -77,6 +77,7 @@ export function AdminDashboard({ overrides = {} }) {
   const [insightCards, setInsightCards] = useState([]);
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [insightTimeLabel, setInsightTimeLabel] = useState("");
+  const [recentActivities, setRecentActivities] = useState([]);
 
   const load = useCallback(async () => {
     if (!apiBaseUrl) return;
@@ -103,15 +104,22 @@ export function AdminDashboard({ overrides = {} }) {
       const query = new URLSearchParams();
       if (branchId) query.set("branch_id", branchId);
       const suffix = query.toString() ? `?${query}` : "";
-      const payload = await apiFetch(`/api/v1/dashboard/home-insights${suffix}`, {
-        fallback: "Impossible de charger les comparaisons du tableau de bord.",
-      });
+      const [payload, summary] = await Promise.all([
+        apiFetch(`/api/v1/dashboard/home-insights${suffix}`, {
+          fallback: "Impossible de charger les comparaisons du tableau de bord.",
+        }),
+        apiFetch("/api/v1/dashboard/admin-summary", {
+          fallback: "Impossible de charger l'activité récente.",
+        }).catch(() => null),
+      ]);
       setInsightCards(Array.isArray(payload?.cards) ? payload.cards : []);
       setInsightTimeLabel(payload?.time_label || "");
+      setRecentActivities(Array.isArray(summary?.recent_activities) ? summary.recent_activities : []);
     } catch {
       if (!silent) {
         setInsightCards([]);
         setInsightTimeLabel("");
+        setRecentActivities([]);
       }
     } finally {
       if (!silent) setInsightsLoading(false);
@@ -200,6 +208,22 @@ export function AdminDashboard({ overrides = {} }) {
           </button>
         ))}
       </FilterBar>
+
+      {recentActivities.length > 0 && (
+        <DashboardSection title="Activité récente" action={<span className="text-xs font-semibold text-slate-500">{recentActivities.length} événement(s)</span>}>
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+            {recentActivities.map((activity, index) => (
+              <div key={`${activity.label}-${activity.time}-${index}`} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div>
+                  <p className="text-sm font-black text-slate-900">{activity.label}</p>
+                  <p className="text-xs font-semibold text-slate-600">{activity.value}</p>
+                </div>
+                <span className="text-xs font-semibold text-slate-400">{activity.time}</span>
+              </div>
+            ))}
+          </div>
+        </DashboardSection>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard label="Chiffre d'affaires" value={money(kpi.revenue)} trend={`${formatVariation(kpi.revenue_variation)} vs période préc.`} icon="ShoppingCart" tone="success" />

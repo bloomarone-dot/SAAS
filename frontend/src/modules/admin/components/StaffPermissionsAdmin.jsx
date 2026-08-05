@@ -252,19 +252,22 @@ export function StaffPermissionsAdmin({ currentUser, onMessage }) {
       const updated = await staffApi(`/api/v1/users/${selectedUser.id}`, {
         method: "PATCH",
         body: {
-          ...editForm,
+          first_name: editForm.first_name.trim(),
+          last_name: editForm.last_name.trim(),
+          username: editForm.username.trim(),
+          role: editForm.role,
           email: editForm.email.trim() || null,
           phone: editForm.phone.trim() || null,
           branch_id: editForm.branch_id || null,
           quartier: editForm.quartier.trim() || null,
           responsible_id: editForm.responsible_id || null,
-          permissions: draftPermissions,
         },
       });
       setUsers((current) => current.map((user) => (user.id === updated.id ? updated : user)));
-      onMessage("Informations du personnel mises à jour.");
+      setPanelMode("detail");
+      onMessage(`Informations de ${updated.first_name} ${updated.last_name} enregistrées.`);
     } catch (error) {
-      onMessage(error.message);
+      onMessage(error.message || "Impossible de modifier cet utilisateur.");
     } finally {
       setIsLoading(false);
     }

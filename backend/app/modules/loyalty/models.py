@@ -27,5 +27,6 @@ class LoyaltyCard(Base):
     stamps: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_dishes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     free_meals_claimed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    item_stamps_json: Mapped[str | None] = mapped_column(String(4000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

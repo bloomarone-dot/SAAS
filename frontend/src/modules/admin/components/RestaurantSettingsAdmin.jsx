@@ -313,7 +313,8 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
         </div>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="grid gap-5 lg:grid-cols-2">
+          <div className="flex flex-col gap-5">
+            <div className="grid gap-5 lg:grid-cols-2">
             <SettingsGroup title="Identité">
               <div className="grid gap-4 md:grid-cols-2">
                 <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={fieldsDisabled} />
@@ -349,6 +350,7 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
                 </div>
               </div>
             </SettingsGroup>
+            </div>
 
             <SettingsGroup title="Réseau local (tablettes)">
               <p className="mb-3 text-sm font-medium text-slate-500">
@@ -412,11 +414,16 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
               <p className="mb-3 text-xs font-semibold text-slate-500">
                 Chaque quartier a son propre tarif (500 / 1 000 / 1 500 / 2 000 FCFA). Modifiez le montant si besoin.
               </p>
-              <div className="grid gap-3 md:grid-cols-[1fr_140px_140px_auto]">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_140px_140px] xl:grid-cols-[minmax(0,1fr)_140px_140px_auto] xl:items-end">
                 <Field name="name" label="Quartier" value={areaForm.name} onChange={updateAreaField} disabled={!canUpdate || isLoading} required />
                 <Field name="delivery_fee" label="Frais" type="number" min="0" value={areaForm.delivery_fee} onChange={updateAreaField} disabled={!canUpdate || isLoading} required />
                 <Field name="average_delivery_minutes" label="Délai min." type="number" min="1" value={areaForm.average_delivery_minutes} onChange={updateAreaField} disabled={!canUpdate || isLoading} />
-                <button type="button" onClick={createDeliveryArea} disabled={!canUpdate || isLoading || !areaForm.name.trim()} className="mt-6 h-11 rounded bg-[#f04438] px-4 text-sm font-black text-white disabled:opacity-60">
+                <button
+                  type="button"
+                  onClick={createDeliveryArea}
+                  disabled={!canUpdate || isLoading || !areaForm.name.trim()}
+                  className="h-11 rounded bg-[#f04438] px-4 text-sm font-black text-white disabled:opacity-60 xl:justify-self-start"
+                >
                   Ajouter
                 </button>
               </div>
@@ -450,10 +457,12 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
             </SettingsGroup>
 
             <SettingsGroup title="Marque">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={fieldsDisabled} />
                 <Field name="cover_image_url" label="Image de couverture" value={form.cover_image_url} onChange={updateField} placeholder="URL de l'image principale" disabled={fieldsDisabled} />
-                <LogoUpload onChange={uploadLogo} disabled={fieldsDisabled} />
+                <div className="sm:col-span-2">
+                  <LogoUpload onChange={uploadLogo} disabled={fieldsDisabled} />
+                </div>
                 <ColorField name="primary_color" label="Couleur principale" value={form.primary_color} onChange={updateField} disabled={fieldsDisabled} />
                 <ColorField name="secondary_color" label="Couleur secondaire" value={form.secondary_color} onChange={updateField} disabled={fieldsDisabled} />
                 <ColorField name="accent_color" label="Couleur accent" value={form.accent_color} onChange={updateField} disabled={fieldsDisabled} />

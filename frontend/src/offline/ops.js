@@ -395,8 +395,8 @@ export async function sendLocalOrderToKitchen(order, restaurantId, dishesById = 
     const nextOrder = {
       ...order,
       status: drinksOnly ? "Prête" : order.status === "Nouvelle" ? "Acceptée" : order.status,
-      is_closed: drinksOnly ? true : order.is_closed,
-      closed_at: drinksOnly ? createdAt : order.closed_at,
+      is_closed: order.is_closed,
+      closed_at: order.closed_at,
       updated_at: createdAt,
       updatedAt: createdAt,
     };
@@ -453,8 +453,8 @@ export async function sendLocalOrderToKitchen(order, restaurantId, dishesById = 
   const nextOrder = {
     ...order,
     status: drinksOnly ? "Prête" : kitchenItems.length ? "Acceptée" : order.status,
-    is_closed: drinksOnly ? true : order.is_closed,
-    closed_at: drinksOnly ? createdAt : order.closed_at,
+    is_closed: order.is_closed,
+    closed_at: order.closed_at,
     updated_at: createdAt,
     updatedAt: createdAt,
   };
@@ -707,16 +707,21 @@ function cashierNameOf(user) {
 
 function orderVisibleToCashier(order, cashierUserId, { pending = false } = {}) {
   if (!cashierUserId) return true;
-  const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
+  const paidStatuses = new Set(["Payée", "Payee", "Archivée", "Archivee"]);
+  const status = String(order.status || "");
+  const cashier = order.cashier_id ?? order.cashierId ?? null;
   const createdBy = order.created_by_cashier_id ?? order.createdByCashierId ?? null;
   const isDelivery = String(order.fulfillment_type || "") === "Livraison";
 
+  if (paidStatuses.has(status) || order.paid_at) {
+    return cashier === cashierUserId || (isDelivery && createdBy === cashierUserId);
+  }
+
+  const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
   if (assigned === cashierUserId) return true;
   if (assigned) return false;
   if (isDelivery && createdBy && createdBy !== cashierUserId) return false;
   if (pending) return true;
-
-  const cashier = order.cashier_id ?? order.cashierId ?? null;
   return cashier === cashierUserId;
 }
 

@@ -35,14 +35,15 @@ class LoyaltyUnitTests(unittest.TestCase):
         self.assertEqual(normalize_loyalty_phone("+237 657 000 000"), "657000000")
         self.assertEqual(normalize_loyalty_phone("0657000000"), "657000000")
 
-    def test_count_skips_packaging(self):
+    def test_count_skips_packaging_and_drinks(self):
         order = make_order(
             items=[
                 SimpleNamespace(quantity=2, unit_price=1000, line_total=2000, sale_channel="REPAS"),
                 SimpleNamespace(quantity=1, unit_price=200, line_total=200, sale_channel="EMBALLAGE"),
+                SimpleNamespace(quantity=3, unit_price=500, line_total=1500, sale_channel="BOISSON"),
             ]
         )
-        self.assertEqual(count_loyalty_dishes(order), 2)
+        self.assertEqual(count_loyalty_dishes(order), 1)
 
     def test_preview_grants_free_on_tenth(self):
         class FakeQuery:

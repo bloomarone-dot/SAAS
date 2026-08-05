@@ -63,7 +63,17 @@ function buildCartLines(cart, dishes) {
   });
 }
 
-export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cashierScopeId = null }) {
+function isPaidToday(order) {
+  const stamp = order.paid_at || order.paidAt || order.updated_at || order.updatedAt;
+  if (!stamp) return false;
+  return new Date(stamp).toDateString() === new Date().toDateString();
+}
+
+function isPaidDelivery(order) {
+  return String(order.fulfillment_type || "") === "Livraison" && ["Payée", "Payee"].includes(order.status);
+}
+
+export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cashierScopeId = null, onReportRefresh, cashierReport = null }) {
   const [areas, setAreas] = useState([]);
   const [orders, setOrders] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -173,6 +183,23 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
     [orders],
   );
   const recentOrders = useMemo(() => orders.slice(0, 30), [orders]);
+  const deliveryStats = useMemo(() => {
+    const receiptDeliveries = (cashierReport?.receipts || []).filter(
+      (order) => isPaidDelivery(order) && isPaidToday(order),
+    );
+    const orderDeliveries = orders.filter(
+      (order) => isPaidDelivery(order) && isPaidToday(order),
+    );
+    const merged = new Map();
+    [...receiptDeliveries, ...orderDeliveries].forEach((order) => {
+      merged.set(String(order.id), order);
+    });
+    const paidToday = [...merged.values()];
+    return {
+      validatedToday: paidToday.length,
+      totalToday: paidToday.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
+    };
+  }, [orders, cashierReport]);
 
   async function loadMenu() {
     if (!restaurantId) return;
@@ -380,12 +407,14 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
       if (restaurantId) mirrorOrderLocal(paid, restaurantId).catch(() => {});
       onMessage?.(`Paiement validé pour ${paid.order_number} · ${method}.`);
       setOrders((current) => current.map((item) => (item.id === paid.id ? { ...item, ...paid } : item)));
+      onReportRefresh?.();
     } catch (error) {
       if (isNetworkError(error)) {
         try {
           const paid = await validateLocalDeliveryPayment(order, method, currentUser);
           onMessage?.(`Paiement enregistré localement pour ${order.order_number}. Sync à la reconnexion.`);
           setOrders((current) => current.map((item) => (item.id === order.id ? { ...item, ...paid } : item)));
+          onReportRefresh?.();
         } catch (localErr) {
           onMessage?.(localErr.message || "Validation locale impossible.");
         }
@@ -401,7 +430,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
     setKitchenBusyId(order.id);
     try {
       const updated = await orderApi.sendToKitchen(order.id);
-      const drinksReady = updated?.status === "Prête" && updated?.is_closed;
+      const drinksReady = updated?.status === "Prête" && !KITCHEN_ENABLED;
       onMessage?.(
         drinksReady
           ? `Commande ${order.order_number} : boissons uniquement — prête à encaisser.`
@@ -478,6 +507,16 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
 
   return (
     <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-xs font-black uppercase text-emerald-700">Livraisons validées aujourd&apos;hui</p>
+          <p className="mt-1 text-2xl font-black text-emerald-900">{deliveryStats.validatedToday}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <p className="text-xs font-black uppercase text-slate-500">Total encaissé livraisons</p>
+          <p className="mt-1 text-2xl font-black text-slate-950">{money(deliveryStats.totalToday)}</p>
+        </div>
+      </div>
       <FilterBar
         right={
           <SecondaryAction icon="Plus" onClick={() => setShowForm(true)}>

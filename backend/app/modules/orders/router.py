@@ -168,7 +168,7 @@ def create_cashier_delivery(
     order = CustomerOrder(
         restaurant_id=current_user.restaurant_id,
         branch_id=current_user.branch_id or delivery_area.branch_id,
-        cashier_id=current_user.id,
+        cashier_id=None,
         created_by_cashier_id=current_user.id,
         order_number=make_order_number(restaurant.slug),
         customer_name=payload.customer_name.strip(),
@@ -198,6 +198,7 @@ def create_cashier_delivery(
     recalculate_order_total(order)
     db.add(order)
     assign_order_to_cash_register(db, order, rule="AUTO")
+    order.assigned_cashier_id = current_user.id
     log_action(
         db,
         current_user,
@@ -819,9 +820,6 @@ def _confirm_order_without_kitchen(
 
     if drinks_only:
         order.status = "Prête"
-        order.is_closed = True
-        order.closed_at = utcnow()
-        order.closed_by_id = current_user.id
         notify(
             db,
             restaurant_id=current_user.restaurant_id,
@@ -977,11 +975,8 @@ def send_order_to_kitchen(
     drinks_only = bool(kitchen_items) and skipped_bar == len(kitchen_items) and created_count == 0
 
     if drinks_only:
-        # Boissons bar uniquement (ex. boissons gazeuses) → paiement immédiat, sans cuisine.
+        # Boissons bar uniquement (ex. boissons gazeuses) → prêt à encaisser, commande modifiable.
         order.status = "Prête"
-        order.is_closed = True
-        order.closed_at = utcnow()
-        order.closed_by_id = current_user.id
         notify(
             db,
             restaurant_id=current_user.restaurant_id,
@@ -1542,6 +1537,25 @@ def settle_cash_payment(
             "total_amount": order.total_amount,
         },
     )
+    notify(
+        db,
+        restaurant_id=order.restaurant_id,
+        role=Role.ADMIN.value,
+        title="Encaissement enregistré",
+        message=f"{order.order_number} · {order.total_amount} FCFA · {order.payment_method or '—'}",
+        category="order",
+        link="dashboard",
+    )
+    if order.fulfillment_type == "Livraison":
+        notify(
+            db,
+            restaurant_id=order.restaurant_id,
+            role=Role.ADMIN.value,
+            title="Livraison encaissée",
+            message=f"{order.order_number} · {order.customer_name or 'Client'} · {order.total_amount} FCFA",
+            category="order",
+            link="online-dispatch",
+        )
 
 
 def notify_order_cancelled(db: Session, user: User, order: CustomerOrder, previous_status: str) -> None:

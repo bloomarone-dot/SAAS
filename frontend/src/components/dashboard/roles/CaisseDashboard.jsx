@@ -684,7 +684,9 @@ export function CaisseDashboard({ overrides = {} }) {
           restaurantId={currentUser?.restaurant_id}
           currentUser={currentUser}
           cashierScopeId={cashierScopeId}
+          cashierReport={report}
           onMessage={setMessage}
+          onReportRefresh={() => loadCashierReport({ silent: true })}
         />
       )}
 
@@ -811,8 +813,11 @@ export function CaisseDashboard({ overrides = {} }) {
                   : "border-amber-100 bg-amber-50 text-amber-900"
               }`}
               >
-                <p className="font-black">Carte fidélité · 9 plats → 10e offert</p>
+                <p className="font-black">Carte fidélité · 9 commandes repas ou 9× le même plat → 10e offert</p>
                 <p className="mt-1">{loyaltyPreview.message}</p>
+                <p className="mt-2 text-[11px] font-semibold opacity-80">
+                  Code promo et remise manuelle : appliqués sur la facture entière (repas + boissons + livraison).
+                </p>
                 {loyaltyPreview.free_dishes > 0 && (
                   <p className="mt-1 font-black">
                     Remise fidélité prévue : −{Number(loyaltyPreview.discount_amount || 0).toLocaleString("fr-FR")} FCFA

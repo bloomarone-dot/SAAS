@@ -917,9 +917,29 @@ def build_recent_activities(db: Session, restaurant_id: str) -> list[AdminDashbo
         activities.append((
             order.created_at,
             AdminDashboardActivity(
-                label="Commande",
+                label="Commande créée",
                 value=order.order_number,
                 time=format_activity_time(order.created_at),
+            ),
+        ))
+
+    latest_paid = (
+        db.query(CustomerOrder)
+        .filter(
+            CustomerOrder.restaurant_id == restaurant_id,
+            CustomerOrder.status.in_(["Payée", "Payee"]),
+        )
+        .order_by(CustomerOrder.paid_at.desc())
+        .limit(3)
+        .all()
+    )
+    for order in latest_paid:
+        activities.append((
+            order.paid_at or order.updated_at,
+            AdminDashboardActivity(
+                label="Encaissement" if order.fulfillment_type != "Livraison" else "Livraison encaissée",
+                value=f"{order.order_number} · {float(order.total_amount or 0):.0f} FCFA",
+                time=format_activity_time(order.paid_at or order.updated_at),
             ),
         ))
 

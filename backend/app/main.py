@@ -638,6 +638,17 @@ def ensure_loyalty_cards_table() -> None:
     """Cree la table des cartes de fidelite (9 plats → 10e offert)."""
     from app.modules.loyalty.models import LoyaltyCard  # noqa: F401
     Base.metadata.create_all(bind=engine, tables=[LoyaltyCard.__table__])
+    ensure_loyalty_columns()
+
+
+def ensure_loyalty_columns() -> None:
+    inspector = inspect(engine)
+    if "loyalty_cards" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("loyalty_cards")}
+    if "item_stamps_json" not in existing:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE loyalty_cards ADD COLUMN item_stamps_json TEXT NULL"))
 
 
 def ensure_user_columns() -> None:
