@@ -19,7 +19,6 @@ import {
   createLocalCashierDelivery,
   mirrorOrderLocal,
   scopeOrdersForCashier,
-  validateLocalDeliveryPayment,
 } from "@/offline";
 
 const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
@@ -38,13 +37,25 @@ const DELIVERY_READY_TO_SEND_STATUSES = new Set([
 ]);
 
 const PAYMENT_OPTIONS = [
+  "Paiement à la livraison",
   "Paiement avant livraison",
   "Paiement pendant la livraison",
-  "Paiement à la livraison",
   "Dépôt Orange Money",
   "Dépôt MTN Mobile Money",
   "Espèces",
 ];
+
+const PAYMENT_INTENT_LABELS = new Set([
+  "Paiement à la livraison",
+  "Paiement avant livraison",
+  "Paiement pendant la livraison",
+]);
+
+function paymentIntentLabel(order) {
+  const method = String(order?.payment_method || "");
+  if (PAYMENT_INTENT_LABELS.has(method)) return method;
+  return method || "Non renseigné";
+}
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
@@ -97,7 +108,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
     customer_phone: "",
     customer_address: "",
     delivery_area_id: "",
-    payment_method: PAYMENT_OPTIONS[0],
+    payment_method: "Paiement à la livraison",
     notes: "",
   });
   const [cart, setCart] = useState(new Map());
@@ -107,7 +118,6 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
   const [kitchenBusyId, setKitchenBusyId] = useState("");
   const [departBusyId, setDepartBusyId] = useState("");
   const [returnBusyId, setReturnBusyId] = useState("");
-  const [paymentBusyId, setPaymentBusyId] = useState("");
   const [feeDraft, setFeeDraft] = useState("");
   const [feeBusy, setFeeBusy] = useState(false);
   const [usingOfflineCatalog, setUsingOfflineCatalog] = useState(false);
@@ -343,7 +353,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
       customer_phone: "",
       customer_address: "",
       delivery_area_id: areas[0]?.id || "",
-      payment_method: PAYMENT_OPTIONS[0],
+      payment_method: "Paiement à la livraison",
       notes: "",
     });
     setCart(new Map());
@@ -381,8 +391,8 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
       if (restaurantId) mirrorOrderLocal(created, restaurantId).catch(() => {});
       onMessage?.(
         KITCHEN_ENABLED
-          ? `Livraison ${created.order_number} enregistrée. Envoyez-la en cuisine, puis marquez « Parti en livraison ».`
-          : `Livraison ${created.order_number} enregistrée. Marquez « Parti en livraison » quand le livreur part.`,
+          ? `Livraison ${created.order_number} enregistrée (paiement à la livraison). Envoyez en cuisine, puis « Parti en livraison » — encaissez au retour du livreur.`
+          : `Livraison ${created.order_number} enregistrée. Marquez « Parti en livraison », puis encaissez au retour du livreur.`,
       );
       setShowForm(false);
       resetForm();
@@ -437,46 +447,16 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
       onReportRefresh?.();
       if (onOpenInvoice) {
         onOpenInvoice(updated);
-        onMessage?.(`Facture ouverte pour ${updated.order_number} — validez le paiement (${updated.payment_method}).`);
+        onMessage?.(`Facture ouverte pour ${updated.order_number} — choisissez le mode de paiement reçu du client.`);
       } else {
         onMessage?.(
-          `Retour livreur pour ${order.order_number}. Ouvrez la facture dans « À encaisser » pour valider (${order.payment_method}).`,
+          `Retour livreur pour ${order.order_number}. Ouvrez la facture dans « À encaisser » pour choisir le paiement.`,
         );
       }
     } catch (error) {
       onMessage?.(error.message || "Impossible d'enregistrer le retour du livreur.");
     } finally {
       setReturnBusyId("");
-    }
-  }
-
-  async function validateDeliveryPayment(order) {
-    const method = order.payment_method || "Espèces";
-    setPaymentBusyId(order.id);
-    try {
-      const paid = await orderApi.validatePayment(order.id, {
-        payment_method: method,
-        discount_amount: 0,
-      });
-      if (restaurantId) mirrorOrderLocal(paid, restaurantId).catch(() => {});
-      onMessage?.(`Paiement validé pour ${paid.order_number} · ${method}.`);
-      setOrders((current) => current.map((item) => (item.id === paid.id ? { ...item, ...paid } : item)));
-      onReportRefresh?.();
-    } catch (error) {
-      if (isNetworkError(error)) {
-        try {
-          const paid = await validateLocalDeliveryPayment(order, method, currentUser);
-          onMessage?.(`Paiement enregistré localement pour ${order.order_number}. Sync à la reconnexion.`);
-          setOrders((current) => current.map((item) => (item.id === order.id ? { ...item, ...paid } : item)));
-          onReportRefresh?.();
-        } catch (localErr) {
-          onMessage?.(localErr.message || "Validation locale impossible.");
-        }
-      } else {
-        onMessage?.(error.message || "Validation du paiement impossible.");
-      }
-    } finally {
-      setPaymentBusyId("");
     }
   }
 
@@ -532,7 +512,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
         <div className="mt-3 space-y-1 text-xs font-semibold text-slate-600">
           <p><DashboardIcon name="MapPin" size={12} className="mr-1 inline" />{order.delivery_area_name || "Quartier non renseigné"}</p>
           <p><DashboardIcon name="User" size={12} className="mr-1 inline" />Prise en charge : {orderTakerDisplay(order)}</p>
-          <p><DashboardIcon name="Phone" size={12} className="mr-1 inline" />{order.payment_method}</p>
+          <p><DashboardIcon name="Phone" size={12} className="mr-1 inline" />Paiement prévu : {paymentIntentLabel(order)}</p>
           <p className="line-clamp-2">{itemsLabel}</p>
           <p>{money(order.total_amount)} · {formatDateTime(order.created_at)}</p>
         </div>
@@ -566,19 +546,23 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
             {returnBusyId === order.id ? "Enregistrement…" : "Retour livreur — ouvrir facture"}
           </button>
         )}
-        {canValidatePayment && (
+        {canValidatePayment && onOpenInvoice && (
           <button
             type="button"
-            disabled={paymentBusyId === order.id}
-            onClick={() => (onOpenInvoice ? onOpenInvoice(order) : validateDeliveryPayment(order))}
+            onClick={() => onOpenInvoice(order)}
             className="lte-btn lte-btn-primary lte-btn-sm mt-3 w-full"
           >
-            {paymentBusyId === order.id ? "Validation…" : onOpenInvoice ? "Ouvrir la facture" : "Valider le paiement client"}
+            Encaisser — choisir le paiement
           </button>
         )}
         {DELIVERY_DEPARTED_STATUSES.has(order.status) && showActions && (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
-            Livreur en route — validez le paiement seulement à son retour ({order.payment_method}).
+            Livreur en route ({paymentIntentLabel(order)}). À son retour, cliquez « Retour livreur » puis choisissez le mode de paiement réel.
+          </p>
+        )}
+        {DELIVERY_PAYABLE_STATUSES.has(order.status) && showActions && (
+          <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800">
+            Client revenu — ouvrez la facture, sélectionnez Espèces / Mobile Money / Carte, puis validez (comme pour les commandes serveur).
           </p>
         )}
         {DELIVERY_READY_TO_SEND_STATUSES.has(order.status) && showActions && !canSendKitchen && (
@@ -738,7 +722,7 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
               )}
             </label>
             <label className="lte-form-group">
-              <span className="lte-label">Paiement</span>
+              <span className="lte-label">Paiement prévu</span>
               <select
                 value={form.payment_method}
                 onChange={(event) => setForm((current) => ({ ...current, payment_method: event.target.value }))}
@@ -748,6 +732,9 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
                   <option key={option} value={option}>{option}</option>
                 ))}
               </select>
+              <span className="lte-help">
+                Pour « Paiement à la livraison », le mode réel (espèces, Mobile Money…) sera choisi à l&apos;encaissement, comme pour les commandes serveur.
+              </span>
             </label>
             <label className="lte-form-group md:col-span-2">
               <span className="lte-label">Adresse complémentaire (optionnel)</span>

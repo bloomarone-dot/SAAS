@@ -374,6 +374,7 @@ export function CaisseDashboard({ overrides = {} }) {
 
   function mapOrderMethodToUi(method) {
     const value = String(method || "");
+    if (/paiement (avant|pendant|à|a) la livraison/i.test(value)) return "";
     if (/espèce|espece|cash/i.test(value)) return "Espèces";
     if (/orange|mtn|mobile/i.test(value)) return "Mobile Money";
     if (/carte|card/i.test(value)) return "Carte";

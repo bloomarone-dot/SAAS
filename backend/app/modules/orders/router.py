@@ -54,6 +54,8 @@ PAID_STATUSES = {"Payée", "Payee"}
 EXCLUDED_ACTIVE_STATUSES = {"Annulée", "Annulee", "Archivée", "Archivee"}
 PAYABLE_STATUSES = {"Prête", "Livrée"}
 CASHIER_PENDING_STATUSES = PAYABLE_STATUSES | {"PENDING_PAYMENT"}
+DELIVERY_DEPART_STATUSES = {"Nouvelle", "Acceptée", "En préparation"}
+DELIVERY_RETURN_FROM_STATUSES = {"Prête"}
 
 
 def is_order_payable(order: CustomerOrder) -> bool:
@@ -1741,13 +1743,23 @@ def assert_status_transition_allowed(user: User, order: CustomerOrder, new_statu
             raise HTTPException(status_code=403, detail="L'administrateur ne peut pas encaisser une commande.")
         if user.role not in {Role.MANAGER, Role.CAISSE} and not has_permission(user, Permission.CASHIER_UPDATE):
             raise HTTPException(status_code=403, detail="Seule la caisse peut valider un paiement")
-        if order.status not in PAYABLE_STATUSES:
+        if not is_order_payable(order):
+            if order.fulfillment_type == "Livraison":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Livraison : marquez d'abord « Parti en livraison », puis « Retour livreur » avant d'encaisser.",
+                )
             raise HTTPException(status_code=400, detail="La caisse ne peut encaisser que les commandes pretes ou servies")
 
     if user.role == Role.SERVEUR and new_status in {"Payée", "Annulée"}:
         raise HTTPException(status_code=403, detail="Le serveur ne peut pas encaisser ou annuler une facture")
 
     if user.role == Role.CAISSE and new_status != "Payée":
+        if order.fulfillment_type == "Livraison":
+            if new_status == "Prête" and order.status in DELIVERY_DEPART_STATUSES:
+                return
+            if new_status == "Livrée" and order.status in DELIVERY_RETURN_FROM_STATUSES:
+                return
         raise HTTPException(status_code=403, detail="La caisse ne peut pas modifier le statut d'une facture hors paiement")
 
 
