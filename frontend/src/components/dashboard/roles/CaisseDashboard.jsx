@@ -39,7 +39,7 @@ const paymentMethods = [
   { label: "Espèces", icon: "Wallet" },
   { label: "Mobile Money", icon: "Phone" },
   { label: "Carte", icon: "ReceiptText" },
-  { label: "Mixte", icon: "Layers" },
+  { label: "Espèces + Mobile", icon: "LayoutGrid" },
 ];
 
 function money(value) {
@@ -450,13 +450,13 @@ export function CaisseDashboard({ overrides = {} }) {
   async function validatePayment() {
     if (!selectedOrder) return;
     if (!methodChosen || !paymentMethod) {
-      setMessage("Sélectionnez d'abord le mode de paiement (Espèces, Mobile Money, Carte ou Mixte).");
+      setMessage("Sélectionnez d'abord le mode de paiement (Espèces, Mobile Money, Carte ou Espèces + Mobile).");
       return;
     }
     setIsLoading(true);
     setMessage("");
     const discountAmount = Number(discount || selectedOrder.discount_amount || 0);
-    const isMixed = paymentMethod === "Mixte";
+    const isMixed = paymentMethod === "Espèces + Mobile";
     const isMobileMoney = paymentMethod === "Mobile Money";
     const actualMethod = isMobileMoney ? resolveMobileMoneyLabel() : paymentMethod;
     const payload = {
@@ -691,6 +691,24 @@ export function CaisseDashboard({ overrides = {} }) {
 
       {activeTab === "overview" && (
         <div className="space-y-5">
+          <div className="grid grid-cols-2 gap-3 rounded-lg border border-sky-200 bg-sky-50 p-4 sm:grid-cols-4">
+            <div>
+              <p className="text-[11px] font-black uppercase text-sky-700">Frais livraison (jour)</p>
+              <p className="mt-1 text-xl font-black text-sky-950">{money(deliveryFeesTotal)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-black uppercase text-emerald-700">Espèces</p>
+              <p className="mt-1 text-xl font-black text-emerald-950">{money(cashTotal)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-black uppercase text-slate-600">Mobile Money</p>
+              <p className="mt-1 text-xl font-black text-slate-950">{money(mobileMoneyTotal)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-black uppercase text-slate-600">Total encaissé</p>
+              <p className="mt-1 text-xl font-black text-slate-950">{money(report.total_collected)}</p>
+            </div>
+          </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {kpis.map((item) => (
               <StatCard key={item.label} {...item} />
@@ -901,7 +919,7 @@ export function CaisseDashboard({ overrides = {} }) {
                         onClick={() => {
                           setPaymentMethod(method.label);
                           setMethodChosen(true);
-                          if (method.label !== "Mixte") {
+                          if (method.label !== "Espèces + Mobile") {
                             setSplitCashAmount("");
                             setSplitMobileAmount("");
                           }
@@ -937,9 +955,9 @@ export function CaisseDashboard({ overrides = {} }) {
                     </select>
                   </div>
                 )}
-                {paymentMethod === "Mixte" && (
+                {paymentMethod === "Espèces + Mobile" && (
                   <div className="rounded-lg border border-sky-100 bg-sky-50 p-4 space-y-3">
-                    <p className="text-sm font-black text-slate-950">Paiement mixte espèces + Mobile Money</p>
+                    <p className="text-sm font-black text-slate-950">Paiement mixte : espèces + Mobile Money</p>
                     <p className="text-xs font-semibold text-slate-600">
                       Total à répartir : {money(invoiceTotal(selectedOrder, discount))}
                     </p>
