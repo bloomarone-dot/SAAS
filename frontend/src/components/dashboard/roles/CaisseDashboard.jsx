@@ -150,6 +150,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const [activePaymentRequest, setActivePaymentRequest] = useState(null);
   const [methodChosen, setMethodChosen] = useState(false);
   const [lastPaidOrder, setLastPaidOrder] = useState(null);
+  const [loyaltyPreview, setLoyaltyPreview] = useState(null);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitMobileAmount, setSplitMobileAmount] = useState("");
   const restaurantId = currentUser?.restaurant_id;
