@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from app.modules.menu.schemas import (
     DishCreate,
     DishResponse,
     DishUpdate,
+    MenuStaffCatalog,
     PublicRestaurantMenu,
 )
 from app.modules.menu.services import MenuService
@@ -170,6 +171,24 @@ def create_new_category(
     )
     db.commit()
     return created
+
+
+@router.get("/catalog/restaurant/{restaurant_id}", response_model=MenuStaffCatalog)
+def get_restaurant_catalog(
+    restaurant_id: str,
+    include_unavailable: bool = Query(default=True),
+    current_user: User = Depends(require_tenant_user),
+    db: Session = Depends(get_db),
+):
+    assert_menu_read_allowed(current_user)
+    if restaurant_id != current_user.restaurant_id:
+        raise HTTPException(status_code=403, detail="Restaurant non autorise")
+    categories, dishes = MenuService.get_restaurant_catalog(
+        db=db,
+        restaurant_id=current_user.restaurant_id,
+        include_unavailable=include_unavailable,
+    )
+    return MenuStaffCatalog(categories=categories, dishes=dishes)
 
 
 @router.get("/categories/restaurant/{restaurant_id}", response_model=list[CategoryResponse])

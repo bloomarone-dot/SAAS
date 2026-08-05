@@ -21,6 +21,7 @@ from app.modules.dashboard.schemas import (
     AdminDashboardWeeklyPoint,
 )
 from app.modules.orders.models import CustomerOrder
+from app.modules.orders.payment_reporting import bucket_amount, order_payment_breakdown
 from app.modules.permissions.models import Permission, Role
 from app.modules.restaurants.models import Restaurant
 from app.modules.stock.models import StockItem, StockRecipeIngredient
@@ -621,17 +622,13 @@ def aggregate_cashier_performance(
         })
         amount = float(order.total_amount or 0)
         method = (order.payment_method or "Non renseigné").strip() or "Non renseigné"
-        method_lower = method.lower()
         row["total_collected"] += amount
         row["payments_validated"] += 1
         row["printed_receipts"] += int(order.print_count or 0)
         row["by_payment_method"][method] = row["by_payment_method"].get(method, 0.0) + amount
-        if "cash" in method_lower or "esp" in method_lower:
-            row["cash_payments"] += amount
-        elif "card" in method_lower or "carte" in method_lower:
-            row["card_payments"] += amount
-        elif "momo" in method_lower or "money" in method_lower or "orange" in method_lower or "mtn" in method_lower:
-            row["mobile_money_payments"] += amount
+        row["cash_payments"] += bucket_amount(order, "Espèces")
+        row["mobile_money_payments"] += bucket_amount(order, "Mobile Money")
+        row["card_payments"] += bucket_amount(order, "Carte")
     result = []
     for row in rows.values():
         row["average_ticket"] = round(row["total_collected"] / row["payments_validated"], 0) if row["payments_validated"] else 0

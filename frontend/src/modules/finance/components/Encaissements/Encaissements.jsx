@@ -101,8 +101,9 @@ export function Encaissements({ onMessage }) {
         <p className="mb-4 text-sm font-semibold text-slate-500">Chargement des encaissements...</p>
       )}
 
-      <div className="mb-4 grid gap-3 md:grid-cols-4">
+      <div className="mb-4 grid gap-3 md:grid-cols-5">
         <Stat label="Commandes payées" value={report?.receipts_count || 0} />
+        <Stat label="Frais livraison" value={money(report?.total_delivery_fees || 0)} />
         <Stat label="Total HT" value={money(totals.ht)} />
         <Stat label="TVA collectée" value={money(totals.tva)} />
         <Stat label="Total TTC encaissé" value={money(totals.ttc)} />

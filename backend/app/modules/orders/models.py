@@ -45,6 +45,8 @@ class CustomerOrder(Base):
     payment_previous_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     discount_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     delivery_fee: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    cash_paid_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mobile_paid_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

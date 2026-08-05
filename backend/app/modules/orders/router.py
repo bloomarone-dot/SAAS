@@ -18,6 +18,11 @@ from app.modules.branches.models import DeliveryArea
 from app.modules.finance.models import CashRegister, PromotionCode
 from app.modules.kitchen.models import KitchenStatus, KitchenTicketModel
 from app.modules.kitchen.router import mark_order_kitchen_tickets_served
+from app.modules.orders.payment_reporting import (
+    aggregate_delivery_fees,
+    aggregate_payment_methods,
+    bucket_amount,
+)
 from app.modules.orders.models import CashDrawerSession, CustomerOrder, CustomerOrderItem
 from app.modules.notifications.service import notify
 from app.modules.orders.schemas import (
@@ -311,12 +316,11 @@ def cashier_report(
         func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at).desc()
     ).all()
     total_collected = sum(float(order.total_amount or 0) for order in receipts)
+    total_delivery_fees = aggregate_delivery_fees(receipts)
     discount_lines: list[CashierDiscountLine] = []
     total_discounts = 0.0
-    by_payment_method: dict[str, float] = {}
+    by_payment_method = aggregate_payment_methods(receipts)
     for order in receipts:
-        method = order.payment_method or "Non renseigné"
-        by_payment_method[method] = by_payment_method.get(method, 0) + float(order.total_amount or 0)
         discount_value = float(order.discount_amount or 0)
         if discount_value > 0:
             total_discounts += discount_value
@@ -350,6 +354,7 @@ def cashier_report(
         paid_orders_count=len(receipts),
         receipts_count=len(receipts),
         total_collected=total_collected,
+        total_delivery_fees=total_delivery_fees,
         total_discounts=round(total_discounts, 2),
         discounted_orders_count=len(discount_lines),
         discount_lines=discount_lines,
@@ -360,20 +365,6 @@ def cashier_report(
         analytics=analytics,
     )
 
-
-def _is_cash_method(method: str | None) -> bool:
-    value = (method or "").strip().lower()
-    return value in {"espèces", "especes", "cash", "liquide"}
-
-
-def _is_mobile_method(method: str | None) -> bool:
-    value = (method or "").strip().lower()
-    return "orange" in value or "mtn" in value or "mobile" in value
-
-
-def _is_card_method(method: str | None) -> bool:
-    value = (method or "").strip().lower()
-    return "carte" in value or "card" in value
 
 
 def build_cash_drawer_session_out(
@@ -402,13 +393,9 @@ def build_cash_drawer_session_out(
     for order in receipts:
         amount = float(order.total_amount or 0)
         sales_total += amount
-        method = order.payment_method
-        if _is_cash_method(method):
-            cash_sales += amount
-        elif _is_mobile_method(method):
-            mobile_sales += amount
-        elif _is_card_method(method):
-            card_sales += amount
+        cash_sales += bucket_amount(order, "Espèces")
+        mobile_sales += bucket_amount(order, "Mobile Money")
+        card_sales += bucket_amount(order, "Carte")
 
     opening_float = float(session.opening_float) if session else 0.0
     closing_counted = float(session.closing_counted) if session and session.closing_counted is not None else None
@@ -699,6 +686,25 @@ def validate_cashier_payment(
                 detail="Livraison : marquez d'abord « Parti en livraison », puis « Retour livreur » avant d'encaisser.",
             )
         raise HTTPException(status_code=400, detail="La caisse ne peut encaisser que les commandes prêtes ou servies")
+    if payload.cash_amount is not None or payload.mobile_amount is not None:
+        cash_part = round(float(payload.cash_amount or 0), 2)
+        mobile_part = round(float(payload.mobile_amount or 0), 2)
+        if cash_part <= 0 and mobile_part <= 0:
+            raise HTTPException(status_code=400, detail="Indiquez au moins un montant espèces ou Mobile Money.")
+        preview_discount = payload.discount_amount if payload.discount_amount is not None else float(order.discount_amount or 0)
+        subtotal = sum(
+            float(item.line_total or 0)
+            for item in order.items
+            if getattr(item, "sale_channel", None) != "EMBALLAGE"
+        )
+        expected_total = round(max(0.0, subtotal + float(order.delivery_fee or 0) - preview_discount), 2)
+        if round(cash_part + mobile_part, 2) != expected_total:
+            raise HTTPException(
+                status_code=400,
+                detail=f"La somme espèces + Mobile Money ({cash_part + mobile_part} FCFA) doit égaler le total ({expected_total} FCFA).",
+            )
+        if mobile_part > 0 and not (payload.mobile_operator or "").strip():
+            raise HTTPException(status_code=400, detail="Sélectionnez l'opérateur Mobile Money pour la part mobile.")
     settle_cash_payment(
         db,
         order,
@@ -706,6 +712,9 @@ def validate_cashier_payment(
         payload.payment_method,
         payload.discount_amount,
         payload.cash_register_id,
+        cash_amount=payload.cash_amount,
+        mobile_amount=payload.mobile_amount,
+        mobile_operator=payload.mobile_operator,
     )
     try:
         from app.modules.payments.service import close_pending_payment_requests_for_order
@@ -1484,10 +1493,22 @@ def apply_cashier_pending_scope(query, user: User):
 
 
 def apply_cashier_receipts_scope(query, user: User):
-    """Caissière : uniquement ses encaissements."""
+    """Caissière : ses encaissements + Mobile Money validé sur ses commandes assignées."""
     if user.role not in {Role.CAISSE}:
         return query
-    return query.filter(CustomerOrder.cashier_id == user.id)
+    return query.filter(
+        or_(
+            CustomerOrder.cashier_id == user.id,
+            and_(
+                CustomerOrder.cashier_id.is_(None),
+                CustomerOrder.payment_status == "SUCCESS",
+                or_(
+                    CustomerOrder.assigned_cashier_id == user.id,
+                    CustomerOrder.created_by_cashier_id == user.id,
+                ),
+            ),
+        )
+    )
 
 
 def assert_order_mutable_by_cashier(order: CustomerOrder, user: User) -> None:
@@ -1529,6 +1550,9 @@ def settle_cash_payment(
     payment_method: str,
     discount_amount: float | None = None,
     cash_register_id: str | None = None,
+    cash_amount: float | None = None,
+    mobile_amount: float | None = None,
+    mobile_operator: str | None = None,
 ) -> None:
     """Encaisse une commande (espèces / règlement direct) : commande -> Payée/SUCCESS.
 
@@ -1536,7 +1560,22 @@ def settle_cash_payment(
     être vérifiées par l'appelant. Ne commit pas.
     """
     previous_status = order.status
-    order.payment_method = (payment_method or "").strip() or order.payment_method
+    if cash_amount is not None and mobile_amount is not None:
+        cash_part = round(float(cash_amount or 0), 2)
+        mobile_part = round(float(mobile_amount or 0), 2)
+        order.cash_paid_amount = cash_part
+        order.mobile_paid_amount = mobile_part
+        if mobile_part > 0:
+            order.payment_method = "Mixte (Espèces + Mobile Money)" if cash_part > 0 else (
+                "Orange Money" if (mobile_operator or "").strip().upper() == "ORANGE" else "MTN Mobile Money"
+            )
+        else:
+            order.payment_method = "Espèces"
+            order.mobile_paid_amount = 0.0
+    else:
+        order.cash_paid_amount = None
+        order.mobile_paid_amount = None
+        order.payment_method = (payment_method or "").strip() or order.payment_method
     if discount_amount is not None:
         order.discount_amount = discount_amount
     from app.modules.loyalty.service import apply_loyalty_on_payment

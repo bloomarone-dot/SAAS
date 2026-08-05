@@ -27,6 +27,12 @@ export const menuApi = {
       rows.map((row) => ({ ...row, image_url: browserImageUrl(row.image_url) }))
     ),
 
+  getCatalog: (restaurantId, includeUnavailable = true) =>
+    request(`/api/v1/menu/catalog/restaurant/${restaurantId}?include_unavailable=${includeUnavailable}`).then((data) => ({
+      categories: (data.categories || []).map((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
+      dishes: (data.dishes || []).map((row) => ({ ...row, image_url: browserImageUrl(row.image_url) })),
+    })),
+
   createCategory: (categoryData) =>
     mutatingRequest("/api/v1/menu/categories", {
       method: "POST",

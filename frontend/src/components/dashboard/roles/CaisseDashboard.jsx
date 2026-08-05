@@ -17,6 +17,7 @@ import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { useAutoClearMessage } from "@/utils/useAutoClearMessage";
 import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFilterBar";
 import { orderTakerDisplay, orderTakerGroupKey, orderTakerRole, isDeliveryOrder } from "@/modules/orders/utils/orderLabels";
+import { aggregateDeliveryFees, aggregatePaymentMethods } from "@/modules/orders/utils/paymentReporting";
 import {
   buildCashierReportText,
   downloadTextFile,
@@ -38,6 +39,7 @@ const paymentMethods = [
   { label: "Espèces", icon: "Wallet" },
   { label: "Mobile Money", icon: "Phone" },
   { label: "Carte", icon: "ReceiptText" },
+  { label: "Mixte", icon: "Layers" },
 ];
 
 function money(value) {
@@ -62,6 +64,12 @@ function orderSubtotal(order) {
     .reduce((total, item) => total + Number(item.line_total || 0), 0);
 }
 
+function invoiceTotal(order, discountPreview = "") {
+  const subtotal = orderSubtotal(order);
+  const discount = Number(discountPreview || order?.discount_amount || 0);
+  return Math.max(0, subtotal + Number(order?.delivery_fee || 0) - discount);
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("fr-FR", {
@@ -79,6 +87,7 @@ function emptyReport() {
     paid_orders_count: 0,
     receipts_count: 0,
     total_collected: 0,
+    total_delivery_fees: 0,
     total_discounts: 0,
     discounted_orders_count: 0,
     discount_lines: [],
@@ -141,7 +150,8 @@ export function CaisseDashboard({ overrides = {} }) {
   const [activePaymentRequest, setActivePaymentRequest] = useState(null);
   const [methodChosen, setMethodChosen] = useState(false);
   const [lastPaidOrder, setLastPaidOrder] = useState(null);
-  const [loyaltyPreview, setLoyaltyPreview] = useState(null);
+  const [splitCashAmount, setSplitCashAmount] = useState("");
+  const [splitMobileAmount, setSplitMobileAmount] = useState("");
   const restaurantId = currentUser?.restaurant_id;
   const cashierScopeId = adminReviewOnly ? null : currentUser?.id || null;
 
@@ -345,9 +355,10 @@ export function CaisseDashboard({ overrides = {} }) {
       cancelled = true;
     };
   }, [selectedOrder?.id, selectedOrder?.customer_phone, selectedOrder?.discount_amount]);
-  const mobileMoneyTotal = Object.entries(report.by_payment_method ?? {})
-    .filter(([method]) => /mobile|orange|mtn/i.test(method))
-    .reduce((total, [, amount]) => total + Number(amount || 0), 0);
+  const cashTotal = Number(report.by_payment_method?.["Espèces"] || 0);
+  const mobileMoneyTotal = Number(report.by_payment_method?.["Mobile Money"] || 0);
+  const cardTotal = Number(report.by_payment_method?.["Carte"] || 0);
+  const deliveryFeesTotal = Number(report.total_delivery_fees || aggregateDeliveryFees(receipts));
 
   const ordersByStaff = useMemo(() => {
     const groups = new Map();
@@ -361,9 +372,10 @@ export function CaisseDashboard({ overrides = {} }) {
 
   const kpis = [
     { label: "Commandes non payées", value: report.pending_orders_count ?? pendingOrders.length, trend: "À encaisser", icon: "ClipboardList", tone: "warning" },
-    { label: "Total encaissé", value: money(report.total_collected), trend: "Service du jour", icon: "Wallet", tone: "success" },
+    { label: "Frais livraison", value: money(deliveryFeesTotal), trend: "Service du jour", icon: "Truck", tone: "default" },
+    { label: "Espèces", value: money(cashTotal), trend: "Service du jour", icon: "Wallet", tone: "success" },
     { label: "Mobile Money", value: money(mobileMoneyTotal), trend: "Service du jour", icon: "Phone", tone: "info" },
-    { label: "Reçus imprimables", value: report.receipts_count ?? receipts.length, trend: "Commandes payées", icon: "ReceiptText", tone: "default" },
+    { label: "Total encaissé", value: money(report.total_collected), trend: "Service du jour", icon: "ReceiptText", tone: "success" },
   ];
 
   function mapRequestMethodToUi(method) {
@@ -405,6 +417,8 @@ export function CaisseDashboard({ overrides = {} }) {
       : mapOrderMethodToUi(order.payment_method);
     setPaymentMethod(suggested);
     setMethodChosen(Boolean(suggested));
+    setSplitCashAmount("");
+    setSplitMobileAmount("");
     if (request?.method === "ORANGE" || request?.method === "MTN") {
       setMobileOperator(request.method === "ORANGE" ? "ORANGE" : "MTN");
     }
@@ -435,23 +449,49 @@ export function CaisseDashboard({ overrides = {} }) {
   async function validatePayment() {
     if (!selectedOrder) return;
     if (!methodChosen || !paymentMethod) {
-      setMessage("Sélectionnez d'abord le mode de paiement (Espèces, Mobile Money ou Carte).");
+      setMessage("Sélectionnez d'abord le mode de paiement (Espèces, Mobile Money, Carte ou Mixte).");
       return;
     }
     setIsLoading(true);
     setMessage("");
     const discountAmount = Number(discount || selectedOrder.discount_amount || 0);
+    const isMixed = paymentMethod === "Mixte";
     const isMobileMoney = paymentMethod === "Mobile Money";
     const actualMethod = isMobileMoney ? resolveMobileMoneyLabel() : paymentMethod;
-    const payload = { payment_method: actualMethod, discount_amount: discountAmount };
+    const payload = {
+      payment_method: isMixed ? "Mixte (Espèces + Mobile Money)" : actualMethod,
+      discount_amount: discountAmount,
+    };
+    if (isMixed) {
+      const cashPart = Number(splitCashAmount || 0);
+      const mobilePart = Number(splitMobileAmount || 0);
+      const expected = invoiceTotal(selectedOrder, discount);
+      if (Math.round(cashPart + mobilePart) !== Math.round(expected)) {
+        setMessage(`La somme espèces (${cashPart}) + Mobile Money (${mobilePart}) doit égaler ${expected.toLocaleString("fr-FR")} FCFA.`);
+        setIsLoading(false);
+        return;
+      }
+      if (mobilePart > 0 && !mobileOperator) {
+        setMessage("Sélectionnez l'opérateur Mobile Money.");
+        setIsLoading(false);
+        return;
+      }
+      payload.cash_amount = cashPart;
+      payload.mobile_amount = mobilePart;
+      if (mobilePart > 0) payload.mobile_operator = mobileOperator;
+    }
 
     async function settleOffline() {
-      if (!OFFLINE_CASH_METHODS.has(actualMethod)) {
+      const offlineMethod = isMixed ? "Mixte (Espèces + Mobile Money)" : actualMethod;
+      if (!isMixed && !OFFLINE_CASH_METHODS.has(offlineMethod)) {
         throw new Error("Mode de paiement non pris en charge hors ligne.");
       }
       const result = await payLocalCashOrder(selectedOrder, {
-        payment_method: actualMethod,
+        payment_method: offlineMethod,
         discount_amount: discountAmount,
+        cash_amount: isMixed ? payload.cash_amount : undefined,
+        mobile_amount: isMixed ? payload.mobile_amount : undefined,
+        mobile_operator: isMixed ? mobileOperator : undefined,
         restaurantId,
         cashier: currentUser,
       });
@@ -650,7 +690,7 @@ export function CaisseDashboard({ overrides = {} }) {
 
       {activeTab === "overview" && (
         <div className="space-y-5">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {kpis.map((item) => (
               <StatCard key={item.label} {...item} />
             ))}
@@ -750,9 +790,15 @@ export function CaisseDashboard({ overrides = {} }) {
           />
 
           <DashboardSection title="Récapitulatif du service">
-            <div className="rounded-lg bg-emerald-50 p-6">
-              <p className="text-sm font-semibold text-slate-600">Total encaissé aujourd'hui</p>
-              <p className="mt-2 text-4xl font-black text-slate-950">{money(report.total_collected)}</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-lg bg-sky-50 p-6">
+                <p className="text-sm font-semibold text-slate-600">Frais de livraison encaissés</p>
+                <p className="mt-2 text-3xl font-black text-sky-900">{money(deliveryFeesTotal)}</p>
+              </div>
+              <div className="rounded-lg bg-emerald-50 p-6">
+                <p className="text-sm font-semibold text-slate-600">Total encaissé aujourd&apos;hui</p>
+                <p className="mt-2 text-3xl font-black text-slate-950">{money(report.total_collected)}</p>
+              </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Metric label="Transactions" value={Number(report.paid_orders_count || 0).toLocaleString("fr-FR")} />
@@ -846,7 +892,7 @@ export function CaisseDashboard({ overrides = {} }) {
                   <p className="mt-1 text-xs font-semibold text-slate-500">
                     Vérifiez puis sélectionnez le mode avant de valider. L&apos;impression se fait après validation.
                   </p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {paymentMethods.map((method) => (
                       <button
                         key={method.label}
@@ -854,6 +900,10 @@ export function CaisseDashboard({ overrides = {} }) {
                         onClick={() => {
                           setPaymentMethod(method.label);
                           setMethodChosen(true);
+                          if (method.label !== "Mixte") {
+                            setSplitCashAmount("");
+                            setSplitMobileAmount("");
+                          }
                         }}
                         className={`flex h-12 items-center justify-center gap-2 rounded-lg border text-sm font-black ${
                           methodChosen && paymentMethod === method.label
@@ -884,6 +934,53 @@ export function CaisseDashboard({ overrides = {} }) {
                       <option value="MTN">MTN Mobile Money</option>
                       <option value="ORANGE">Orange Money</option>
                     </select>
+                  </div>
+                )}
+                {paymentMethod === "Mixte" && (
+                  <div className="rounded-lg border border-sky-100 bg-sky-50 p-4 space-y-3">
+                    <p className="text-sm font-black text-slate-950">Paiement mixte espèces + Mobile Money</p>
+                    <p className="text-xs font-semibold text-slate-600">
+                      Total à répartir : {money(invoiceTotal(selectedOrder, discount))}
+                    </p>
+                    <label className="block">
+                      <span className="text-xs font-black uppercase text-slate-500">Part espèces</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={splitCashAmount}
+                        onChange={(event) => setSplitCashAmount(event.target.value)}
+                        className="mt-2 h-11 w-full rounded-lg border border-sky-200 bg-white px-3 text-sm font-black text-slate-700 outline-none"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-black uppercase text-slate-500">Part Mobile Money</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={splitMobileAmount}
+                        onChange={(event) => setSplitMobileAmount(event.target.value)}
+                        className="mt-2 h-11 w-full rounded-lg border border-sky-200 bg-white px-3 text-sm font-black text-slate-700 outline-none"
+                      />
+                    </label>
+                    <select
+                      value={mobileOperator}
+                      onChange={(event) => setMobileOperator(event.target.value)}
+                      className="h-11 w-full rounded-lg border border-sky-200 bg-white px-3 text-sm font-black text-slate-700 outline-none"
+                    >
+                      <option value="MTN">MTN Mobile Money</option>
+                      <option value="ORANGE">Orange Money</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const total = invoiceTotal(selectedOrder, discount);
+                        const mobilePart = Number(splitMobileAmount || 0);
+                        setSplitCashAmount(String(Math.max(0, total - mobilePart)));
+                      }}
+                      className="lte-btn lte-btn-default lte-btn-sm"
+                    >
+                      Calculer le reste en espèces
+                    </button>
                   </div>
                 )}
                 <label className="block">
@@ -1065,12 +1162,19 @@ function DiscountLinesTable({ lines }) {
 }
 
 function PaymentTotals({ rows }) {
-  const entries = Object.entries(rows);
-  if (!entries.length) return <EmptyState text="Aucun paiement validé pour le moment." />;
-  const total = entries.reduce((sum, [, amount]) => sum + Number(amount || 0), 0);
+  const bucketOrder = ["Espèces", "Mobile Money", "Carte", "Autre"];
+  const entries = bucketOrder
+    .map((method) => [method, rows?.[method]])
+    .filter(([, amount]) => Number(amount || 0) > 0);
+  const extra = Object.entries(rows || {}).filter(([method, amount]) => (
+    Number(amount || 0) > 0 && !bucketOrder.includes(method)
+  ));
+  const allEntries = [...entries, ...extra];
+  if (!allEntries.length) return <EmptyState text="Aucun paiement validé pour le moment." />;
+  const total = allEntries.reduce((sum, [, amount]) => sum + Number(amount || 0), 0);
   return (
     <div className="space-y-3">
-      {entries.map(([method, amount]) => (
+      {allEntries.map(([method, amount]) => (
         <div key={method} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white px-4 py-3 text-sm">
           <span className="font-black text-slate-700">{method}</span>
           <span className="font-black text-slate-950">{money(amount)}</span>

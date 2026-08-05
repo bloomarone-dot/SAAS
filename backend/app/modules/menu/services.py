@@ -21,6 +21,20 @@ class MenuService:
         return category
 
     @staticmethod
+    def get_restaurant_catalog(db: Session, restaurant_id: str, include_unavailable: bool = True):
+        categories = (
+            db.query(CategoryModel)
+            .filter(CategoryModel.restaurant_id == restaurant_id, CategoryModel.is_active.is_(True))
+            .order_by(CategoryModel.created_at.desc())
+            .all()
+        )
+        dish_query = db.query(DishModel).filter(DishModel.restaurant_id == restaurant_id)
+        if not include_unavailable:
+            dish_query = dish_query.filter(DishModel.is_available.is_(True))
+        dishes = dish_query.order_by(DishModel.created_at.desc()).all()
+        return categories, dishes
+
+    @staticmethod
     def get_categories_by_restaurant(db: Session, restaurant_id: str):
         return (
             db.query(CategoryModel)

@@ -259,6 +259,8 @@ def apply_webhook(
         tx.completed_at = now
         order = load_transaction_order(db, tx)
         if order:
+            if not order.cashier_id:
+                order.cashier_id = order.assigned_cashier_id or order.created_by_cashier_id
             order.status = "Payée"
             order.payment_status = "SUCCESS"
             order.payment_locked = False

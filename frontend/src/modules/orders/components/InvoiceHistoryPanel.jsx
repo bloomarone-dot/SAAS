@@ -244,6 +244,12 @@ function InvoiceDetail({ order }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <Info label="Statut" value={order.status} />
         <Info label="Mode de paiement" value={order.payment_method} />
+        {order.cash_paid_amount != null && order.mobile_paid_amount != null && (
+          <>
+            <Info label="Part espèces" value={money(order.cash_paid_amount)} />
+            <Info label="Part Mobile Money" value={money(order.mobile_paid_amount)} />
+          </>
+        )}
         <Info label="Caissier(ère)" value={order.cashier_name || "-"} />
         <Info label="Prise en charge" value={order.created_by_cashier_name || order.cashier_name || "-"} />
         <Info label="Téléphone" value={order.customer_phone || "-"} />

@@ -363,6 +363,8 @@ def ensure_order_columns() -> None:
         "deleted_at": "DATETIME NULL",
         "deleted_by": "VARCHAR(36) NULL",
         "delete_reason": "TEXT NULL",
+        "cash_paid_amount": "FLOAT NULL",
+        "mobile_paid_amount": "FLOAT NULL",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
     if missing:

@@ -17,6 +17,7 @@ import {
 } from "@/offline/store";
 import { idbDelete, idbGet, STORES } from "@/offline/db";
 import { cacheTables } from "@/utils/offlineCache";
+import { aggregateDeliveryFees, aggregatePaymentMethods } from "@/modules/orders/utils/paymentReporting";
 import { KITCHEN_ENABLED } from "@/config/features";
 
 export function newLocalId(prefix = "local") {
@@ -692,6 +693,7 @@ function isLocalOrderPayable(order) {
   }
   return Boolean(order?.is_closed);
 }
+
 const CASHIER_PAID_STATUSES = new Set(["Payée", "Payee"]);
 const OFFLINE_CASH_METHODS = new Set(["Espèces", "Carte", "Orange Money", "MTN Mobile Money"]);
 
@@ -701,6 +703,7 @@ function emptyCashierReport() {
     paid_orders_count: 0,
     receipts_count: 0,
     total_collected: 0,
+    total_delivery_fees: 0,
     total_discounts: 0,
     discounted_orders_count: 0,
     discount_lines: [],
@@ -734,7 +737,12 @@ function orderVisibleToCashier(order, cashierUserId, { pending = false } = {}) {
   const isDelivery = String(order.fulfillment_type || "") === "Livraison";
 
   if (paidStatuses.has(status) || order.paid_at) {
-    return cashier === cashierUserId || (isDelivery && createdBy === cashierUserId);
+    if (cashier === cashierUserId) return true;
+    if (!cashier && order.payment_status === "SUCCESS") {
+      const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
+      return assigned === cashierUserId || createdBy === cashierUserId;
+    }
+    return isDelivery && createdBy === cashierUserId;
   }
 
   const assigned = order.assigned_cashier_id ?? order.assignedCashierId ?? null;
@@ -764,15 +772,13 @@ export function scopeCashierReport(report, cashierUserId) {
 function recomputeTotals(report) {
   const pending = report.pending_orders || [];
   const receipts = report.receipts || [];
-  const by_payment_method = {};
+  const by_payment_method = aggregatePaymentMethods(receipts);
   let total_collected = 0;
   let total_discounts = 0;
   const discount_lines = [];
   for (const order of receipts) {
     const amount = Number(order.total_amount || 0);
     total_collected += amount;
-    const method = order.payment_method || "Non renseigné";
-    by_payment_method[method] = (by_payment_method[method] || 0) + amount;
     const discountValue = Number(order.discount_amount || 0);
     if (discountValue > 0) {
       total_discounts += discountValue;
@@ -796,6 +802,7 @@ function recomputeTotals(report) {
     paid_orders_count: receipts.length,
     receipts_count: receipts.length,
     total_collected,
+    total_delivery_fees: aggregateDeliveryFees(receipts),
     total_discounts: Math.round(total_discounts * 100) / 100,
     discounted_orders_count: discount_lines.length,
     discount_lines,
@@ -896,11 +903,15 @@ export async function claimLocalOrderForCashier(order, restaurantId, cashier) {
 export async function payLocalCashOrder(order, {
   payment_method = "Espèces",
   discount_amount = null,
+  cash_amount = null,
+  mobile_amount = null,
+  mobile_operator = null,
   restaurantId,
   cashier = null,
 } = {}) {
   const method = String(payment_method || "Espèces").trim() || "Espèces";
-  if (!OFFLINE_CASH_METHODS.has(method)) {
+  const isMixed = method.toLowerCase().includes("mixte");
+  if (!isMixed && !OFFLINE_CASH_METHODS.has(method)) {
     throw new Error("Mode de paiement non pris en charge hors ligne.");
   }
   if (!order?.id) throw new Error("Commande introuvable.");
@@ -933,6 +944,8 @@ export async function payLocalCashOrder(order, {
     discount_amount: discount,
     total_amount: totalAmount,
     payment_method: method,
+    cash_paid_amount: isMixed ? Number(cash_amount || 0) : null,
+    mobile_paid_amount: isMixed ? Number(mobile_amount || 0) : null,
     status: "Payée",
     payment_status: "SUCCESS",
     paid_at: paidAt,
@@ -957,7 +970,15 @@ export async function payLocalCashOrder(order, {
   const nextReport = recomputeTotals({ ...snapshot, pending_orders: pending, receipts });
   await saveCashierSnapshot(rid, nextReport);
 
-  const payload = { payment_method: method, discount_amount: discount };
+  const payload = {
+    payment_method: method,
+    discount_amount: discount,
+    ...(isMixed ? {
+      cash_amount: Number(cash_amount || 0),
+      mobile_amount: Number(mobile_amount || 0),
+      mobile_operator: mobile_operator || undefined,
+    } : {}),
+  };
   enqueueOfflineAction({
     type: "cash_payment",
     label: `Paiement ${order.order_number || order.id}`,

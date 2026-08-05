@@ -42,9 +42,12 @@ class OrderStatusUpdateIn(BaseModel):
 
 
 class CashierPaymentIn(BaseModel):
-    payment_method: str = Field(min_length=2, max_length=40)
+    payment_method: str = Field(min_length=2, max_length=80)
     discount_amount: Optional[float] = Field(default=None, ge=0)
     cash_register_id: Optional[str] = None
+    cash_amount: Optional[float] = Field(default=None, ge=0)
+    mobile_amount: Optional[float] = Field(default=None, ge=0)
+    mobile_operator: Optional[str] = Field(default=None, max_length=20)
 
 
 class OrderReopenIn(BaseModel):
@@ -128,6 +131,8 @@ class OrderPublic(OrmModel):
     closed_at: Optional[datetime] = None
     discount_amount: float
     delivery_fee: float
+    cash_paid_amount: Optional[float] = None
+    mobile_paid_amount: Optional[float] = None
     total_amount: float
     cancelled_at: Optional[datetime] = None
     paid_at: Optional[datetime] = None
@@ -167,6 +172,7 @@ class CashierReportOut(BaseModel):
     paid_orders_count: int
     receipts_count: int
     total_collected: float
+    total_delivery_fees: float = 0
     total_discounts: float = 0
     discounted_orders_count: int = 0
     discount_lines: list[CashierDiscountLine] = Field(default_factory=list)

@@ -246,15 +246,9 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     }
 
     try {
-      const fetchedCategories = await menuApi.getCategories(restaurantId);
-      const activeCategories = fetchedCategories.filter((item) => item.is_active !== false);
-      const groups = await Promise.all(
-        activeCategories.map((category) =>
-          menuApi.getDishesByCategory(category.id, true).catch(() => [])
-        )
-      );
-      const nextCategories = activeCategories;
-      const nextDishes = groups.flat().filter((dish) => dish.is_available !== false);
+      const catalog = await menuApi.getCatalog(restaurantId, true);
+      const nextCategories = (catalog.categories || []).filter((item) => item.is_active !== false);
+      const nextDishes = (catalog.dishes || []).filter((dish) => dish.is_available !== false);
       setCategories(nextCategories);
       setDishes(nextDishes);
       cacheMenuCatalog(restaurantId, nextCategories, nextDishes);

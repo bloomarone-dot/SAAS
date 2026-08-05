@@ -118,3 +118,8 @@ class PublicRestaurantMenu(BaseModel):
     restaurant: dict
     categories: list[CategoryResponse]
     dishes: list[DishResponse]
+
+
+class MenuStaffCatalog(BaseModel):
+    categories: list[CategoryResponse]
+    dishes: list[DishResponse]
