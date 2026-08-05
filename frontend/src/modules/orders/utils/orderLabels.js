@@ -33,3 +33,14 @@ export function orderTakerGroupKey(order) {
   }
   return orderTakerName(order) || "Sans serveur assigné";
 }
+
+/** Caissier(ère) ayant encaissé ou pris en charge la commande. */
+export function cashierDisplay(order, fallback = "Non renseigné") {
+  if (!order) return fallback;
+  return (
+    order.cashier_name ||
+    order.created_by_cashier_name ||
+    order.assigned_cashier_name ||
+    fallback
+  );
+}

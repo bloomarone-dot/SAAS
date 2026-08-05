@@ -4,7 +4,7 @@ import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 import { apiFetch } from "@/config/http";
-import { orderTakerDisplay, orderTakerRole, isDeliveryOrder } from "@/modules/orders/utils/orderLabels";
+import { orderTakerDisplay, orderTakerRole, isDeliveryOrder, cashierDisplay } from "@/modules/orders/utils/orderLabels";
 import { OrangeMoneyPayment } from "./OrangeMoneyPayment";
 import { formatMinutes, orderKitchenTimingDetails, orderKitchenTimingLabel } from "@/modules/menu/utils/kitchenTiming";
 
@@ -462,6 +462,10 @@ function OrdersTable({ orders, selectedOrderId, reviewOnly, onDetail, onEdit, on
 function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtnPay }) {
   const visibleItems = order.items.filter((item) => item.sale_channel !== "EMBALLAGE");
   const subtotal = visibleItems.reduce((total, item) => total + Number(item.line_total || 0), 0);
+  const discount = Number(order.discount_amount || 0);
+  const deliveryFee = Number(order.delivery_fee || 0);
+  const total = Math.max(0, subtotal + deliveryFee - discount);
+
   return (
     <div className="space-y-5">
       <div>
@@ -482,11 +486,21 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
           </div>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-100 p-3 text-center">
-        <Metric label="Articles" value={visibleItems.length} />
-        <Metric label="Sous-total" value={money(subtotal)} />
-        <Metric label="Total" value={money(order.total_amount)} />
+
+      <div className="grid gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2">
+        <DetailInfo label="Caissier(ère)" value={cashierDisplay(order)} />
+        <DetailInfo label="Mode de paiement" value={order.payment_method || "—"} />
+        {order.paid_at && (
+          <DetailInfo
+            label="Payée le"
+            value={new Date(order.paid_at).toLocaleString("fr-FR")}
+          />
+        )}
+        {isDeliveryOrder(order) && order.delivery_area_name && (
+          <DetailInfo label="Quartier" value={order.delivery_area_name} />
+        )}
       </div>
+
       <div className="divide-y divide-slate-100">
         {visibleItems.map((item) => (
           <div key={item.id} className="flex justify-between py-2 text-sm">
@@ -495,6 +509,24 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
           </div>
         ))}
       </div>
+
+      <div className="space-y-1 rounded-lg border border-slate-100 bg-white p-3 text-sm font-semibold text-slate-700">
+        <div className="flex justify-between"><span>Sous-total</span><span>{money(subtotal)}</span></div>
+        {deliveryFee > 0 && (
+          <div className="flex justify-between"><span>Frais de livraison</span><span>{money(deliveryFee)}</span></div>
+        )}
+        {discount > 0 && (
+          <div className="flex justify-between text-red-600">
+            <span>Réduction</span>
+            <span>- {money(discount)}</span>
+          </div>
+        )}
+        <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-black text-slate-950">
+          <span>Total TTC</span>
+          <span>{money(order.total_amount ?? total)}</span>
+        </div>
+      </div>
+
       {order.notes && <div className="rounded-lg bg-orange-50 p-3 text-sm font-semibold text-orange-700">{order.notes}</div>}
 
       {/* Bouton Orange Money — visible si commande non payée */}
@@ -545,6 +577,15 @@ function OrderDetail({ order, reviewOnly, onStatus, onDelete, onOrangePay, onMtn
 
 function Metric({ label, value }) {
   return <div><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-1 font-black text-slate-950">{value}</p></div>;
+}
+
+function DetailInfo({ label, value }) {
+  return (
+    <div>
+      <p className="text-[11px] font-bold uppercase text-slate-500">{label}</p>
+      <p className="mt-1 text-sm font-black text-slate-800">{value}</p>
+    </div>
+  );
 }
 
 function StatusBadge({ status }) {
