@@ -90,7 +90,12 @@ def create_pending_transaction(
 ) -> PaymentTransaction:
     if order.payment_locked or order.status == "PENDING_PAYMENT":
         raise ValueError("Un paiement est déjà actif pour cette facture")
-    if order.status not in {"Prête", "Livrée"}:
+    if order.fulfillment_type == "Livraison":
+        if order.status not in {"Livrée", "Livree"}:
+            raise ValueError(
+                "Livraison : encaissement possible uniquement après retour du livreur (statut Livrée)."
+            )
+    elif order.status not in {"Prête", "Livrée"}:
         raise ValueError("La caisse ne peut encaisser que les commandes prêtes ou servies")
 
     tx = PaymentTransaction(

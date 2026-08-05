@@ -133,6 +133,7 @@ export function CaisseDashboard({ overrides = {} }) {
   const [requestActionId, setRequestActionId] = useState("");
   const [activeTab, setActiveTab] = useState(resolveCashierTab(activeView));
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [invoiceOrder, setInvoiceOrder] = useState(null);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportPeriod, setReportPeriod] = useState("today");
   const [reportCustomPeriod, setReportCustomPeriod] = useState({ start: "", end: "" });
@@ -319,7 +320,10 @@ export function CaisseDashboard({ overrides = {} }) {
     [report.pending_orders, query]
   );
   const receipts = report.receipts ?? [];
-  const selectedOrder = pendingOrders.find((order) => order.id === selectedOrderId) || pendingOrders[0] || null;
+  const selectedOrder = invoiceOrder
+    || pendingOrders.find((order) => String(order.id) === String(selectedOrderId))
+    || pendingOrders[0]
+    || null;
   const selectedReceipt = receipts.find((order) => order.id === selectedReceiptId) || receipts[0] || null;
 
   useEffect(() => {
@@ -377,18 +381,21 @@ export function CaisseDashboard({ overrides = {} }) {
   }
 
   async function openPaymentModal(order, request = null) {
+    if (!order?.id) return;
     if (!adminReviewOnly && cashierScopeId) {
       try {
         if (shouldPreferLocalData() || isLocalIdSafe(order.id)) {
           await claimLocalOrderForCashier(order, restaurantId, currentUser);
         } else {
-          await orderApi.claimForCashier(order.id);
+          const claimed = await orderApi.claimForCashier(order.id);
+          order = { ...order, ...claimed };
         }
       } catch (error) {
         setMessage(error.message || "Cette commande est déjà prise en charge par une autre caissière.");
         return;
       }
     }
+    setInvoiceOrder(order);
     setSelectedOrderId(order.id);
     setDiscount(order.discount_amount ? String(order.discount_amount) : "");
     setActivePaymentRequest(request);
@@ -402,6 +409,7 @@ export function CaisseDashboard({ overrides = {} }) {
     }
     setShowPaymentModal(true);
     setLastPaidOrder(null);
+    setActiveTab((current) => (current === "deliveries" ? "pending" : current));
   }
 
   async function openPaymentRequest(req) {
@@ -449,6 +457,7 @@ export function CaisseDashboard({ overrides = {} }) {
       setReport(result.report);
       setDiscount("");
       setSelectedOrderId("");
+      setInvoiceOrder(null);
       setSelectedReceiptId(result.order.id);
       setActivePaymentRequest(null);
       setLastPaidOrder(result.order);
@@ -473,6 +482,7 @@ export function CaisseDashboard({ overrides = {} }) {
       const paid = await orderApi.validatePayment(selectedOrder.id, payload);
       setDiscount("");
       setSelectedOrderId("");
+      setInvoiceOrder(null);
       setSelectedReceiptId(paid.id);
       setActivePaymentRequest(null);
       setLastPaidOrder(paid);
@@ -687,6 +697,7 @@ export function CaisseDashboard({ overrides = {} }) {
           cashierReport={report}
           onMessage={setMessage}
           onReportRefresh={() => loadCashierReport({ silent: true })}
+          onOpenInvoice={openPaymentModal}
         />
       )}
 
@@ -771,6 +782,7 @@ export function CaisseDashboard({ overrides = {} }) {
         open={showPaymentModal && Boolean(selectedOrder)}
         onClose={() => {
           setShowPaymentModal(false);
+          setInvoiceOrder(null);
           setActivePaymentRequest(null);
         }}
         title={selectedOrder ? `Facture · ${selectedOrder.order_number}` : ""}
@@ -782,6 +794,7 @@ export function CaisseDashboard({ overrides = {} }) {
               type="button"
               onClick={() => {
                 setShowPaymentModal(false);
+                setInvoiceOrder(null);
                 setActivePaymentRequest(null);
               }}
               className="lte-btn lte-btn-default"

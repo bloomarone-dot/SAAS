@@ -56,6 +56,36 @@ PAYABLE_STATUSES = {"Prête", "Livrée"}
 CASHIER_PENDING_STATUSES = PAYABLE_STATUSES | {"PENDING_PAYMENT"}
 
 
+def is_order_payable(order: CustomerOrder) -> bool:
+    """Salle : encaissement dès Prête/Livrée ou commande clôturée (addition). Livraison : après retour livreur."""
+    if order.status in PAID_STATUSES:
+        return False
+    if order.fulfillment_type == "Livraison":
+        return order.status in {"Livrée", "Livree"}
+    if order.status in PAYABLE_STATUSES:
+        return True
+    return bool(getattr(order, "is_closed", False))
+
+
+def pending_orders_status_filter():
+    """File d'attente caisse (livraisons Prête exclues — livreur pas encore revenu)."""
+    unpaid = ~CustomerOrder.status.in_(PAID_STATUSES | EXCLUDED_ACTIVE_STATUSES)
+    return or_(
+        and_(
+            CustomerOrder.fulfillment_type != "Livraison",
+            or_(
+                CustomerOrder.status.in_(PAYABLE_STATUSES),
+                and_(CustomerOrder.is_closed.is_(True), unpaid),
+            ),
+        ),
+        and_(
+            CustomerOrder.fulfillment_type == "Livraison",
+            CustomerOrder.status.in_(("Livrée", "Livree")),
+        ),
+        CustomerOrder.status == "PENDING_PAYMENT",
+    )
+
+
 @router.post("/public/{slug}", response_model=OrderPublic, status_code=status.HTTP_201_CREATED)
 @public_order_rate_limit
 def create_public_order(slug: str, payload: PublicOrderCreateIn, request: Request, db: Session = Depends(get_db)):
@@ -179,7 +209,7 @@ def create_cashier_delivery(
         payment_method=payload.payment_method,
         delivery_area_id=delivery_area.id,
         delivery_fee=delivery_fee,
-        status="Prête" if not kitchen_enabled() else "Nouvelle",
+        status="Nouvelle",
     )
     for dish in dishes:
         quantity = quantities[dish.id]
@@ -265,7 +295,7 @@ def cashier_report(
         .filter(~CustomerOrder.status.in_(EXCLUDED_ACTIVE_STATUSES))
     )
     pending_query = apply_cashier_pending_scope(
-        base_query.filter(CustomerOrder.status.in_(CASHIER_PENDING_STATUSES)),
+        base_query.filter(pending_orders_status_filter()),
         current_user,
     )
     pending_orders = pending_query.order_by(CustomerOrder.created_at.asc()).all()
@@ -660,7 +690,12 @@ def validate_cashier_payment(
         raise HTTPException(status_code=400, detail="Cette commande est déjà payée")
     if order.payment_locked:
         raise HTTPException(status_code=409, detail="Facture verrouillée par un paiement Mobile Money actif")
-    if order.status not in PAYABLE_STATUSES:
+    if not is_order_payable(order):
+        if order.fulfillment_type == "Livraison":
+            raise HTTPException(
+                status_code=400,
+                detail="Livraison : marquez d'abord « Parti en livraison », puis « Retour livreur » avant d'encaisser.",
+            )
         raise HTTPException(status_code=400, detail="La caisse ne peut encaisser que les commandes prêtes ou servies")
     settle_cash_payment(
         db,

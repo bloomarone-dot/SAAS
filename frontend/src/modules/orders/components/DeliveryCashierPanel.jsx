@@ -24,7 +24,18 @@ import {
 
 const CLOSED_STATUSES = new Set(["Payée", "Payee", "Annulée", "Annulee", "Archivée", "Archivee"]);
 const KITCHEN_SEND_STATUSES = new Set(["Nouvelle", "Acceptée", "Acceptee", "En préparation", "En preparation"]);
-const DELIVERY_PAYABLE_STATUSES = new Set(["Prête", "Prete", "Livrée", "Livree", "Nouvelle"]);
+/** Livreur revenu avec l'argent — seul moment où l'on encaisse une livraison. */
+const DELIVERY_PAYABLE_STATUSES = new Set(["Livrée", "Livree"]);
+/** Commande prête à partir (livreur en route), pas encore encaissable. */
+const DELIVERY_DEPARTED_STATUSES = new Set(["Prête", "Prete"]);
+/** Peut être marquée « parti en livraison ». */
+const DELIVERY_READY_TO_SEND_STATUSES = new Set([
+  "Nouvelle",
+  "Acceptée",
+  "Acceptee",
+  "En préparation",
+  "En preparation",
+]);
 
 const PAYMENT_OPTIONS = [
   "Paiement avant livraison",
@@ -73,7 +84,7 @@ function isPaidDelivery(order) {
   return String(order.fulfillment_type || "") === "Livraison" && ["Payée", "Payee"].includes(order.status);
 }
 
-export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cashierScopeId = null, onReportRefresh, cashierReport = null }) {
+export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cashierScopeId = null, onReportRefresh, cashierReport = null, onOpenInvoice = null }) {
   const [areas, setAreas] = useState([]);
   const [orders, setOrders] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -94,6 +105,8 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [letterFilter, setLetterFilter] = useState("ALL");
   const [kitchenBusyId, setKitchenBusyId] = useState("");
+  const [departBusyId, setDepartBusyId] = useState("");
+  const [returnBusyId, setReturnBusyId] = useState("");
   const [paymentBusyId, setPaymentBusyId] = useState("");
   const [feeDraft, setFeeDraft] = useState("");
   const [feeBusy, setFeeBusy] = useState(false);
@@ -227,12 +240,13 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
 
     try {
       const fetchedCategories = await menuApi.getCategories(restaurantId);
+      const activeCategories = fetchedCategories.filter((item) => item.is_active !== false);
       const groups = await Promise.all(
-        fetchedCategories.map((category) =>
-          menuApi.getDishesByCategory(category.id, false).catch(() => [])
+        activeCategories.map((category) =>
+          menuApi.getDishesByCategory(category.id, true).catch(() => [])
         )
       );
-      const nextCategories = fetchedCategories.filter((item) => item.is_active !== false);
+      const nextCategories = activeCategories;
       const nextDishes = groups.flat().filter((dish) => dish.is_available !== false);
       setCategories(nextCategories);
       setDishes(nextDishes);
@@ -367,8 +381,8 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
       if (restaurantId) mirrorOrderLocal(created, restaurantId).catch(() => {});
       onMessage?.(
         KITCHEN_ENABLED
-          ? `Livraison ${created.order_number} enregistrée. Envoyez-la en cuisine quand vous êtes prêt.`
-          : `Livraison ${created.order_number} enregistrée. Attendez le paiement client puis validez.`,
+          ? `Livraison ${created.order_number} enregistrée. Envoyez-la en cuisine, puis marquez « Parti en livraison ».`
+          : `Livraison ${created.order_number} enregistrée. Marquez « Parti en livraison » quand le livreur part.`,
       );
       setShowForm(false);
       resetForm();
@@ -393,6 +407,46 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
       }
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function markDeliveryDeparted(order) {
+    setDepartBusyId(order.id);
+    try {
+      const updated = await orderApi.updateStatus(order.id, "Prête");
+      if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
+      onMessage?.(`Livraison ${order.order_number} : livreur parti — en attente du retour et du paiement.`);
+      setOrders((current) =>
+        current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+      );
+    } catch (error) {
+      onMessage?.(error.message || "Impossible de marquer la livraison comme partie.");
+    } finally {
+      setDepartBusyId("");
+    }
+  }
+
+  async function markDeliveryReturned(order) {
+    setReturnBusyId(order.id);
+    try {
+      const updated = await orderApi.updateStatus(order.id, "Livrée");
+      if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
+      setOrders((current) =>
+        current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+      );
+      onReportRefresh?.();
+      if (onOpenInvoice) {
+        onOpenInvoice(updated);
+        onMessage?.(`Facture ouverte pour ${updated.order_number} — validez le paiement (${updated.payment_method}).`);
+      } else {
+        onMessage?.(
+          `Retour livreur pour ${order.order_number}. Ouvrez la facture dans « À encaisser » pour valider (${order.payment_method}).`,
+        );
+      }
+    } catch (error) {
+      onMessage?.(error.message || "Impossible d'enregistrer le retour du livreur.");
+    } finally {
+      setReturnBusyId("");
     }
   }
 
@@ -449,7 +503,13 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
   }
 
   function renderOrderCard(order, showActions = true) {
-    const canSendKitchen = showActions && KITCHEN_ENABLED && KITCHEN_SEND_STATUSES.has(order.status) && !order.is_closed;
+    const canSendKitchen = showActions && KITCHEN_ENABLED && order.status === "Nouvelle" && !order.is_closed;
+    const canMarkDeparted = showActions
+      && !CLOSED_STATUSES.has(order.status)
+      && DELIVERY_READY_TO_SEND_STATUSES.has(order.status);
+    const canMarkReturned = showActions
+      && !CLOSED_STATUSES.has(order.status)
+      && DELIVERY_DEPARTED_STATUSES.has(order.status);
     const canValidatePayment = showActions
       && !CLOSED_STATUSES.has(order.status)
       && DELIVERY_PAYABLE_STATUSES.has(order.status);
@@ -486,19 +546,44 @@ export function DeliveryCashierPanel({ restaurantId, currentUser, onMessage, cas
             {kitchenBusyId === order.id ? "Envoi…" : "Envoyer en cuisine"}
           </button>
         )}
+        {canMarkDeparted && !canSendKitchen && (
+          <button
+            type="button"
+            disabled={departBusyId === order.id}
+            onClick={() => markDeliveryDeparted(order)}
+            className="lte-btn lte-btn-default lte-btn-sm mt-3 w-full"
+          >
+            {departBusyId === order.id ? "Enregistrement…" : "Parti en livraison (prêt)"}
+          </button>
+        )}
+        {canMarkReturned && (
+          <button
+            type="button"
+            disabled={returnBusyId === order.id}
+            onClick={() => markDeliveryReturned(order)}
+            className="lte-btn lte-btn-default lte-btn-sm mt-3 w-full"
+          >
+            {returnBusyId === order.id ? "Enregistrement…" : "Retour livreur — ouvrir facture"}
+          </button>
+        )}
         {canValidatePayment && (
           <button
             type="button"
             disabled={paymentBusyId === order.id}
-            onClick={() => validateDeliveryPayment(order)}
+            onClick={() => (onOpenInvoice ? onOpenInvoice(order) : validateDeliveryPayment(order))}
             className="lte-btn lte-btn-primary lte-btn-sm mt-3 w-full"
           >
-            {paymentBusyId === order.id ? "Validation…" : "Valider le paiement client"}
+            {paymentBusyId === order.id ? "Validation…" : onOpenInvoice ? "Ouvrir la facture" : "Valider le paiement client"}
           </button>
         )}
-        {!KITCHEN_ENABLED && showActions && !CLOSED_STATUSES.has(order.status) && order.status === "Nouvelle" && (
+        {DELIVERY_DEPARTED_STATUSES.has(order.status) && showActions && (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
-            En attente — validez dès réception du paiement client ({order.payment_method}).
+            Livreur en route — validez le paiement seulement à son retour ({order.payment_method}).
+          </p>
+        )}
+        {DELIVERY_READY_TO_SEND_STATUSES.has(order.status) && showActions && !canSendKitchen && (
+          <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-[11px] font-semibold text-sky-800">
+            Commande enregistrée — marquez « Parti en livraison » quand le livreur part avec les plats.
           </p>
         )}
       </article>

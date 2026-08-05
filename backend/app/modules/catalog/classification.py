@@ -44,13 +44,44 @@ BEVERAGE_KEYWORDS = {
 }
 
 
+MEAL_CATEGORY_KEYWORDS = {
+    "plat",
+    "plats",
+    "repas",
+    "food",
+    "entree",
+    "entrees",
+    "dessert",
+    "desserts",
+    "burger",
+    "burgers",
+    "pizza",
+    "pizzas",
+    "grill",
+    "grillade",
+    "grillades",
+    "accompagnement",
+    "accompagnements",
+    "specialite",
+    "specialites",
+}
+
+
 def normalize_text(value: str | None) -> str:
     normalized = unicodedata.normalize("NFKD", value or "")
     return "".join(char for char in normalized if not unicodedata.combining(char)).lower()
 
 
 def classify_sale_channel(*values: str | None) -> str:
-    text = " ".join(normalize_text(value) for value in values)
+    parts = [normalize_text(value) for value in values if value]
+    category_text = " ".join(parts[2:4]) if len(parts) > 2 else ""
+    category_tokens = set(re.findall(r"[a-z0-9]+", category_text))
+    if category_tokens.intersection(MEAL_CATEGORY_KEYWORDS):
+        return "REPAS"
+    if category_tokens.intersection(BEVERAGE_KEYWORDS):
+        return "BOISSON"
+
+    text = " ".join(parts)
     tokens = set(re.findall(r"[a-z0-9]+", text))
     return "BOISSON" if tokens.intersection(BEVERAGE_KEYWORDS) else "REPAS"
 

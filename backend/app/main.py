@@ -156,6 +156,7 @@ def create_tables() -> None:
     ensure_table_columns()
     ensure_menu_category_columns()
     ensure_menu_item_columns()
+    reclassify_menu_sale_channels()
     ensure_order_columns()
     ensure_stock_columns()
     ensure_finance_columns()
@@ -248,6 +249,46 @@ def ensure_menu_item_columns() -> None:
     with engine.begin() as connection:
         for name, definition in missing:
             connection.execute(text(f"ALTER TABLE menu_items ADD COLUMN {name} {definition}"))
+
+
+def reclassify_menu_sale_channels() -> None:
+    """Corrige les plats mal classés boisson/repas (ex. catégorie Plats avec sale_channel BOISSON)."""
+    from app.database import SessionLocal
+    from app.modules.catalog.classification import classify_sale_channel, requires_kitchen_preparation
+    from app.modules.catalog.models import MenuCategory, MenuItem
+
+    inspector = inspect(engine)
+    if "menu_items" not in inspector.get_table_names():
+        return
+
+    db = SessionLocal()
+    try:
+        categories = {category.id: category for category in db.query(MenuCategory).all()}
+        changed = False
+        for item in db.query(MenuItem).all():
+            category = categories.get(item.category_id)
+            channel = classify_sale_channel(
+                item.name,
+                item.description,
+                category.name if category else None,
+                category.description if category else None,
+            )
+            if channel == item.sale_channel:
+                continue
+            item.sale_channel = channel
+            item.requires_kitchen = requires_kitchen_preparation(
+                item.name,
+                item.description,
+                category.name if category else None,
+                category.description if category else None,
+                sale_channel=channel,
+                explicit=item.requires_kitchen,
+            )
+            changed = True
+        if changed:
+            db.commit()
+    finally:
+        db.close()
 
 
 def ensure_restaurant_settings_columns() -> None:

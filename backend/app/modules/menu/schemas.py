@@ -105,6 +105,7 @@ class DishResponse(DishBase, OrmModel):
     restaurant_id: str
     category_id: Optional[str] = None
     cost_per_dish: float = 0
+    sale_channel: str = "REPAS"
     requires_kitchen: Optional[bool] = None
     created_at: datetime
 

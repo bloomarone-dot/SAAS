@@ -120,20 +120,23 @@ class MenuService:
                 value = round(float(value))
             setattr(dish, key, value)
         category = tenant_find(db, CategoryModel, dish.category_id, restaurant_id)
+        previous_channel = dish.sale_channel
         dish.sale_channel = classify_sale_channel(
             dish.name,
             dish.description,
             category.name if category else None,
             category.description if category else None,
         )
-        if "requires_kitchen" not in update_data:
+        explicit_kitchen = update_data.get("requires_kitchen") if "requires_kitchen" in update_data else None
+        if explicit_kitchen is not None:
+            dish.requires_kitchen = bool(explicit_kitchen)
+        elif dish.sale_channel != previous_channel or dish.requires_kitchen is None:
             dish.requires_kitchen = requires_kitchen_preparation(
                 dish.name,
                 dish.description,
                 category.name if category else None,
                 category.description if category else None,
                 sale_channel=dish.sale_channel,
-                explicit=dish.requires_kitchen,
             )
         db.commit()
         db.refresh(dish)

@@ -22,13 +22,13 @@ let warmupInFlight = null;
 
 async function warmMenu(restaurantId) {
   const fetchedCategories = await menuApi.getCategories(restaurantId);
+  const activeCategories = fetchedCategories.filter((item) => item.is_active !== false);
   const groups = await Promise.all(
-    fetchedCategories.map((category) => menuApi.getDishesByCategory(category.id, false).catch(() => [])),
+    activeCategories.map((category) => menuApi.getDishesByCategory(category.id, true).catch(() => [])),
   );
-  const categories = fetchedCategories.filter((item) => item.is_active !== false);
   const dishes = groups.flat().filter((dish) => dish.is_available !== false);
-  cacheMenuCatalog(restaurantId, categories, dishes);
-  return { categories: categories.length, dishes: dishes.length };
+  cacheMenuCatalog(restaurantId, activeCategories, dishes);
+  return { categories: activeCategories.length, dishes: dishes.length };
 }
 
 async function warmTables(restaurantId) {

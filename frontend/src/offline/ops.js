@@ -33,14 +33,16 @@ function nowIso() {
 
 function dishNeedsKitchen(dish) {
   if (!dish) return true;
-  if (dish.requires_kitchen === true) return true;
-  if (dish.requires_kitchen === false) return false;
   const channel = String(dish.sale_channel || "").toUpperCase();
-  if (channel === "EMBALLAGE") return false;
+  if (channel === "REPAS") return dish.requires_kitchen !== false;
   if (channel === "BOISSON") {
+    if (dish.requires_kitchen === true) return true;
+    if (dish.requires_kitchen === false) return false;
     const name = `${dish.name || ""} ${dish.description || ""}`.toLowerCase();
     return /jus\s+naturel|jus\s+frais|citronnade|smoothie/.test(name);
   }
+  if (dish.requires_kitchen === true) return true;
+  if (dish.requires_kitchen === false) return false;
   return true;
 }
 
@@ -236,9 +238,9 @@ export async function createLocalCashierDelivery({
     payment_method: payload.payment_method,
     notes: payload.notes || null,
     fulfillment_type: "Livraison",
-    status: KITCHEN_ENABLED ? "Nouvelle" : "Prête",
+    status: "Nouvelle",
     created_by_cashier_id: currentUser?.id || null,
-    cashier_id: currentUser?.id || null,
+    cashier_id: null,
     items: cartLines.map((line) => ({
       menu_item_id: line.menu_item_id,
       name: line.name,
@@ -272,6 +274,10 @@ export async function createLocalCashierDelivery({
 }
 
 export async function validateLocalDeliveryPayment(order, paymentMethod, currentUser) {
+  const status = normalizeCashierStatus(order?.status);
+  if (status !== "Livrée") {
+    throw new Error("Marquez d'abord « Retour livreur » avant de valider le paiement.");
+  }
   await initOfflineFoundation();
   const createdAt = nowIso();
   const nextOrder = {
@@ -388,7 +394,7 @@ export async function sendLocalOrderToKitchen(order, restaurantId, dishesById = 
   if (!KITCHEN_ENABLED) {
     const kitchenItems = items.filter((item) => {
       const dish = dishesById[item.menu_item_id];
-      if (dish) return dish.requires_kitchen !== false && String(dish.sale_channel || "").toUpperCase() !== "BOISSON";
+      if (dish) return dishNeedsKitchen(dish);
       return item.requires_kitchen !== false && item.sale_channel !== "BOISSON";
     });
     const drinksOnly = items.length > 0 && kitchenItems.length === 0;
@@ -672,6 +678,20 @@ export async function removeLocalTicket(ticketId) {
 }
 
 const CASHIER_PENDING_STATUSES = new Set(["Prête", "Prete", "Livrée", "Livree", "PENDING_PAYMENT"]);
+
+function isLocalOrderPayable(order) {
+  const status = normalizeCashierStatus(order?.status);
+  if (CASHIER_PAID_STATUSES.has(status) || order?._paid_offline || order?.payment_status === "SUCCESS") {
+    return false;
+  }
+  if (String(order?.fulfillment_type || "") === "Livraison") {
+    return status === "Livrée";
+  }
+  if (CASHIER_PENDING_STATUSES.has(status) || status === "Servie") {
+    return true;
+  }
+  return Boolean(order?.is_closed);
+}
 const CASHIER_PAID_STATUSES = new Set(["Payée", "Payee"]);
 const OFFLINE_CASH_METHODS = new Set(["Espèces", "Carte", "Orange Money", "MTN Mobile Money"]);
 
@@ -812,10 +832,14 @@ export async function loadCashierReportMerged(restaurantId, remoteReport = null,
       receiptsById.set(id, { ...receiptsById.get(id), ...order, status: "Payée" });
       continue;
     }
-    if (CASHIER_PENDING_STATUSES.has(status)) {
+    if (isLocalOrderPayable(order)) {
       if (!receiptsById.has(id)) {
         pendingById.set(id, { ...pendingById.get(id), ...order, status });
       }
+    } else if (String(order.fulfillment_type || "") === "Livraison" && status === "Prête") {
+      pendingById.delete(id);
+    } else if (!order.is_closed) {
+      pendingById.delete(id);
     }
   }
 
@@ -884,7 +908,10 @@ export async function payLocalCashOrder(order, {
   if (CASHIER_PAID_STATUSES.has(status) || order._paid_offline || order.payment_status === "SUCCESS") {
     throw new Error("Cette commande est déjà encaissée localement.");
   }
-  if (!CASHIER_PENDING_STATUSES.has(status) && status !== "Servie") {
+  if (!isLocalOrderPayable(order)) {
+    if (String(order.fulfillment_type || "") === "Livraison") {
+      throw new Error("Livraison : marquez d'abord « Parti en livraison », puis « Retour livreur » avant d'encaisser.");
+    }
     throw new Error("Seules les commandes prêtes ou servies peuvent être encaissées hors ligne.");
   }
 

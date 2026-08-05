@@ -77,17 +77,19 @@ function canPayOrder(order) {
 }
 
 /** Commande 100 % boissons bar (pas de passage cuisine). */
+function dishSaleChannel(dish, item) {
+  const channel = String(item?.sale_channel || dish?.sale_channel || "").toUpperCase();
+  if (channel === "REPAS" || channel === "BOISSON") return channel;
+  if (dish?.requires_kitchen === true) return "REPAS";
+  if (dish?.requires_kitchen === false) return "BOISSON";
+  return "REPAS";
+}
+
 function isDrinksOnlyOrder(order, dishes = []) {
-  const dishesById = Object.fromEntries((dishes || []).map((dish) => [dish.id, dish]));
   const items = (order?.items || []).filter((item) => String(item.sale_channel || "").toUpperCase() !== "EMBALLAGE");
   if (!items.length) return false;
-  return items.every((item) => {
-    const dish = dishesById[item.menu_item_id];
-    if (dish?.requires_kitchen === true) return false;
-    if (dish?.requires_kitchen === false) return true;
-    const channel = String(item.sale_channel || dish?.sale_channel || "").toUpperCase();
-    return channel === "BOISSON";
-  });
+  const dishesById = Object.fromEntries((dishes || []).map((dish) => [dish.id, dish]));
+  return items.every((item) => dishSaleChannel(dishesById[item.menu_item_id], item) === "BOISSON");
 }
 
 const STEPS = KITCHEN_ENABLED
@@ -245,16 +247,20 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
     try {
       const fetchedCategories = await menuApi.getCategories(restaurantId);
+      const activeCategories = fetchedCategories.filter((item) => item.is_active !== false);
       const groups = await Promise.all(
-        fetchedCategories.map((category) =>
-          menuApi.getDishesByCategory(category.id, false).catch(() => [])
+        activeCategories.map((category) =>
+          menuApi.getDishesByCategory(category.id, true).catch(() => [])
         )
       );
-      const nextCategories = fetchedCategories.filter((item) => item.is_active !== false);
+      const nextCategories = activeCategories;
       const nextDishes = groups.flat().filter((dish) => dish.is_available !== false);
       setCategories(nextCategories);
       setDishes(nextDishes);
       cacheMenuCatalog(restaurantId, nextCategories, nextDishes);
+      if (nextCategories.length && !nextDishes.length) {
+        setMessage("Aucun plat disponible. Vérifiez dans Catalogue que vos catégories repas sont actives et vos plats marqués disponibles.");
+      }
     } catch {
       const ok = await applyCached("Menu chargé depuis la mémoire locale (hors ligne).");
       if (!ok) setError("Impossible de charger le menu. Connectez-vous une fois pour le mémoriser.");
@@ -661,8 +667,11 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       );
       setOrder(result.order);
       if (currentUser?.id) saveOrderSnapshot(currentUser.id, result.order);
-      setMenuMode(false);
-      if (isDrinksOnlyOrder(result.order, dishes) || result.order?.status === "Prête") {
+      const drinksOnlyOrder = isDrinksOnlyOrder(result.order, dishes);
+      if (KITCHEN_ENABLED || drinksOnlyOrder) {
+        setMenuMode(false);
+      }
+      if (drinksOnlyOrder || result.order?.status === "Prête") {
         setMessage("Boissons confirmées — demandez le paiement à la caisse maintenant.");
         setPaymentOrder(result.order);
         return;
@@ -690,8 +699,11 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       const updated = await orderApi.sendToKitchen(session.orderId);
       setOrder(updated);
       if (restaurantId) mirrorOrderLocal(updated, restaurantId).catch(() => {});
-      setMenuMode(false);
-      if (isDrinksOnlyOrder(updated, dishes) || (updated?.status === "Prête" && updated?.is_closed)) {
+      const drinksOnlyOrder = isDrinksOnlyOrder(updated, dishes);
+      if (KITCHEN_ENABLED || drinksOnlyOrder) {
+        setMenuMode(false);
+      }
+      if (drinksOnlyOrder || updated?.status === "Prête") {
         setMessage("Boissons confirmées — paiement immédiat demandé à la caisse.");
         setPaymentOrder(updated);
       } else {
