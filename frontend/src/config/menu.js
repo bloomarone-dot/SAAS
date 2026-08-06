@@ -334,6 +334,61 @@ export const APP_MENUS = {
   ],
 };
 
+const PERMISSION_EXTRA_MENUS = [
+  {
+    permission: PERMISSIONS.SERVICE_READ,
+    primaryRole: ROLES.SERVEUR,
+    items: [{ key: "service-dashboard", label: "Service en salle", icon: "Utensils" }],
+  },
+  {
+    permission: PERMISSIONS.KITCHEN_READ,
+    primaryRole: ROLES.CUISINE,
+    items: [{ key: "kitchen-dashboard", label: "Production cuisine", icon: "ChefHat" }],
+  },
+  {
+    permission: PERMISSIONS.CASHIER_READ,
+    primaryRole: ROLES.CAISSE,
+    items: APP_MENUS.CAISSE.filter((item) => item.key !== "dashboard"),
+  },
+  {
+    permission: PERMISSIONS.ACCOUNTING_READ,
+    primaryRole: ROLES.COMPTABLE,
+    items: [{ key: "comptabilite", label: "Comptabilité", icon: "Calculator", defaultView: "comptabilite" }],
+  },
+  {
+    permission: PERMISSIONS.STOCK_READ,
+    primaryRole: ROLES.STOCK,
+    items: [
+      { key: "stocks", label: "Stocks", icon: "Box", defaultView: "stocks" },
+      { key: "products", label: "Produits stock", icon: "Box" },
+      { key: "entries", label: "Entrées stock", icon: "Truck" },
+      { key: "alerts", label: "Alertes stock", icon: "AlertTriangle" },
+    ],
+  },
+];
+
+export function getAppMenuForUser(user) {
+  if (!user?.role) return [];
+  const baseMenu = [...(APP_MENUS[user.role] ?? APP_MENUS.MANAGER)];
+  const userPermissions = new Set(user.permissions ?? []);
+  const knownKeys = new Set(
+    baseMenu.flatMap((item) => [item.key, ...(item.children?.map((child) => child.key) ?? [])]),
+  );
+  const extras = [];
+
+  for (const group of PERMISSION_EXTRA_MENUS) {
+    if (user.role === group.primaryRole) continue;
+    if (!userPermissions.has(group.permission)) continue;
+    for (const item of group.items) {
+      if (knownKeys.has(item.key)) continue;
+      extras.push(item);
+      knownKeys.add(item.key);
+    }
+  }
+
+  return [...baseMenu, ...extras];
+}
+
 export const ROLE_DASHBOARDS = {
   SUPERADMIN: {
     title: "Tableau de bord Superadmin",

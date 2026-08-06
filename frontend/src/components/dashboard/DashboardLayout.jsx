@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { APP_MENUS } from "@/config/menu";
+import { getAppMenuForUser } from "@/config/menu";
 import { apiFetch, getToken, setToken } from "@/config/http";
 import { InstallAppButton } from "@/components/InstallAppButton";
 import { useFullscreen } from "@/hooks/useFullscreen";
@@ -24,7 +24,7 @@ export function DashboardLayout({
   const [notifications, setNotifications] = useState([]);
   const [openMenuKeys, setOpenMenuKeys] = useState({});
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-  const menus = APP_MENUS[role] ?? APP_MENUS.MANAGER;
+  const menus = getAppMenuForUser(user ?? { role });
   const roleMeta = getRoleMeta(role);
   const hideSidebar = role === "SERVEUR" || role === "CUISINE" || role === "COMPTABLE";
   const isSuperadmin = role === "SUPERADMIN";

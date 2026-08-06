@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 const POSPage = lazy(() => import('./modules/menu/pages/POSPage'));
 const KitchenPage = lazy(() => import('./modules/menu/pages/KitchenPage'));
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { hasModuleAccess } from "@/utils/access";
 import { RoleDashboard } from "@/components/dashboard/RoleDashboard";
 import { RoleWorkspacePage, roleWorkspaceSupports } from "@/components/dashboard/RoleWorkspacePage";
 import { ViewErrorBoundary } from "@/components/ViewErrorBoundary";
@@ -744,8 +745,25 @@ export default function App() {
         return <RoleDashboard role="SERVEUR" overrides={{ ...overrides, __currentUser: session }} onNavigate={navigateFromDashboard} />;
       }
 
+      if (activeView === "service-dashboard" && hasModuleAccess(session, "SERVEUR") && session.role !== "SERVEUR") {
+        return <RoleDashboard role="SERVEUR" overrides={{ ...overrides, __currentUser: session }} onNavigate={navigateFromDashboard} />;
+      }
+
       if (session.role === "CUISINE" && activeView === "dashboard") {
         return <RoleDashboard role="CUISINE" overrides={{ ...overrides, __currentUser: session }} onNavigate={navigateFromDashboard} />;
+      }
+
+      if (activeView === "kitchen-dashboard" && hasModuleAccess(session, "CUISINE") && session.role !== "CUISINE") {
+        return <RoleDashboard role="CUISINE" overrides={{ ...overrides, __currentUser: session }} onNavigate={navigateFromDashboard} />;
+      }
+
+      if (activeView === "cashier-dashboard" && hasModuleAccess(session, "CAISSE") && session.role !== "CAISSE") {
+        return (
+          <RoleDashboard
+            role="CAISSE"
+            overrides={{ ...overrides, __activeView: "dashboard", __currentUser: session }}
+          />
+        );
       }
 
       // Comptabilité (partie double) : le rôle COMPTABLE utilise le nouveau module dédié.
@@ -797,7 +815,7 @@ export default function App() {
         (view) => view !== "discounts" && !accountingOwnedViews.has(view),
       );
 
-      if (caisseOperatorViews.includes(activeView) && session.role === "CAISSE") {
+      if (caisseOperatorViews.includes(activeView) && hasModuleAccess(session, "CAISSE")) {
         return (
           <RoleDashboard
             role="CAISSE"
@@ -833,7 +851,7 @@ export default function App() {
           />
         );
       }
-      if (activeView === "comptabilite" && session.role === "STOCK") {
+      if (activeView === "comptabilite" && hasModuleAccess(session, "COMPTABLE")) {
         return (
           <AccountingOperations
             apiBaseUrl={apiBaseUrl}
@@ -845,7 +863,7 @@ export default function App() {
         );
       }
       const stockAccountingViews = ["accounts", "journals", "accounting-entries", "accounting-expenses", "expense-analytics", "accounting-revenues", "accounting-payments", "cash", "statements", "encaissements", "food-cost", "echeancier", "rapprochement"];
-      if (stockAccountingViews.includes(activeView) && session.role === "STOCK") {
+      if (stockAccountingViews.includes(activeView) && hasModuleAccess(session, "COMPTABLE")) {
         return (
           <AccountingOperations
             apiBaseUrl={apiBaseUrl}
@@ -878,15 +896,15 @@ export default function App() {
         return <BranchesAdmin apiBaseUrl={apiBaseUrl} onMessage={setMessage} showCreateOnMount={false} />;
       }
 
-      if (activeView === "open-table" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+      if (activeView === "open-table" && hasModuleAccess(session, "SERVEUR")) {
         return <ServerOpenTables restaurantId={session.restaurant_id} />;
       }
 
-      if (activeView === "free-table" && ["ADMIN", "MANAGER", "SERVEUR"].includes(session.role)) {
+      if (activeView === "free-table" && hasModuleAccess(session, "SERVEUR")) {
         return <ServerFreeTables restaurantId={session.restaurant_id} />;
       }
 
-      if (["orders", "new-table-order", "add-order-items", "send-kitchen", "ready-notifications", "served-orders", "request-bill", "request-payment"].includes(activeView) && session.role === "SERVEUR") {
+      if (["orders", "new-table-order", "add-order-items", "send-kitchen", "ready-notifications", "served-orders", "request-bill", "request-payment"].includes(activeView) && hasModuleAccess(session, "SERVEUR")) {
         return <ServerOrderWorkspace restaurantId={session.restaurant_id} role={session.role} view={activeView} />;
       }
 
@@ -894,19 +912,19 @@ export default function App() {
         return <POSPage restaurantId={session.restaurant_id} role={session.role} currentUser={session} />;
       }
 
-      if (activeView === "clients" && session.role === "SERVEUR") {
+      if (activeView === "clients" && hasModuleAccess(session, "SERVEUR")) {
         return <ServerClients />;
       }
 
-      if (activeView === "invoices" && session.role === "SERVEUR") {
+      if (activeView === "invoices" && hasModuleAccess(session, "SERVEUR")) {
         return <ServerInvoices />;
       }
 
-      if (activeView === "history" && session.role === "SERVEUR") {
+      if (activeView === "history" && hasModuleAccess(session, "SERVEUR")) {
         return <ServerHistory />;
       }
 
-      if (["orders", "preparation", "ready", "kitchen-detail", "notes", "start-preparation", "dish-ready", "order-ready", "urgent", "preparation-history"].includes(activeView) && session.role === "CUISINE") {
+      if (["orders", "preparation", "ready", "kitchen-detail", "notes", "start-preparation", "dish-ready", "order-ready", "urgent", "preparation-history"].includes(activeView) && hasModuleAccess(session, "CUISINE")) {
         const filter = ["ready", "dish-ready", "order-ready"].includes(activeView)
           ? "ready"
           : ["preparation", "start-preparation", "preparation-history"].includes(activeView)
@@ -976,15 +994,15 @@ export default function App() {
         return <MenuCatalogAdmin restaurantId={session.restaurant_id} role={session.role} onMessage={setMessage} />;
       }
 
-      if (["stocks", "stock"].includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
+      if (["stocks", "stock"].includes(activeView) && hasModuleAccess(session, "STOCK")) {
         return <StockDashboard variant="stock" overrides={overrides} onNavigate={navigateFromDashboard} />;
       }
 
-      if (activeView === "damages" && session.role === "CUISINE") {
+      if (activeView === "damages" && hasModuleAccess(session, "CUISINE")) {
         return <StockOperations apiBaseUrl={apiBaseUrl} role={session.role} mode="inventory" onMessage={setMessage} />;
       }
 
-      if (stockViews.includes(activeView) && ["ADMIN", "MANAGER", "STOCK", "COMPTABLE"].includes(session.role)) {
+      if (stockViews.includes(activeView) && hasModuleAccess(session, "STOCK")) {
         const stockModeMap = {
           "stock-in": "movements",
           "stock-out": "movements",
