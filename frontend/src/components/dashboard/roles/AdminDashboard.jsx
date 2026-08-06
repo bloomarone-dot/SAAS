@@ -5,7 +5,9 @@ import { apiFetch } from "@/config/http";
 import { DashboardSection, FilterBar, PageContainer, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
 import { DailyReportModal } from "@/modules/admin/components/DailyReportModal";
 import { InsightsCarousel } from "@/modules/admin/components/InsightsCarousel";
+import { RestaurantLogoUploader } from "@/modules/admin/components/RestaurantLogoUploader";
 import { getTimeGreeting } from "@/utils/greeting";
+import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
 
 function money(value) {
@@ -64,6 +66,8 @@ function periodBounds(period, custom) {
 export function AdminDashboard({ overrides = {} }) {
   const apiBaseUrl = overrides.__apiBaseUrl;
   const currentUser = overrides.__currentUser;
+  const theme = overrides.theme;
+  const onThemeChange = overrides.__onThemeChange;
   const greetingTitle = `${getTimeGreeting()}${currentUser?.first_name ? `, ${currentUser.first_name}` : ""}`;
   const dateLabel = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
 
@@ -174,6 +178,15 @@ export function AdminDashboard({ overrides = {} }) {
             </SecondaryAction>
           </>
         }
+      />
+
+      <RestaurantLogoUploader
+        currentUser={currentUser}
+        logoUrl={theme?.logoUrl}
+        restaurantName={theme?.name}
+        restaurantSlug={theme?.slug}
+        primaryColor={theme?.primary}
+        onUpdated={(restaurant) => onThemeChange?.(buildRestaurantTheme(restaurant))}
       />
 
       <FilterBar

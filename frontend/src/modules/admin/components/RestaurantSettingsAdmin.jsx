@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { PageHeader } from "@/modules/admin/components/AdminUi";
+import { RestaurantLogoUploader } from "@/modules/admin/components/RestaurantLogoUploader";
 import { apiFetch } from "@/config/http";
 import { getLanApiBaseUrl, invalidateApiProbe, setLanApiBaseUrl } from "@/config/api";
 import { cacheDeliveryAreas } from "@/utils/offlineCache";
@@ -253,29 +254,11 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
     }
   }
 
-  async function uploadLogo(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsLoading(true);
-    try {
-      const body = new FormData();
-      body.append("file", file);
-      const data = await apiFetch("/api/v1/restaurants/me/logo", {
-        method: "POST",
-        body,
-        fallback: "Import du logo impossible.",
-      });
-      setRestaurant(data);
-      setForm((current) => ({ ...current, logo_url: data.logo_url ?? "" }));
-      onThemeChange?.(buildRestaurantTheme(data));
-      onMessage("Logo du restaurant importé.");
-    } catch (error) {
-      onMessage(error.message);
-    } finally {
-      event.target.value = "";
-      setIsLoading(false);
-    }
+  function handleLogoUpdated(data) {
+    setRestaurant(data);
+    setForm((current) => ({ ...current, logo_url: data.logo_url ?? "" }));
+    onThemeChange?.(buildRestaurantTheme(data));
+    onMessage("Logo du restaurant importé.");
   }
 
   return (
@@ -457,12 +440,20 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
             </SettingsGroup>
 
             <SettingsGroup title="Marque">
+              <div className="mb-4">
+                <RestaurantLogoUploader
+                  currentUser={currentUser}
+                  logoUrl={form.logo_url}
+                  restaurantName={form.name}
+                  restaurantSlug={restaurant?.slug}
+                  primaryColor={form.primary_color}
+                  variant="inline"
+                  onUpdated={handleLogoUpdated}
+                />
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field name="logo_url" label="URL du logo" value={form.logo_url} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="logo_url" label="URL du logo (optionnel)" value={form.logo_url} onChange={updateField} disabled={fieldsDisabled} placeholder="Rempli automatiquement après import" />
                 <Field name="cover_image_url" label="Image de couverture" value={form.cover_image_url} onChange={updateField} placeholder="URL de l'image principale" disabled={fieldsDisabled} />
-                <div className="sm:col-span-2">
-                  <LogoUpload onChange={uploadLogo} disabled={fieldsDisabled} />
-                </div>
                 <ColorField name="primary_color" label="Couleur principale" value={form.primary_color} onChange={updateField} disabled={fieldsDisabled} />
                 <ColorField name="secondary_color" label="Couleur secondaire" value={form.secondary_color} onChange={updateField} disabled={fieldsDisabled} />
                 <ColorField name="accent_color" label="Couleur accent" value={form.accent_color} onChange={updateField} disabled={fieldsDisabled} />
@@ -593,23 +584,6 @@ function ColorField({ label, name, value, onChange, disabled }) {
           onChange={onChange}
           disabled={disabled}
           className="min-w-0 flex-1 px-3 text-sm font-semibold outline-none disabled:bg-slate-50 disabled:text-slate-400"
-        />
-      </div>
-    </label>
-  );
-}
-
-function LogoUpload({ onChange, disabled }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-black text-[#070528]">Importer le logo</span>
-      <div className="mt-2 flex h-11 items-center border border-slate-200 bg-white px-3">
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/svg+xml"
-          onChange={onChange}
-          disabled={disabled}
-          className="w-full text-sm font-semibold text-slate-600 file:mr-3 file:border-0 file:bg-[#fff4ed] file:px-3 file:py-1.5 file:text-xs file:font-black file:text-[#f04438] disabled:text-slate-400"
         />
       </div>
     </label>

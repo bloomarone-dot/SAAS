@@ -663,8 +663,9 @@ export default function App() {
             __apiBaseUrl: apiBaseUrl,
             __currentUser: session,
             theme: restaurantTheme,
+            __onThemeChange: setRestaurantTheme,
           }
-      : { __apiBaseUrl: apiBaseUrl, __currentUser: session, theme: restaurantTheme };
+      : { __apiBaseUrl: apiBaseUrl, __currentUser: session, theme: restaurantTheme, __onThemeChange: setRestaurantTheme };
 
   return (
     <DashboardLayout
