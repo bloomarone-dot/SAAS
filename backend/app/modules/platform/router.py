@@ -2,6 +2,7 @@ from datetime import date, datetime
 from app.modules.shared.models import utcnow
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -28,6 +29,7 @@ from app.modules.platform.schemas import (
 )
 from app.modules.restaurants.models import Restaurant
 from app.modules.restaurants.router import generate_slug
+from app.modules.restaurants.tenant_resolution import BASE_DOMAIN, RESERVED_SUBDOMAINS, normalize_subdomain
 from app.modules.users.models import User
 from app.rate_limits import auth_rate_limit
 from app.security import generate_temporary_password, hash_password
@@ -75,6 +77,25 @@ def _unique_username(db: Session, seed: str) -> str:
         counter += 1
         username = f"{base}{counter}"
     return username
+
+
+def _unique_subdomain(db: Session, slug: str) -> str:
+    subdomain = normalize_subdomain(slug)
+    if subdomain in RESERVED_SUBDOMAINS:
+        subdomain = f"{subdomain}1"
+    original_subdomain = subdomain
+    counter = 1
+    while db.query(Restaurant).filter(func.lower(Restaurant.subdomain) == subdomain).one_or_none():
+        counter += 1
+        subdomain = f"{original_subdomain}{counter}"
+    return subdomain
+
+
+def _tenant_public_url(subdomain: str, path: str = "/") -> str:
+    import os
+
+    scheme = os.getenv("TENANT_PUBLIC_SCHEME", "https").strip().rstrip(":/") or "https"
+    return f"{scheme}://{subdomain}.{BASE_DOMAIN}{path}"
 
 
 # --- Demandes d'instance (landing publique + gestion superadmin) ---
@@ -150,6 +171,7 @@ def approve_instance_request(request_id: str, current_user: User = Depends(requi
         raise HTTPException(status_code=409, detail="Un utilisateur avec cet email existe déjà : créez le restaurant manuellement")
 
     slug = _unique_slug(db, request.restaurant_name)
+    subdomain = _unique_subdomain(db, slug)
     username = _unique_username(db, email.split("@")[0] if email else request.restaurant_name)
     temp_password = generate_temporary_password()
     name_parts = request.owner_name.split()
@@ -159,6 +181,7 @@ def approve_instance_request(request_id: str, current_user: User = Depends(requi
     restaurant = Restaurant(
         name=request.restaurant_name,
         slug=slug,
+        subdomain=subdomain,
         phone=request.owner_phone,
         email=email,
         city=request.city,
@@ -205,13 +228,12 @@ def approve_instance_request(request_id: str, current_user: User = Depends(requi
     )
     db.commit()
 
-    base = _public_base_url()
     return InstanceRequestApproveOut(
         request_id=request.id,
         restaurant_id=restaurant.id,
         restaurant_slug=slug,
-        landing_url=f"{base}/restaurant/{slug}",
-        login_url=f"{base}/restaurant/{slug}/login",
+        landing_url=_tenant_public_url(subdomain),
+        login_url=_tenant_public_url(subdomain, "/login"),
         admin_username=username,
         admin_temporary_password=temp_password,
         message="Instance créée. Communiquez ces identifiants à l'administrateur du restaurant.",

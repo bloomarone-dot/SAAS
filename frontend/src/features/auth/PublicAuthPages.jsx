@@ -1066,7 +1066,7 @@ function RestaurantNotFoundPage() {
       title="Restaurant introuvable"
       text={
         slugHint
-          ? `Aucun restaurant actif ne correspond à « ${slugHint} ». Vérifiez le sous-domaine dans l'admin (slug / sous-domaine) ou essayez : /restaurant/${slugHint}/login`
+          ? `Aucun restaurant actif ne correspond à « ${slugHint} ». Vérifiez le sous-domaine dans l'admin (slug / sous-domaine), l'enregistrement DNS (${slugHint}.bloomarone.com → IP du VPS ou wildcard *.bloomarone.com), ou essayez : /restaurant/${slugHint}/login`
           : "Aucun restaurant actif ne correspond à cette adresse. En local, utilisez http://VOTRE-SLUG.localhost:5173 ou http://localhost:5173/restaurant/VOTRE-SLUG/login"
       }
     />
