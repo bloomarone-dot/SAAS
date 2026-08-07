@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DashboardIcon } from "../icons";
 import { apiFetch } from "@/config/http";
-import { DashboardSection, FilterBar, PageContainer, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
+import { DashboardSection, ErrorState, FilterBar, PageContainer, SecondaryAction, StatCard } from "@/modules/admin/components/AdminUi";
 import { DailyReportModal } from "@/modules/admin/components/DailyReportModal";
 import { InsightsCarousel } from "@/modules/admin/components/InsightsCarousel";
 import { RestaurantLogoUploader } from "@/modules/admin/components/RestaurantLogoUploader";
@@ -64,7 +64,6 @@ function periodBounds(period, custom) {
 }
 
 export function AdminDashboard({ overrides = {} }) {
-  const apiBaseUrl = overrides.__apiBaseUrl;
   const currentUser = overrides.__currentUser;
   const theme = overrides.theme;
   const onThemeChange = overrides.__onThemeChange;
@@ -82,10 +81,12 @@ export function AdminDashboard({ overrides = {} }) {
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [insightTimeLabel, setInsightTimeLabel] = useState("");
   const [recentActivities, setRecentActivities] = useState([]);
+  const [loadError, setLoadError] = useState("");
+  const [insightsError, setInsightsError] = useState("");
 
   const load = useCallback(async () => {
-    if (!apiBaseUrl) return;
     setIsLoading(true);
+    setLoadError("");
     try {
       const [start, end] = periodBounds(period, {});
       const query = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString() });
@@ -94,16 +95,17 @@ export function AdminDashboard({ overrides = {} }) {
       setData(await apiFetch(`/api/v1/dashboard/analytics?${query}`, {
         fallback: "Impossible de charger les analyses du tableau de bord.",
       }));
-    } catch {
-      // le dashboard ne doit pas casser sur une erreur réseau
+    } catch (error) {
+      setData(null);
+      setLoadError(error.message || "Impossible de charger les analyses du tableau de bord.");
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrl, period, category, branchId]);
+  }, [period, category, branchId]);
 
   const loadInsights = useCallback(async ({ silent = false } = {}) => {
-    if (!apiBaseUrl) return;
     if (!silent) setInsightsLoading(true);
+    if (!silent) setInsightsError("");
     try {
       const query = new URLSearchParams();
       if (branchId) query.set("branch_id", branchId);
@@ -119,16 +121,17 @@ export function AdminDashboard({ overrides = {} }) {
       setInsightCards(Array.isArray(payload?.cards) ? payload.cards : []);
       setInsightTimeLabel(payload?.time_label || "");
       setRecentActivities(Array.isArray(summary?.recent_activities) ? summary.recent_activities : []);
-    } catch {
+    } catch (error) {
       if (!silent) {
         setInsightCards([]);
         setInsightTimeLabel("");
         setRecentActivities([]);
+        setInsightsError(error.message || "Impossible de charger les comparaisons du tableau de bord.");
       }
     } finally {
       if (!silent) setInsightsLoading(false);
     }
-  }, [apiBaseUrl, branchId]);
+  }, [branchId]);
 
   useEffect(() => {
     load();
@@ -188,6 +191,25 @@ export function AdminDashboard({ overrides = {} }) {
         primaryColor={theme?.primary}
         onUpdated={(restaurant) => onThemeChange?.(buildRestaurantTheme(restaurant))}
       />
+
+      {(loadError || insightsError) && (
+        <ErrorState
+          title="Indicateurs indisponibles"
+          text={loadError || insightsError}
+          action={
+            <button
+              type="button"
+              onClick={() => {
+                load();
+                loadInsights({ silent: false });
+              }}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-black text-white"
+            >
+              Réessayer
+            </button>
+          }
+        />
+      )}
 
       <FilterBar
         right={

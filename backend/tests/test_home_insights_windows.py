@@ -108,5 +108,22 @@ class HomeInsightsWindowIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(second, first)
 
 
+class AnalyticsBoundsTests(unittest.TestCase):
+    def test_coerce_timezone_aware_dates_to_utc_naive(self):
+        from app.modules.dashboard.router import _analytics_bounds, _coerce_db_datetime
+
+        aware = datetime(2026, 8, 7, 22, 59, 59, tzinfo=timezone.utc)
+        self.assertEqual(_coerce_db_datetime(aware), datetime(2026, 8, 7, 22, 59, 59))
+
+        start, end = _analytics_bounds(
+            datetime(2026, 8, 6, 23, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 7, 22, 59, 59, tzinfo=timezone.utc),
+        )
+        self.assertIsNone(start.tzinfo)
+        self.assertIsNone(end.tzinfo)
+        self.assertEqual(start, datetime(2026, 8, 6, 23, 0, 0))
+        self.assertEqual(end, datetime(2026, 8, 7, 22, 59, 59))
+
+
 if __name__ == "__main__":
     unittest.main()

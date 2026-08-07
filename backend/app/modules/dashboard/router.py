@@ -101,9 +101,11 @@ def admin_summary(
     current_user: User = Depends(require_tenant_user),
     db: Session = Depends(get_db),
 ):
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    _assert_dashboard_reader(current_user)
     restaurant_id = current_user.restaurant_id
     period_start, period_end = dashboard_period(start_date, end_date)
+    period_start = _coerce_db_datetime(period_start)
+    period_end = _coerce_db_datetime(period_end)
     orders_count, revenue = read_orders_and_revenue(db, restaurant_id, period_start, period_end)
     sales_metrics = build_sales_metrics(db, restaurant_id, period_start, period_end)
     revenue = sales_metrics["revenue"]
@@ -148,8 +150,27 @@ REALTIME_STATUS_KEYS = {
 }
 
 
+def _coerce_db_datetime(value: datetime | None) -> datetime | None:
+    """Normalise les dates query (souvent timezone-aware ISO) en UTC naïf pour MySQL."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(dt_timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _assert_dashboard_reader(user: User) -> None:
+    """Accès lecture dashboard : admin/owner ou permission paramètres."""
+    role = getattr(user, "role", None)
+    if getattr(user, "is_owner", False) or role in {Role.ADMIN, Role.MANAGER, "ADMIN", "MANAGER"}:
+        return
+    assert_permission(user, Permission.RESTAURANT_SETTINGS_READ)
+
+
 def _analytics_bounds(start_date, end_date):
     """Période par défaut = aujourd'hui ; sinon respecte start/end fournis."""
+    start_date = _coerce_db_datetime(start_date)
+    end_date = _coerce_db_datetime(end_date)
     now = utcnow()
     if not start_date and not end_date:
         start = datetime.combine(now.date(), datetime.min.time())
@@ -315,7 +336,7 @@ def dashboard_analytics(
     db: Session = Depends(get_db),
 ):
     """Agrégat unique alimentant le dashboard moderne (KPIs, graphes, sections)."""
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    _assert_dashboard_reader(current_user)
     restaurant_id = current_user.restaurant_id
     start, end = _analytics_bounds(start_date, end_date)
 
@@ -1038,7 +1059,7 @@ def home_insights(
     - Semaine : lundi→maintenant vs lundi→même jour/heure semaine dernière
     - Mois : 1→aujourd'hui vs 1→même jour du mois précédent
     """
-    assert_permission(current_user, Permission.RESTAURANT_SETTINGS_READ)
+    _assert_dashboard_reader(current_user)
     restaurant_id = current_user.restaurant_id
     restaurant = db.get(Restaurant, restaurant_id) if restaurant_id else None
     tz = _resolve_restaurant_tz(getattr(restaurant, "timezone", None))
