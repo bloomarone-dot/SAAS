@@ -29,7 +29,8 @@ export const KITCHEN_STATUS_RANK = {
   Servie: 4,
 };
 
-export const MAX_QUEUE_SIZE = 150;
+/** Capacité file sync — doit couvrir une journée offline dense (~500 cmd × ~5 ops). */
+export const MAX_QUEUE_SIZE = 5000;
 export const MAX_ATTEMPTS = 5;
 export const MAX_RETRY_DELAY_MS = 120_000;
 

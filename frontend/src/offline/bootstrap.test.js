@@ -40,6 +40,16 @@ test("restoreLocalSession restaure le profil cache avec JWT valide", () => {
   const result = restoreLocalSession();
   assert.equal(result?.user?.id, "u1");
   assert.equal(result?.source, "cache");
+  assert.equal(result?.tokenValid, true);
+});
+
+test("restoreLocalSession conserve la session avec JWT expiré (travail offline)", () => {
+  const token = fakeJwt({ exp: Math.floor(Date.now() / 1000) - 3600 });
+  localStorage.setItem("access_token", token);
+  saveCachedSession({ id: "u2", role: "CAISSE", restaurant_id: "r1" });
+  const result = restoreLocalSession();
+  assert.equal(result?.user?.id, "u2");
+  assert.equal(result?.tokenValid, false);
 });
 
 test("SYNC_STATUS expose PENDING_SYNC", () => {

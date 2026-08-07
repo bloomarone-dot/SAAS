@@ -110,11 +110,17 @@ export const SYNC_STATUS = {
 
 /**
  * Restaure la session locale sans appel réseau (Offline First boot).
+ * JWT expiré : on conserve le profil cache pour continuer à travailler offline
+ * (refresh token à la reconnexion, sans logout forcé).
  */
 export function restoreLocalSession() {
   const token = localStorage.getItem("access_token");
-  if (!token || !isAccessTokenUsable(token)) return null;
+  if (!token) return null;
   const user = loadCachedSession();
   if (!user?.id) return null;
-  return { user, source: "cache" };
+  return {
+    user,
+    source: "cache",
+    tokenValid: isAccessTokenUsable(token),
+  };
 }

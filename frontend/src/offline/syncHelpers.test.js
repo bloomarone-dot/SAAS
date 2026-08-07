@@ -12,6 +12,7 @@ import {
   sortQueueForFlush,
   TYPE_PRIORITY,
   computeRetryDelayMs,
+  MAX_QUEUE_SIZE,
 } from "./syncHelpers.js";
 
 describe("isLocalId", () => {
@@ -140,5 +141,11 @@ describe("computeRetryDelayMs", () => {
     assert.equal(computeRetryDelayMs(1), 2000);
     assert.equal(computeRetryDelayMs(2), 4000);
     assert.equal(computeRetryDelayMs(10), 120_000);
+  });
+});
+
+describe("MAX_QUEUE_SIZE", () => {
+  it("supporte une journée offline dense (500+ commandes)", () => {
+    assert.ok(MAX_QUEUE_SIZE >= 5000);
   });
 });
