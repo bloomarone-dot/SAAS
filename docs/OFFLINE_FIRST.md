@@ -87,7 +87,17 @@ npm run build                          # PWA + SW OK
 - **Admin analytics** : stale data offline, refresh au retour réseau
 - **Dev Vite** : pas de SW — utiliser `Dockerfile.prod` en prod
 
-## 7. Garanties POS
+## 8. Dashboard Admin Offline First ✅
+
+Le back-office admin calcule tous les KPI localement via `adminAnalyticsCore.js` :
+
+- **Sources** : commandes IndexedDB + snapshot caisse + tickets cuisine + tables
+- **KPI** : CA jour/semaine/mois, commandes, ticket moyen, clients, TVA, remises, annulations, tables, cuisine
+- **Graphiques** : ventes par heure, par jour, top produits/catégories, modes de paiement
+- **Rapports** : rapport journalier PDF/CSV hors ligne (`DailyReportModal`)
+- **Perf** : snapshot cache IDB pour affichage < 500 ms au boot
+- **Sync** : recalcul local après chaque sync — ne remplace pas les données, merge
+
 
 | Action | Offline (cache OK) |
 |--------|-------------------|

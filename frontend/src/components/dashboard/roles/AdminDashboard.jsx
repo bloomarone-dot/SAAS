@@ -6,6 +6,14 @@ import { DashboardSection, ErrorState, FilterBar, PageContainer, SecondaryAction
 import { DailyReportModal } from "@/modules/admin/components/DailyReportModal";
 import { InsightsCarousel } from "@/modules/admin/components/InsightsCarousel";
 import { RestaurantLogoUploader } from "@/modules/admin/components/RestaurantLogoUploader";
+import {
+  cacheAdminAnalyticsSnapshot,
+  computeAdminAnalyticsLocal,
+  computeAdminInsightsLocal,
+  loadAdminAnalyticsSnapshot,
+} from "@/offline/adminAnalytics";
+import { loadLocalFirst } from "@/offline/localFirst";
+import { shouldPreferLocalData } from "@/utils/network";
 import { getTimeGreeting } from "@/utils/greeting";
 import { buildRestaurantTheme } from "@/utils/restaurantTheme";
 import { useAutoRefresh } from "@/utils/useAutoRefresh";
@@ -83,60 +91,96 @@ export function AdminDashboard({ overrides = {} }) {
   const [recentActivities, setRecentActivities] = useState([]);
   const [loadError, setLoadError] = useState("");
   const [insightsError, setInsightsError] = useState("");
+  const [dataSource, setDataSource] = useState("local");
+
+  const restaurantId = currentUser?.restaurant_id;
 
   const load = useCallback(async () => {
-    setIsLoading(true);
+    if (!restaurantId) return;
     setLoadError("");
+
     try {
-      const [start, end] = periodBounds(period, {});
-      const query = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString() });
-      if (category !== "all") query.set("category", category);
-      if (branchId) query.set("branch_id", branchId);
-      setData(await apiFetch(`/api/v1/dashboard/analytics?${query}`, {
-        fallback: "Impossible de charger les analyses du tableau de bord.",
-        timeout: 30_000,
-      }));
+      await loadLocalFirst({
+        loadSyncCache: () => loadAdminAnalyticsSnapshot(restaurantId),
+        loadCache: async () => computeAdminAnalyticsLocal(restaurantId, { period, category, branchId }),
+        fetchRemote: async () => {
+          const [start, end] = periodBounds(period, {});
+          const query = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString() });
+          if (category !== "all") query.set("category", category);
+          if (branchId) query.set("branch_id", branchId);
+          const remote = await apiFetch(`/api/v1/dashboard/analytics?${query}`, {
+            fallback: "Impossible de charger les analyses du tableau de bord.",
+            timeout: 30_000,
+            softAuth: true,
+          });
+          await cacheAdminAnalyticsSnapshot(restaurantId, remote);
+          return remote;
+        },
+        apply: (payload) => {
+          if (payload) {
+            setData(payload);
+            setDataSource(payload.source === "local" || shouldPreferLocalData() ? "local" : "remote");
+          }
+        },
+        onNotice: () => setDataSource("local"),
+      });
     } catch (error) {
       const detail = error.message || "Impossible de charger les analyses du tableau de bord.";
       setLoadError(error.status ? `${detail} (HTTP ${error.status})` : detail);
+      setDataSource("local");
     } finally {
       setIsLoading(false);
     }
-  }, [period, category, branchId]);
+  }, [restaurantId, period, category, branchId]);
 
   const loadInsights = useCallback(async ({ silent = false } = {}) => {
+    if (!restaurantId) return;
     if (!silent) setInsightsLoading(true);
     if (!silent) setInsightsError("");
+
     try {
+      if (shouldPreferLocalData()) {
+        const local = await computeAdminInsightsLocal(restaurantId, { branchId });
+        setInsightCards(Array.isArray(local?.cards) ? local.cards : []);
+        setInsightTimeLabel(local?.time_label || "");
+        setRecentActivities(Array.isArray(local?.recent_activities) ? local.recent_activities : []);
+        return;
+      }
       const query = new URLSearchParams();
       if (branchId) query.set("branch_id", branchId);
       const suffix = query.toString() ? `?${query}` : "";
       const [payload, summary] = await Promise.all([
         apiFetch(`/api/v1/dashboard/home-insights${suffix}`, {
           fallback: "Impossible de charger les comparaisons du tableau de bord.",
+          softAuth: true,
         }),
         apiFetch("/api/v1/dashboard/admin-summary", {
           fallback: "Impossible de charger l'activité récente.",
+          softAuth: true,
         }).catch(() => null),
       ]);
       setInsightCards(Array.isArray(payload?.cards) ? payload.cards : []);
       setInsightTimeLabel(payload?.time_label || "");
       setRecentActivities(Array.isArray(summary?.recent_activities) ? summary.recent_activities : []);
     } catch (error) {
-      if (!silent) {
-        setInsightCards([]);
-        setInsightTimeLabel("");
-        setRecentActivities([]);
+      const local = await computeAdminInsightsLocal(restaurantId, { branchId }).catch(() => null);
+      if (local) {
+        setInsightCards(Array.isArray(local?.cards) ? local.cards : []);
+        setInsightTimeLabel(local?.time_label || "");
+        setRecentActivities(Array.isArray(local?.recent_activities) ? local.recent_activities : []);
+      } else if (!silent) {
         setInsightsError(error.message || "Impossible de charger les comparaisons du tableau de bord.");
       }
     } finally {
       if (!silent) setInsightsLoading(false);
     }
-  }, [branchId]);
+  }, [restaurantId, branchId]);
 
   useEffect(() => {
+    if (!restaurantId) return;
+    setIsLoading(!data);
     load();
-  }, [load]);
+  }, [load, restaurantId]);
 
   useEffect(() => {
     loadInsights({ silent: false });
@@ -146,6 +190,7 @@ export function AdminDashboard({ overrides = {} }) {
   useAutoRefresh(() => loadInsights({ silent: true }), 30_000, [loadInsights]);
 
   const kpi = data?.kpis ?? {};
+  const cashDrawer = data?.cash_drawer ?? {};
   const realtime = data?.realtime_orders ?? {};
   const branchOptions = (data?.branches ?? []).filter((branch) => branch.id);
   const meal = Number(data?.meal_vs_drink?.meal || 0);
@@ -193,7 +238,7 @@ export function AdminDashboard({ overrides = {} }) {
         onUpdated={(restaurant) => onThemeChange?.(buildRestaurantTheme(restaurant))}
       />
 
-      {(loadError || insightsError) && (
+      {(loadError || insightsError) && !data && (
         <ErrorState
           title="Indicateurs indisponibles"
           text={loadError || insightsError}
@@ -210,6 +255,18 @@ export function AdminDashboard({ overrides = {} }) {
             </button>
           }
         />
+      )}
+
+      {dataSource === "local" && data && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900">
+          Données calculées localement — synchronisation en arrière-plan au retour réseau.
+        </div>
+      )}
+
+      {(loadError || insightsError) && data && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800">
+          {loadError || insightsError} — affichage des données locales.
+        </p>
       )}
 
       <FilterBar
@@ -261,10 +318,20 @@ export function AdminDashboard({ overrides = {} }) {
         </DashboardSection>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Chiffre d'affaires" value={money(kpi.revenue)} trend={`${formatVariation(kpi.revenue_variation)} vs période préc.`} icon="ShoppingCart" tone="success" />
         <StatCard label="Commandes" value={Number(kpi.orders_count || 0).toLocaleString("fr-FR")} trend={`${formatVariation(kpi.orders_variation)} vs période préc.`} icon="ClipboardList" tone="info" />
-        <StatCard label="Ticket moyen" value={money(kpi.average_ticket)} trend={`Marge ${Number(kpi.margin_rate || 0).toFixed(1)} %`} icon="ReceiptText" tone="warning" />
+        <StatCard label="Ticket moyen" value={money(kpi.average_ticket)} trend={`Clients ${Number(kpi.clients_served || 0).toLocaleString("fr-FR")}`} icon="ReceiptText" tone="warning" />
+        <StatCard label="Encaissements caisse" value={money(cashDrawer.total_collected ?? kpi.revenue)} trend={`${cashDrawer.receipts_count ?? 0} reçu(s)`} icon="CreditCard" tone="success" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        <StatCard label="CA jour" value={money(kpi.revenue_today)} icon="CalendarDays" tone="default" />
+        <StatCard label="CA semaine" value={money(kpi.revenue_week)} icon="BarChart3" tone="default" />
+        <StatCard label="CA mois" value={money(kpi.revenue_month)} icon="CalendarDays" tone="default" />
+        <StatCard label="Tables libres" value={String(kpi.tables_free ?? "—")} trend={`${kpi.tables_occupied ?? 0} occupée(s)`} icon="LayoutGrid" tone="info" />
+        <StatCard label="Tickets cuisine" value={String(kpi.open_tickets ?? 0)} trend={`${kpi.closed_tickets ?? 0} clôturé(s)`} icon="ChefHat" tone="warning" />
+        <StatCard label="TVA collectée" value={money(kpi.vat_collected)} trend={`Remises -${money(kpi.total_discounts)}`} icon="Percent" tone="default" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_0.6fr]">
@@ -287,9 +354,28 @@ export function AdminDashboard({ overrides = {} }) {
           <TopProducts rows={(data?.top_products ?? []).slice(0, 5)} />
         </DashboardSection>
 
+        <DashboardSection title="Catégories">
+          <TopProducts rows={(data?.top_categories ?? []).slice(0, 5)} />
+        </DashboardSection>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
         <DashboardSection title="Encaissements">
           <PaymentMethods rows={data?.payment_methods ?? []} />
           {(meal > 0 || drink > 0) && <DonutSplit mealShare={mealShare} />}
+        </DashboardSection>
+
+        <DashboardSection title="Caisse & annulations">
+          <div className="space-y-2 text-sm">
+            <CashLine label="Fonds / solde attendu" value={money(cashDrawer.expected_balance)} />
+            <CashLine label="Encaissements" value={money(cashDrawer.total_collected)} />
+            <CashLine label="Remises" value={`-${money(cashDrawer.total_discounts ?? kpi.total_discounts)}`} />
+            <CashLine label="Commandes en attente" value={String(cashDrawer.pending_count ?? 0)} />
+            <CashLine label="Annulations période" value={String(kpi.cancellations ?? 0)} />
+            {kpi.avg_prep_minutes != null && (
+              <CashLine label="Temps moy. préparation" value={`${kpi.avg_prep_minutes} min`} />
+            )}
+          </div>
         </DashboardSection>
       </div>
 
@@ -308,10 +394,15 @@ export function AdminDashboard({ overrides = {} }) {
       )}
 
       {ordersModal && (
-        <OrdersModal title={ordersModal.title} statuses={ordersModal.statuses} onClose={() => setOrdersModal(null)} />
+        <OrdersModal
+          title={ordersModal.title}
+          statuses={ordersModal.statuses}
+          restaurantId={restaurantId}
+          onClose={() => setOrdersModal(null)}
+        />
       )}
 
-      <DailyReportModal open={showDailyReport} onClose={() => setShowDailyReport(false)} branchId={branchId} />
+      <DailyReportModal open={showDailyReport} onClose={() => setShowDailyReport(false)} branchId={branchId} restaurantId={restaurantId} />
     </PageContainer>
   );
 }
@@ -326,7 +417,7 @@ function RealtimeStat({ label, value, tone, onClick }) {
   );
 }
 
-function OrdersModal({ title, statuses, onClose }) {
+function OrdersModal({ title, statuses, restaurantId, onClose }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
@@ -335,8 +426,16 @@ function OrdersModal({ title, statuses, onClose }) {
     let active = true;
     (async () => {
       try {
+        if (shouldPreferLocalData() && restaurantId) {
+          const { loadAdminWorkspaceData } = await import("@/offline/adminAnalytics");
+          const workspace = await loadAdminWorkspaceData(restaurantId);
+          const local = (workspace?.orders || []).filter((order) => statuses.includes(order.status));
+          if (active) setOrders(local);
+          return;
+        }
         const data = await apiFetch("/api/v1/orders?limit=100", {
           fallback: "Impossible de charger les commandes.",
+          softAuth: true,
         }).catch(() => []);
         if (active) setOrders((data || []).filter((order) => statuses.includes(order.status)));
       } finally {
@@ -346,7 +445,7 @@ function OrdersModal({ title, statuses, onClose }) {
     return () => {
       active = false;
     };
-  }, [statuses]);
+  }, [statuses, restaurantId]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
@@ -541,4 +640,13 @@ function EmployeeTable({ rows }) {
 
 function Empty({ text }) {
   return <p className="py-5 text-center text-sm font-semibold text-slate-400">{text}</p>;
+}
+
+function CashLine({ label, value }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+      <span className="font-semibold text-slate-600">{label}</span>
+      <span className="font-black text-slate-900">{value}</span>
+    </div>
+  );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { apiFetch } from "@/config/http";
+import { shouldPreferLocalData } from "@/utils/network";
 import { AdminFormModal } from "@/modules/admin/components/AdminUi";
 import {
   buildDailyReportText,
@@ -120,33 +121,54 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-export function DailyReportModal({ open, onClose, branchId = "" }) {
+export function DailyReportModal({ open, onClose, branchId = "", restaurantId = "" }) {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [source, setSource] = useState("local");
 
   useEffect(() => {
     if (!open) return;
     let active = true;
     setLoading(true);
     setError("");
-    const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : "";
-    apiFetch(`/api/v1/dashboard/daily-report${query}`, {
-      fallback: "Impossible de charger le rapport du jour.",
-    })
-      .then((data) => {
-        if (active) setReport(data);
-      })
-      .catch((err) => {
-        if (active) setError(err.message || "Chargement impossible.");
-      })
-      .finally(() => {
+
+    async function loadReport() {
+      try {
+        if (restaurantId) {
+          const { computeAdminDailyReportLocal } = await import("@/offline/adminAnalytics");
+          const local = await computeAdminDailyReportLocal(restaurantId, { branchId });
+          if (local && active) {
+            setReport(local);
+            setSource("local");
+          }
+        }
+        if (shouldPreferLocalData()) {
+          return;
+        }
+        const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : "";
+        const remote = await apiFetch(`/api/v1/dashboard/daily-report${query}`, {
+          fallback: "Impossible de charger le rapport du jour.",
+          softAuth: true,
+        });
+        if (active) {
+          setReport(remote);
+          setSource("remote");
+        }
+      } catch (err) {
+        if (!report && active) {
+          setError(err.message || "Chargement impossible.");
+        }
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    }
+
+    loadReport();
     return () => {
       active = false;
     };
-  }, [open, branchId]);
+  }, [open, branchId, restaurantId]);
 
   const kpis = report?.kpis ?? {};
 
@@ -218,8 +240,13 @@ export function DailyReportModal({ open, onClose, branchId = "" }) {
         </>
       }
     >
-      {loading && <p className="py-10 text-center text-sm font-semibold text-slate-400">Chargement du rapport...</p>}
-      {error && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">{error}</p>}
+      {loading && !report && <p className="py-10 text-center text-sm font-semibold text-slate-400">Chargement du rapport...</p>}
+      {error && !report && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">{error}</p>}
+      {source === "local" && report && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+          Rapport généré localement — export PDF/CSV disponible hors ligne.
+        </p>
+      )}
       {report && !loading && (
         <div className="space-y-6">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

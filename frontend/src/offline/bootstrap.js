@@ -27,6 +27,7 @@ import {
 import { initOfflineFoundation } from "@/offline/store";
 import { warmupOfflineCache } from "@/offline/warmup";
 import { flushOfflineQueue, getOfflineQueueStats } from "@/offline/sync";
+import { computeAdminAnalyticsLocal } from "@/offline/adminAnalytics";
 
 export { restoreLocalSession, SYNC_STATUS } from "@/offline/sessionCache";
 
@@ -109,8 +110,12 @@ export async function runBackgroundSync(restaurantId, apiBaseUrl) {
     if (isApiReachable() || navigator.onLine) {
       flushResult = await flushOfflineQueue(apiBaseUrl);
     }
+    if (restaurantId) {
+      await computeAdminAnalyticsLocal(restaurantId).catch(() => {});
+    }
     if (restaurantId && (isApiReachable() || navigator.onLine)) {
       await warmupOfflineCache(restaurantId).catch(() => {});
+      await computeAdminAnalyticsLocal(restaurantId).catch(() => {});
     }
   } catch {
     /* best effort */

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5178",
     "build": "vite build",
-    "test:offline": "node --test src/offline/syncHelpers.test.js src/offline/sessionCache.test.js src/offline/bootstrap.test.js"
+    "test:offline": "node --test src/offline/syncHelpers.test.js src/offline/sessionCache.test.js src/offline/bootstrap.test.js src/offline/adminAnalytics.test.js"
   },
   "dependencies": {
     "@tanstack/query-async-storage-persister": "^5.101.4",

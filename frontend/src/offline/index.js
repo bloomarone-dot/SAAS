@@ -81,6 +81,16 @@ export { startSyncEngine, stopSyncEngine, resetSyncBackoff, getSyncBackoffMs } f
 export { OfflineQueryProvider, offlineQueryClient } from "@/offline/queryClient.jsx";
 
 export {
+  computeAdminAnalyticsLocal,
+  computeAdminDailyReportLocal,
+  computeAdminInsightsLocal,
+  computeLocalAnalytics,
+  loadAdminAnalyticsSnapshot,
+  loadAdminWorkspaceData,
+  cacheAdminAnalyticsSnapshot,
+} from "@/offline/adminAnalytics";
+
+export {
   flushOfflineQueue,
   enqueueOfflineAction,
   readOfflineQueue,
