@@ -52,8 +52,14 @@ export function enqueueOfflineAction(action) {
   // Champs de contrôle APRÈS le spread : on ne laisse pas l'appelant forcer status/attempts.
   const entry = {
     ...action,
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: action.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    idempotencyKey:
+      action.idempotencyKey
+      || (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`),
     created_at: new Date().toISOString(),
+    lastTry: null,
     attempts: 0,
     status: "pending",
   };
@@ -371,7 +377,10 @@ async function runAction(action, { apiFetch, apiFetchPublic, idMap }) {
  * @returns {{ synced: number, remaining: number, failed: number, conflicts: number, idMap: object }}
  */
 export async function flushOfflineQueue(apiBaseUrl) {
-  if (!navigator.onLine || !apiBaseUrl) {
+  const { isApiReachable, resolveApiBaseUrl } = await import("@/config/api");
+  await resolveApiBaseUrl().catch(() => {});
+  const canReachServer = Boolean(apiBaseUrl) && (isApiReachable() || navigator.onLine);
+  if (!canReachServer) {
     const queue = readOfflineQueue();
     return {
       synced: 0,
@@ -379,7 +388,7 @@ export async function flushOfflineQueue(apiBaseUrl) {
       failed: queue.filter((a) => a.status === "failed").length,
       conflicts: 0,
       idMap: {},
-      skipped: !navigator.onLine ? "offline" : "no_api",
+      skipped: !navigator.onLine && !isApiReachable() ? "offline" : "no_api",
     };
   }
 

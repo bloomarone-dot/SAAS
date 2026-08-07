@@ -4,6 +4,7 @@
  */
 
 import { apiFetch } from "@/config/http";
+import { isApiReachable } from "@/config/api";
 import { menuApi } from "@/modules/menu/services/menuApi";
 import { orderApi } from "@/modules/orders/services/orderApi";
 import { tableApi } from "@/modules/menu/services/tableApi";
@@ -106,7 +107,8 @@ async function warmCashierReport(restaurantId) {
  */
 export async function warmupOfflineCache(restaurantId, { includeCashier = true } = {}) {
   if (!restaurantId) return { ok: false, details: { reason: "no_restaurant" } };
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  const browserOffline = typeof navigator !== "undefined" && !navigator.onLine;
+  if (browserOffline && !isApiReachable()) {
     return { ok: false, details: { reason: "offline" } };
   }
   if (warmupInFlight) return warmupInFlight;

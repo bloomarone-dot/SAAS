@@ -197,6 +197,7 @@ async function request(path, options = {}) {
     auth = true,
     responseType = "json",
     timeout,
+    softAuth = false,
     _retry = false,
     ...fetchOptions
   } = options;
@@ -240,6 +241,9 @@ async function request(path, options = {}) {
   }
 
   if (auth && response.status === 401) {
+    if (softAuth) {
+      throw new Error("Session serveur indisponible.");
+    }
     const canRefresh = !_retry && !isRefreshPath(path);
     if (canRefresh) {
       try {

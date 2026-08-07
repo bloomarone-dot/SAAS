@@ -61,9 +61,22 @@ export {
   saveCachedBranding,
   loadCachedBranding,
   clearCachedBranding,
+  restoreLocalSession,
+  SYNC_STATUS,
 } from "@/offline/sessionCache";
 
 export { warmupOfflineCache } from "@/offline/warmup";
+
+export {
+  bootstrapOfflineFirst,
+  hydrateLocalWorkspace,
+  refreshSessionBackground,
+  restoreLocalSession,
+  runBackgroundSync,
+  SYNC_STATUS,
+} from "@/offline/bootstrap";
+
+export { loadLocalFirst } from "@/offline/localFirst";
 
 export {
   flushOfflineQueue,

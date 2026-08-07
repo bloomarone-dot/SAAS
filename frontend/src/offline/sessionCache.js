@@ -100,3 +100,21 @@ export function clearCachedBranding() {
     /* ignore */
   }
 }
+
+/** Statuts de synchronisation des entités locales. */
+export const SYNC_STATUS = {
+  SYNCED: "SYNCED",
+  PENDING_SYNC: "PENDING_SYNC",
+  FAILED: "FAILED",
+};
+
+/**
+ * Restaure la session locale sans appel réseau (Offline First boot).
+ */
+export function restoreLocalSession() {
+  const token = localStorage.getItem("access_token");
+  if (!token || !isAccessTokenUsable(token)) return null;
+  const user = loadCachedSession();
+  if (!user?.id) return null;
+  return { user, source: "cache" };
+}

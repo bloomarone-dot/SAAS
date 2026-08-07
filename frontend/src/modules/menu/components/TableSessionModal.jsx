@@ -5,7 +5,7 @@ import {
   isLocalId,
   listLocalOrders,
 } from '@/offline';
-import { isNetworkError } from '@/utils/network';
+import { isNetworkError, shouldPreferLocalData } from '@/utils/network';
 
 export default function TableSessionModal({
   table,
@@ -28,6 +28,17 @@ export default function TableSessionModal({
       setError('');
       setOfflineHint('');
       try {
+        if (shouldPreferLocalData() && restaurantId) {
+          const local = await listLocalOrders(restaurantId);
+          const forTable = local.filter(
+            (order) =>
+              String(order.table_id) === String(table.id)
+              && !['Payée', 'Payee', 'Annulée', 'Annulee'].includes(String(order.status || '')),
+          );
+          setActiveOrders(forTable);
+          setOfflineHint('Mode hors ligne : commandes locales de cette table.');
+          return;
+        }
         const data = await tableApi.getActiveOrders(table.id);
         if (!mounted) return;
         setActiveOrders(data);
@@ -80,6 +91,17 @@ export default function TableSessionModal({
     }
 
     try {
+      if (shouldPreferLocalData() && restaurantId) {
+        const order = await createLocalTableOrder({
+          restaurantId,
+          table,
+          partySize: requestedSeats,
+          currentUser,
+        });
+        onOpenMenuForOrder(order.id, table.name || table.number, table.room);
+        onClose();
+        return;
+      }
       const result = await tableApi.createOrder(table.id, { party_size: requestedSeats });
       onOpenMenuForOrder(result.order.id, table.name || table.number, table.room);
       onClose();

@@ -82,6 +82,7 @@ import {
   retryFailedOfflineActions,
   isNetworkError,
   markEffectiveOffline,
+  shouldPreferLocalData,
 } from "@/utils/network";
 import {
   clearCachedBranding,
@@ -95,6 +96,13 @@ import {
   warmupOfflineCache,
   connectRestaurantRealtime,
 } from "@/offline";
+import {
+  bootstrapOfflineFirst,
+  hydrateLocalWorkspace,
+  refreshSessionBackground,
+  restoreLocalSession,
+  runBackgroundSync,
+} from "@/offline/bootstrap";
 import { getApiBaseUrl, resolveApiBaseUrl, isApiReachable, apiFetch, clearToken, SESSION_EXPIRED_EVENT, setToken } from "@/core/api";
 import { getPublicHostKind, shouldResolveTenantFromHost, buildRestaurantTheme } from "@/core/tenant";
 
@@ -136,8 +144,12 @@ function shouldShowLoginForPath(path = window.location.pathname) {
 export default function App() {
   const apiBaseUrl = useMemo(getApiBaseUrl, []);
   const publicHostKind = useMemo(() => getPublicHostKind(), []);
+  const initialRestore = useMemo(
+    () => (typeof window !== "undefined" ? restoreLocalSession() : null),
+    [],
+  );
   const [restaurantForm, setRestaurantForm] = useState(initialRestaurant);
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(initialRestore?.user ?? null);
   const [activeView, setActiveView] = useState("dashboard");
   const [restaurants, setRestaurants] = useState([]);
   const [restaurantTheme, setRestaurantTheme] = useState(null);
@@ -158,6 +170,17 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [offlineReady, setOfflineReady] = useState(false);
   const [viewHistory, setViewHistory] = useState([]);
+  const [bootstrapping, setBootstrapping] = useState(
+    () => typeof window !== "undefined"
+      && Boolean(localStorage.getItem("access_token"))
+      && !initialRestore?.user,
+  );
+
+  useEffect(() => {
+    if (!initialRestore?.user?.restaurant_id) return;
+    const branding = loadCachedBranding(initialRestore.user.restaurant_id);
+    if (branding) setRestaurantTheme(buildRestaurantTheme(branding));
+  }, [initialRestore?.user?.restaurant_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,12 +197,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     const token = localStorage.getItem("access_token");
-    if (!token) return;
 
-    function openWithUser(user, { offline = false } = {}) {
+    function openWithUser(user, { offline = false, silent = false } = {}) {
       if (!isSessionAllowedOnCurrentHost(user)) {
         rejectWrongHostSession();
+        setBootstrapping(false);
         return;
       }
       saveCachedSession(user);
@@ -188,43 +212,87 @@ export default function App() {
       setActiveView(routeView);
       const nextPath = pushAppRoute(user, routeView, true);
       setCurrentPath(nextPath);
-      if (offline) {
+      setBootstrapping(false);
+      if (offline && !silent) {
         markEffectiveOffline("auth_me");
         setMessage("Mode hors ligne : session locale restaurée.");
-        const branding = loadCachedBranding(user.restaurant_id);
-        if (branding) setRestaurantTheme(buildRestaurantTheme(branding));
-        return;
       }
-      if (user.role === "SUPERADMIN") fetchRestaurants();
-      if (user.role === "ADMIN") fetchAdminSummary();
-      if (user.restaurant_id) {
-        fetchRestaurantTheme(user.restaurant_id);
-        warmupOfflineCache(user.restaurant_id).catch(() => {});
+      const branding = loadCachedBranding(user.restaurant_id);
+      if (branding) setRestaurantTheme(buildRestaurantTheme(branding));
+      if (!offline) {
+        if (user.role === "SUPERADMIN") fetchRestaurants();
+        if (user.role === "ADMIN") fetchAdminSummary();
+        if (user.restaurant_id) {
+          fetchRestaurantTheme(user.restaurant_id);
+          warmupOfflineCache(user.restaurant_id).catch(() => {});
+        }
       }
     }
 
-    apiFetch("/api/v1/auth/me", {
-      fallback: "Impossible de vérifier la session.",
-      timeout: 4_000,
-    })
-      .then((user) => openWithUser(user, { offline: false }))
-      .catch((error) => {
-        // P0.1 : erreur réseau ≠ logout. 401 réel uniquement via SESSION_EXPIRED_EVENT.
-        if (isNetworkError(error) && isAccessTokenUsable(token)) {
-          const cached = loadCachedSession();
-          if (cached) {
-            openWithUser(cached, { offline: true });
-            return;
-          }
+    async function bootstrapSession() {
+      if (session && initialRestore?.user?.id === session.id) {
+        setBootstrapping(false);
+        hydrateLocalWorkspace(session.restaurant_id).then((hydrated) => {
+          if (!cancelled) setOfflineReady(Boolean(hydrated?.ready));
+        });
+        refreshSessionBackground({
+          onUser: (user) => {
+            if (!cancelled) openWithUser(user, { offline: false, silent: true });
+          },
+        }).catch(() => {});
+        if (session.restaurant_id) {
+          runBackgroundSync(session.restaurant_id, apiBaseUrl).catch(() => {});
+        }
+        return;
+      }
+
+      if (!token) {
+        setBootstrapping(false);
+        return;
+      }
+
+      const result = await bootstrapOfflineFirst({
+        apiBaseUrl,
+        onSession: (user, { offline }) => {
+          if (!cancelled) openWithUser(user, { offline, silent: offline });
+        },
+        onHydrated: (hydrated) => {
+          if (!cancelled) setOfflineReady(Boolean(hydrated?.ready));
+        },
+      });
+
+      if (cancelled) return;
+
+      if (!result.opened) {
+        if (shouldPreferLocalData()) {
           setMessage("Hors ligne : reconnectez-vous une fois en ligne pour mémoriser la session.");
+          setBootstrapping(false);
           return;
         }
-        if (!isNetworkError(error)) {
-          clearToken();
-          clearCachedSession();
-          if (shouldShowLoginForPath()) setShowLogin(true);
+        try {
+          const user = await apiFetch("/api/v1/auth/me", {
+            fallback: "Impossible de vérifier la session.",
+            timeout: 4_000,
+            softAuth: true,
+          });
+          openWithUser(user, { offline: false });
+        } catch (error) {
+          if (isNetworkError(error)) {
+            setMessage("Hors ligne : reconnectez-vous une fois en ligne pour mémoriser la session.");
+          } else if (!error?.message?.includes("Session serveur")) {
+            clearToken();
+            clearCachedSession();
+            if (shouldShowLoginForPath()) setShowLogin(true);
+          }
+          setBootstrapping(false);
         }
-      });
+      }
+    }
+
+    bootstrapSession();
+    return () => {
+      cancelled = true;
+    };
   }, [apiBaseUrl]);
 
   useEffect(() => {
@@ -429,6 +497,7 @@ export default function App() {
     setToken(data.access_token);
     saveCachedSession(data.user);
     setSession(data.user);
+    setBootstrapping(false);
     setActiveView("dashboard");
     setViewHistory([]);
     setShowLogin(false);
@@ -541,6 +610,17 @@ export default function App() {
       window.history.pushState({}, "", "/");
       setCurrentPath("/");
     }
+  }
+
+  if (bootstrapping) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
+        <p className="text-base font-black text-slate-800">Ouverture de l&apos;application…</p>
+        <p className="max-w-sm text-sm font-semibold text-slate-500">
+          Reprise de votre session locale si la connexion est indisponible.
+        </p>
+      </div>
+    );
   }
 
   if (!session && currentPath.startsWith("/reset-password")) {
@@ -1180,8 +1260,20 @@ function SyncStatus({
   const [syncing, setSyncing] = useState(false);
   const pendingCount = Math.max(0, queueCount - failedCount);
 
-  // En ligne sans file : pas de bandeau permanent (évite le bruit UI).
-  if (isOnline && queueCount === 0) return null;
+  // Badge connexion toujours visible — ne bloque jamais l'utilisateur.
+  const onlineLabel = isOnline && !shouldPreferLocalData() ? "En ligne" : "Hors ligne";
+  const onlineTone = isOnline && !shouldPreferLocalData()
+    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+    : "border-red-200 bg-red-50 text-red-700";
+
+  if (!syncing && queueCount === 0) {
+    return (
+      <div className={`mb-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black ${onlineTone}`}>
+        <span aria-hidden>{isOnline && !shouldPreferLocalData() ? "🟢" : "🔴"}</span>
+        {onlineLabel}
+      </div>
+    );
+  }
 
   async function syncNow() {
     setSyncing(true);

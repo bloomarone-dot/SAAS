@@ -3,7 +3,8 @@ import { DashboardIcon } from '@/components/dashboard/icons';
 import { AdminFormModal, DashboardSection, FilterBar } from '@/modules/admin/components/AdminUi';
 import { useAutoRefresh } from '@/utils/useAutoRefresh';
 import { cacheTables, getCachedTables, getCachedTablesAsync } from '@/utils/offlineCache';
-import { isNetworkError, shouldPreferLocalData } from '@/utils/network';
+import { isNetworkError } from '@/utils/network';
+import { loadLocalFirst } from '@/offline/localFirst';
 import { createLocalTable, isLocalId } from '@/offline';
 import { validationFor } from '@/utils/validation';
 import { tableApi } from '../services/tableApi';
@@ -87,38 +88,25 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
       setError('');
     }
 
-    async function applyCached(notice) {
-      const cached = (await getCachedTablesAsync(restaurantId)) || getCachedTables(restaurantId);
-      if (cached?.length) {
-        setTables(cached);
-        if (!silent && notice) setNotice(notice);
-        return true;
-      }
-      return false;
-    }
-
-    if (shouldPreferLocalData()) {
-      const ok = await applyCached('Mode hors ligne : plan de salle depuis le cache local.');
-      if (!ok && !silent) {
-        setError('Hors ligne et aucun plan de salle en cache. Créez une table localement.');
-      }
-      if (!silent) setLoading(false);
-      return;
-    }
-
     try {
-      const data = await tableApi.getTables(restaurantId);
-      const merged = mergeWithLocalTables(data);
-      setTables(merged);
-      cacheTables(restaurantId, merged);
-      if (!silent) setNotice('');
+      await loadLocalFirst({
+        loadCache: async () => (await getCachedTablesAsync(restaurantId)) || getCachedTables(restaurantId),
+        fetchRemote: async () => {
+          const data = await tableApi.getTables(restaurantId);
+          const merged = mergeWithLocalTables(data);
+          cacheTables(restaurantId, merged);
+          return merged;
+        },
+        apply: (tables) => {
+          setTables(Array.isArray(tables) ? tables : []);
+          if (!silent) setNotice('');
+        },
+        onNotice: (notice) => {
+          if (!silent && notice) setNotice(notice);
+        },
+      });
     } catch (error) {
-      const ok = await applyCached(
-        isNetworkError(error)
-          ? 'Connexion instable : affichage du plan de salle local.'
-          : null,
-      );
-      if (!ok && !silent) setError(error.message || 'Impossible de charger le plan de salle.');
+      if (!silent) setError(error.message || 'Impossible de charger le plan de salle.');
     } finally {
       if (!silent) setLoading(false);
     }

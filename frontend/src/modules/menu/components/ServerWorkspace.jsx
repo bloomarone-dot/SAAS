@@ -12,6 +12,7 @@ import { clearServerSession, loadOrderSnapshot, loadServerSession, saveOrderSnap
 import { AlphabetFilter, filterByLetter } from "@/components/shared/AlphabetFilter";
 import { cacheMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
 import { enqueueOfflineAction, isNetworkError, preferLocalOpsAfterProbe, shouldPreferLocalData } from "@/utils/network";
+import { loadLocalFirst } from "@/offline/localFirst";
 import {
   buildServerReportText,
   downloadTextFile,
@@ -203,6 +204,16 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
       }
       return;
     }
+    if (shouldPreferLocalData()) {
+      const local = await getLocalOrder(orderId);
+      const snapshot = currentUser?.id ? loadOrderSnapshot(currentUser.id, orderId) : null;
+      const fallback = local || snapshot;
+      if (fallback) {
+        setOrder(fallback);
+        setMessage("Commande chargée depuis la mémoire locale.");
+        return;
+      }
+    }
     try {
       const data = await orderApi.get(orderId);
       setOrder(data);
@@ -228,36 +239,25 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const loadMenu = useCallback(async () => {
     if (!restaurantId) return;
 
-    async function applyCached(notice) {
-      const cached = await getCachedMenuCatalogAsync(restaurantId);
-      if (cached) {
-        setCategories((cached.categories || []).filter((item) => item.is_active !== false));
-        setDishes((cached.dishes || []).filter((dish) => dish.is_available !== false));
-        if (notice) setMessage(notice);
-        return true;
-      }
-      return false;
-    }
-
-    if (shouldPreferLocalData()) {
-      const ok = await applyCached("Menu chargé depuis la mémoire locale (hors ligne).");
-      if (!ok) setError("Impossible de charger le menu. Connectez-vous une fois pour le mémoriser.");
-      return;
-    }
-
     try {
-      const catalog = await menuApi.getCatalog(restaurantId, true);
-      const nextCategories = (catalog.categories || []).filter((item) => item.is_active !== false);
-      const nextDishes = (catalog.dishes || []).filter((dish) => dish.is_available !== false);
-      setCategories(nextCategories);
-      setDishes(nextDishes);
-      cacheMenuCatalog(restaurantId, nextCategories, nextDishes);
-      if (nextCategories.length && !nextDishes.length) {
-        setMessage("Aucun plat disponible. Vérifiez dans Catalogue que vos catégories repas sont actives et vos plats marqués disponibles.");
-      }
+      await loadLocalFirst({
+        loadCache: () => getCachedMenuCatalogAsync(restaurantId),
+        fetchRemote: async () => {
+          const catalog = await menuApi.getCatalog(restaurantId, true);
+          const nextCategories = (catalog.categories || []).filter((item) => item.is_active !== false);
+          const nextDishes = (catalog.dishes || []).filter((dish) => dish.is_available !== false);
+          cacheMenuCatalog(restaurantId, nextCategories, nextDishes);
+          return { categories: nextCategories, dishes: nextDishes };
+        },
+        apply: ({ categories = [], dishes = [] }) => {
+          setCategories(categories.filter((item) => item.is_active !== false));
+          setDishes(dishes.filter((dish) => dish.is_available !== false));
+          setError("");
+        },
+        onNotice: (notice) => setMessage(notice),
+      });
     } catch {
-      const ok = await applyCached("Menu chargé depuis la mémoire locale (hors ligne).");
-      if (!ok) setError("Impossible de charger le menu. Connectez-vous une fois pour le mémoriser.");
+      setError("Impossible de charger le menu. Connectez-vous une fois en ligne pour le mémoriser.");
     }
   }, [restaurantId]);
 

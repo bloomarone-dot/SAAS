@@ -20,6 +20,17 @@ import { cacheTables } from "@/utils/offlineCache";
 import { aggregateDeliveryFees, aggregatePaymentMethods } from "@/modules/orders/utils/paymentReporting";
 import { KITCHEN_ENABLED } from "@/config/features";
 
+import { SYNC_STATUS } from "@/offline/sessionCache";
+
+function stampPendingSync(order) {
+  if (!order || typeof order !== "object") return order;
+  return {
+    ...order,
+    sync_status: order.sync_status || SYNC_STATUS.PENDING_SYNC,
+    _local: order._local !== false,
+  };
+}
+
 export function newLocalId(prefix = "local") {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -171,7 +182,7 @@ export async function createLocalTableOrder({
   await initOfflineFoundation();
   const id = newLocalId("local_order");
   const createdAt = nowIso();
-  const order = {
+  const order = stampPendingSync({
     id,
     restaurantId,
     restaurant_id: restaurantId,
@@ -197,7 +208,7 @@ export async function createLocalTableOrder({
     updated_at: createdAt,
     updatedAt: createdAt,
     _local: true,
-  };
+  });
 
   await upsertLocalOrder(order);
 

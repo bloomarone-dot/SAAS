@@ -42,6 +42,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,woff2,webmanifest}'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/tables/, /^\/kitchen/],
         runtimeCaching: [
           {
             // Menu : réseau d'abord ; cache seulement si vraiment offline.
