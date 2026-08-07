@@ -14,6 +14,7 @@ import {
   isLocalId as isLocalIdPure,
   isConflictResolved,
   isDeferError,
+  computeRetryDelayMs,
 } from "@/offline/syncHelpers";
 
 const OFFLINE_QUEUE_KEY = "offline_action_queue";
@@ -49,17 +50,30 @@ export function enqueueOfflineAction(action) {
     throw err;
   }
 
-  // Champs de contrôle APRÈS le spread : on ne laisse pas l'appelant forcer status/attempts.
+  // Champs PendingOperations — uuid, endpoint, method, payload, retryCount, idempotencyKey
   const entry = {
     ...action,
-    id: action.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    idempotencyKey:
-      action.idempotencyKey
+    uuid:
+      action.uuid
+      || action.idempotencyKey
       || (typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(16).slice(2)}`),
-    created_at: new Date().toISOString(),
+    id: action.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    idempotencyKey:
+      action.idempotencyKey
+      || action.uuid
+      || (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    endpoint: action.endpoint || action.path || action.url || "",
+    method: String(action.method || "POST").toUpperCase(),
+    payload: action.payload ?? action.body ?? null,
+    createdAt: action.createdAt || new Date().toISOString(),
+    created_at: action.created_at || new Date().toISOString(),
     lastTry: null,
+    nextRetryAt: null,
+    retryCount: 0,
     attempts: 0,
     status: "pending",
   };
@@ -431,6 +445,11 @@ export async function flushOfflineQueue(apiBaseUrl) {
         continue;
       }
 
+      if (action.nextRetryAt && Date.parse(action.nextRetryAt) > Date.now()) {
+        remaining.push(action);
+        continue;
+      }
+
       emitSyncEvent("offline-sync-progress", {
         label: action.label || action.type || "action",
         synced,
@@ -473,11 +492,20 @@ export async function flushOfflineQueue(apiBaseUrl) {
         }
 
         const attempts = Number(action.attempts || 0) + 1;
+        const retryCount = attempts;
+        const delayMs = computeRetryDelayMs(attempts);
+        const retryMeta = {
+          lastTry: new Date().toISOString(),
+          nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
+          retryCount,
+        };
         if (attempts >= MAX_ATTEMPTS) {
           remaining.push({
             ...rewritten,
             status: "failed",
             attempts,
+            retryCount,
+            ...retryMeta,
             last_error: String(error.message || error),
             failed_at: new Date().toISOString(),
           });
@@ -487,6 +515,8 @@ export async function flushOfflineQueue(apiBaseUrl) {
             ...rewritten,
             status: "pending",
             attempts,
+            retryCount,
+            ...retryMeta,
             last_error: String(error.message || error),
           });
         }

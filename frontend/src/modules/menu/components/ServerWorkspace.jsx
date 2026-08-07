@@ -143,7 +143,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
   const [readyAlert, setReadyAlert] = useState(false);
   const [dailyStats, setDailyStats] = useState(null);
   const [activeOrders, setActiveOrders] = useState([]);
-  const [resuming, setResuming] = useState(true);
+  const [resuming, setResuming] = useState(false);
   const autoResumeRef = useRef(true);
 
   const loadActiveOrders = useCallback(async () => {
@@ -241,6 +241,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
 
     try {
       await loadLocalFirst({
+        loadSyncCache: () => getCachedMenuCatalog(restaurantId),
         loadCache: () => getCachedMenuCatalogAsync(restaurantId),
         fetchRemote: async () => {
           const catalog = await menuApi.getCatalog(restaurantId, true);
@@ -347,7 +348,7 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
             setResuming(false);
             return;
           }
-          if (!navigator.onLine) {
+          if (!navigator.onLine || shouldPreferLocalData()) {
             setResuming(false);
             return;
           }
@@ -423,15 +424,9 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
           recent: mineToday.slice(0, 6),
         });
       })
-      .catch(() =>
-        setDailyStats({
-          orders: 0,
-          clients: 0,
-          sales: 0,
-          paid: 0,
-          recent: [],
-        }),
-      );
+      .catch(() => {
+        /* conserve les stats précédentes — erreur réseau ≠ reset */
+      });
   }, [session, currentUser?.id, resuming]);
 
   const visibleDishes = useMemo(() => {
@@ -813,10 +808,6 @@ export default function ServerWorkspace({ restaurantId, currentUser }) {
     } finally {
       setBusy("");
     }
-  }
-
-  if (resuming) {
-    return <div className="p-6 text-sm font-semibold text-slate-500">Reprise de votre session...</div>;
   }
 
   const reportStats = dailyStats || { orders: 0, clients: 0, sales: 0, paid: 0, recent: [] };

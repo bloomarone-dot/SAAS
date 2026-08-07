@@ -11,6 +11,7 @@ import { tableApi } from "@/modules/menu/services/tableApi";
 import {
   cacheDeliveryAreas,
   cacheMenuCatalog,
+  cachePaymentModes,
   cacheRestaurantMeta,
   cacheStaffUsers,
   cacheTables,
@@ -73,6 +74,14 @@ async function warmSettings(restaurantId) {
       timeout: 6_000,
     });
     cacheRestaurantMeta(restaurantId, { settings });
+    if (settings?.payment_methods || settings?.tax_rate != null) {
+      cachePaymentModes(restaurantId, {
+        payment_methods: settings.payment_methods,
+        tax_rate: settings.tax_rate,
+        vat_rate: settings.vat_rate,
+        printers: settings.printers,
+      });
+    }
     return true;
   } catch {
     return false;

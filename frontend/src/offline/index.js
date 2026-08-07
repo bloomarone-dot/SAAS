@@ -71,12 +71,14 @@ export {
   bootstrapOfflineFirst,
   hydrateLocalWorkspace,
   refreshSessionBackground,
-  restoreLocalSession,
   runBackgroundSync,
-  SYNC_STATUS,
 } from "@/offline/bootstrap";
 
-export { loadLocalFirst } from "@/offline/localFirst";
+export { loadLocalFirst, applySyncCache } from "@/offline/localFirst";
+
+export { startSyncEngine, stopSyncEngine, resetSyncBackoff, getSyncBackoffMs } from "@/offline/syncEngine";
+
+export { OfflineQueryProvider, offlineQueryClient } from "@/offline/queryClient.jsx";
 
 export {
   flushOfflineQueue,

@@ -4,6 +4,7 @@ import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { DashboardSection, SecondaryAction } from "@/modules/admin/components/AdminUi";
 import { getApiBaseUrl } from "@/config/api";
 import { getToken, refreshAccessToken, clearToken, SESSION_EXPIRED_EVENT } from "@/config/http";
+import { isNetworkError } from "@/utils/network";
 
 async function downloadAuthenticated(path, filename) {
   const url = `${getApiBaseUrl()}${path}`;
@@ -19,7 +20,10 @@ async function downloadAuthenticated(path, filename) {
         headers: { Authorization: `Bearer ${token}` },
         credentials: "include",
       });
-    } catch {
+    } catch (error) {
+      if (isNetworkError(error)) {
+        throw new Error("Connexion indisponible — réessayez lorsque le réseau reviendra.");
+      }
       clearToken();
       window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
       throw new Error("Session expirée, veuillez vous reconnecter.");

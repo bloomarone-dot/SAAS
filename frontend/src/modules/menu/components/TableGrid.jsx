@@ -31,11 +31,11 @@ const tableSlots = [
 ];
 
 export default function TableGrid({ restaurantId, onSelectTable, readOnly = false }) {
-  const [tables, setTables] = useState([]);
+  const [tables, setTables] = useState(() => getCachedTables(restaurantId) || []);
   const [form, setForm] = useState(emptyTable);
   const [showForm, setShowForm] = useState(false);
   const [roomFilter, setRoomFilter] = useState('ALL');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !(getCachedTables(restaurantId)?.length));
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -90,6 +90,7 @@ export default function TableGrid({ restaurantId, onSelectTable, readOnly = fals
 
     try {
       await loadLocalFirst({
+        loadSyncCache: () => getCachedTables(restaurantId),
         loadCache: async () => (await getCachedTablesAsync(restaurantId)) || getCachedTables(restaurantId),
         fetchRemote: async () => {
           const data = await tableApi.getTables(restaurantId);

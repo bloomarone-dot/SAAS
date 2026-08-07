@@ -27,6 +27,13 @@ export const KITCHEN_STATUS_RANK = {
 
 export const MAX_QUEUE_SIZE = 150;
 export const MAX_ATTEMPTS = 5;
+export const MAX_RETRY_DELAY_MS = 120_000;
+
+/** Backoff exponentiel pour PendingOperations (2^n secondes, plafonné). */
+export function computeRetryDelayMs(attempts, baseMs = 1000) {
+  const n = Math.max(1, Number(attempts) || 1);
+  return Math.min(baseMs * 2 ** n, MAX_RETRY_DELAY_MS);
+}
 
 export function isLocalId(id) {
   return String(id || "").startsWith("local_");

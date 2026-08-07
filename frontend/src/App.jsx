@@ -170,17 +170,32 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [offlineReady, setOfflineReady] = useState(false);
   const [viewHistory, setViewHistory] = useState([]);
-  const [bootstrapping, setBootstrapping] = useState(
-    () => typeof window !== "undefined"
-      && Boolean(localStorage.getItem("access_token"))
-      && !initialRestore?.user,
-  );
+  const [bootstrapping, setBootstrapping] = useState(false);
+  const [backgroundSyncing, setBackgroundSyncing] = useState(false);
 
   useEffect(() => {
     if (!initialRestore?.user?.restaurant_id) return;
     const branding = loadCachedBranding(initialRestore.user.restaurant_id);
     if (branding) setRestaurantTheme(buildRestaurantTheme(branding));
   }, [initialRestore?.user?.restaurant_id]);
+
+  useEffect(() => {
+    function onSyncStart() {
+      setBackgroundSyncing(true);
+    }
+    function onSyncEnd() {
+      setBackgroundSyncing(false);
+      const stats = getOfflineQueueStats();
+      setOfflineQueueCount(stats.total);
+      setOfflineFailedCount(stats.failed);
+    }
+    window.addEventListener("offline-sync-started", onSyncStart);
+    window.addEventListener("offline-sync-finished", onSyncEnd);
+    return () => {
+      window.removeEventListener("offline-sync-started", onSyncStart);
+      window.removeEventListener("offline-sync-finished", onSyncEnd);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -264,28 +279,17 @@ export default function App() {
       if (cancelled) return;
 
       if (!result.opened) {
+        setBootstrapping(false);
         if (shouldPreferLocalData()) {
           setMessage("Hors ligne : reconnectez-vous une fois en ligne pour mémoriser la session.");
-          setBootstrapping(false);
           return;
         }
-        try {
-          const user = await apiFetch("/api/v1/auth/me", {
-            fallback: "Impossible de vérifier la session.",
-            timeout: 4_000,
-            softAuth: true,
-          });
-          openWithUser(user, { offline: false });
-        } catch (error) {
-          if (isNetworkError(error)) {
-            setMessage("Hors ligne : reconnectez-vous une fois en ligne pour mémoriser la session.");
-          } else if (!error?.message?.includes("Session serveur")) {
-            clearToken();
-            clearCachedSession();
-            if (shouldShowLoginForPath()) setShowLogin(true);
-          }
-          setBootstrapping(false);
-        }
+        refreshSessionBackground({
+          onUser: (user) => {
+            if (!cancelled) openWithUser(user, { offline: false, silent: true });
+          },
+        }).catch(() => {});
+        return;
       }
     }
 
@@ -613,14 +617,7 @@ export default function App() {
   }
 
   if (bootstrapping) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
-        <p className="text-base font-black text-slate-800">Ouverture de l&apos;application…</p>
-        <p className="max-w-sm text-sm font-semibold text-slate-500">
-          Reprise de votre session locale si la connexion est indisponible.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   if (!session && currentPath.startsWith("/reset-password")) {
@@ -765,6 +762,7 @@ export default function App() {
         queueCount={offlineQueueCount}
         failedCount={offlineFailedCount}
         offlineReady={offlineReady}
+        backgroundSyncing={backgroundSyncing}
         onMessage={setMessage}
         onQueueChange={() => {
           const stats = getOfflineQueueStats();
@@ -1254,22 +1252,27 @@ function SyncStatus({
   queueCount,
   failedCount = 0,
   offlineReady = false,
+  backgroundSyncing = false,
   onMessage,
   onQueueChange,
 }) {
   const [syncing, setSyncing] = useState(false);
   const pendingCount = Math.max(0, queueCount - failedCount);
+  const isSyncing = syncing || backgroundSyncing;
 
-  // Badge connexion toujours visible — ne bloque jamais l'utilisateur.
-  const onlineLabel = isOnline && !shouldPreferLocalData() ? "En ligne" : "Hors ligne";
-  const onlineTone = isOnline && !shouldPreferLocalData()
-    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-    : "border-red-200 bg-red-50 text-red-700";
+  const online = isOnline && !shouldPreferLocalData();
+  const onlineLabel = isSyncing ? "Synchronisation…" : online ? "En ligne" : "Hors ligne";
+  const onlineIcon = isSyncing ? "🟡" : online ? "🟢" : "🔴";
+  const onlineTone = isSyncing
+    ? "border-amber-200 bg-amber-50 text-amber-800"
+    : online
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      : "border-red-200 bg-red-50 text-red-700";
 
-  if (!syncing && queueCount === 0) {
+  if (!isSyncing && queueCount === 0) {
     return (
       <div className={`mb-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black ${onlineTone}`}>
-        <span aria-hidden>{isOnline && !shouldPreferLocalData() ? "🟢" : "🔴"}</span>
+        <span aria-hidden>{onlineIcon}</span>
         {onlineLabel}
       </div>
     );

@@ -11,6 +11,7 @@ import {
   isLocalId,
   sortQueueForFlush,
   TYPE_PRIORITY,
+  computeRetryDelayMs,
 } from "./syncHelpers.js";
 
 describe("isLocalId", () => {
@@ -109,5 +110,13 @@ describe("isConflictResolved", () => {
   it("reconnaît déjà payée", () => {
     assert.equal(isConflictResolved(new Error("Cette commande est déjà payée")), true);
     assert.equal(isConflictResolved(new Error("Stock insuffisant")), false);
+  });
+});
+
+describe("computeRetryDelayMs", () => {
+  it("applique un backoff exponentiel plafonné", () => {
+    assert.equal(computeRetryDelayMs(1), 2000);
+    assert.equal(computeRetryDelayMs(2), 4000);
+    assert.equal(computeRetryDelayMs(10), 120_000);
   });
 });

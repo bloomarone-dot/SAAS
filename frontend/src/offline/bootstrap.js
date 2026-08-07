@@ -14,6 +14,7 @@ import {
   getCachedTablesAsync,
   getCachedDeliveryAreasAsync,
   getCachedStaffUsersAsync,
+  getCachedPaymentModesAsync,
 } from "@/utils/offlineCache";
 import {
   isAccessTokenUsable,
@@ -37,13 +38,14 @@ export async function hydrateLocalWorkspace(restaurantId) {
 
   await initOfflineFoundation().catch(() => {});
 
-  const [menu, tables, areas, staff, meta, branding] = await Promise.all([
+  const [menu, tables, areas, staff, meta, branding, paymentModes] = await Promise.all([
     getCachedMenuCatalogAsync(restaurantId).catch(() => null),
     getCachedTablesAsync(restaurantId).catch(() => null),
     getCachedDeliveryAreasAsync(restaurantId).catch(() => null),
     getCachedStaffUsersAsync(restaurantId).catch(() => null),
     getCachedRestaurantMetaAsync(restaurantId).catch(() => null),
     Promise.resolve(loadCachedBranding(restaurantId)),
+    getCachedPaymentModesAsync(restaurantId).catch(() => null),
   ]);
 
   const ready = Boolean(
@@ -60,6 +62,7 @@ export async function hydrateLocalWorkspace(restaurantId) {
       staff: Array.isArray(staff) ? staff.length : 0,
       branding: Boolean(branding || meta?.branding),
       settings: Boolean(meta?.settings),
+      paymentModes: Boolean(paymentModes),
     },
   };
 }

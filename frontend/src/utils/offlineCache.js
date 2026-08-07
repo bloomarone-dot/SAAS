@@ -218,3 +218,33 @@ export async function getCachedRestaurantMetaAsync(restaurantId) {
     return null;
   }
 }
+
+const PAYMENT_MODES_KEY = "offline_payment_modes_cache";
+
+export function cachePaymentModes(restaurantId, modes) {
+  if (!restaurantId || !modes) return;
+  write(PAYMENT_MODES_KEY, restaurantId, modes);
+  initOfflineFoundation()
+    .then(() =>
+      idbPut(STORES.meta, {
+        key: `payment_modes:${restaurantId}`,
+        modes,
+        savedAt: new Date().toISOString(),
+      }),
+    )
+    .catch(() => {});
+}
+
+export async function getCachedPaymentModesAsync(restaurantId) {
+  const data = read(PAYMENT_MODES_KEY);
+  if (data && data.restaurantId === restaurantId) return data.payload;
+  try {
+    await initOfflineFoundation();
+    const row = await idbGet(STORES.meta, `payment_modes:${restaurantId}`);
+    if (!row?.modes) return null;
+    write(PAYMENT_MODES_KEY, restaurantId, row.modes);
+    return row.modes;
+  } catch {
+    return null;
+  }
+}

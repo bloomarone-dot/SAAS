@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DashboardIcon } from "@/components/dashboard/icons";
 import { AdminCard, AdminPage, DashboardSection, EmptyState, Field, FilterBar, IconButton, PrimaryAction, SearchBox, SecondaryAction, StatCard, StatusPill, TableFooter } from "@/modules/admin/components/AdminUi";
+import { getCachedMenuCatalog, getCachedMenuCatalogAsync } from "@/utils/offlineCache";
+import { loadLocalFirst } from "@/offline/localFirst";
 import { menuApi } from "../services/menuApi";
 
 const emptyForm = { name: "", description: "", image_url: "" };
@@ -13,7 +15,7 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(showCreateOnMount);
   const [editingId, setEditingId] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !getCachedMenuCatalog(restaurantId)?.categories?.length);
   const [error, setError] = useState("");
   const createOnly = showCreateOnMount;
   const canEdit = ["ADMIN", "MANAGER", "CUISINE", "STOCK"].includes(role);
@@ -27,6 +29,20 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
     .sort((a, b) => (dishesByCategory[b.id]?.length || 0) - (dishesByCategory[a.id]?.length || 0))
     .slice(0, 5);
 
+  const applyCatalog = useCallback((catalog) => {
+    const categories = catalog?.categories || [];
+    const dishes = catalog?.dishes || [];
+    const grouped = {};
+    for (const dish of dishes) {
+      const key = dish.category_id;
+      if (!key) continue;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(dish);
+    }
+    setCategories(categories);
+    setDishesByCategory(grouped);
+  }, []);
+
   useEffect(() => {
     loadCategories();
   }, [restaurantId]);
@@ -36,13 +52,26 @@ export default function CategoriesPage({ restaurantId, role, showCreateOnMount =
   }, [showCreateOnMount]);
 
   async function loadCategories() {
-    setLoading(true);
+    if (!restaurantId) return;
     setError("");
+    const hasCache = Boolean(getCachedMenuCatalog(restaurantId)?.categories?.length);
+    if (!hasCache) setLoading(true);
+
     try {
-      const data = await menuApi.getCategories(restaurantId);
-      const entries = await Promise.all(data.map(async (category) => [category.id, await menuApi.getDishesByCategory(category.id)]));
-      setCategories(data);
-      setDishesByCategory(Object.fromEntries(entries));
+      await loadLocalFirst({
+        loadSyncCache: () => getCachedMenuCatalog(restaurantId),
+        loadCache: () => getCachedMenuCatalogAsync(restaurantId),
+        fetchRemote: async () => {
+          const data = await menuApi.getCategories(restaurantId);
+          const entries = await Promise.all(
+            data.map(async (category) => [category.id, await menuApi.getDishesByCategory(category.id)]),
+          );
+          const dishes = entries.flatMap(([, rows]) => rows);
+          return { categories: data, dishes };
+        },
+        apply: applyCatalog,
+        onNotice: () => {},
+      });
     } catch {
       setError("Impossible de charger les catégories du restaurant.");
     } finally {

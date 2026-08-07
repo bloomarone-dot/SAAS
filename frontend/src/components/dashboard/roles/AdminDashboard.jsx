@@ -97,7 +97,6 @@ export function AdminDashboard({ overrides = {} }) {
         timeout: 30_000,
       }));
     } catch (error) {
-      setData(null);
       const detail = error.message || "Impossible de charger les analyses du tableau de bord.";
       setLoadError(error.status ? `${detail} (HTTP ${error.status})` : detail);
     } finally {
