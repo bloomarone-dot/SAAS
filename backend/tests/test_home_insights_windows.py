@@ -1,8 +1,10 @@
 """Fenêtres de comparaison home-insights (jour / semaine / mois)."""
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 from unittest.mock import patch
 
 
@@ -123,6 +125,78 @@ class AnalyticsBoundsTests(unittest.TestCase):
         self.assertIsNone(end.tzinfo)
         self.assertEqual(start, datetime(2026, 8, 6, 23, 0, 0))
         self.assertEqual(end, datetime(2026, 8, 7, 22, 59, 59))
+
+
+class OrderActivityDatetimeTests(unittest.TestCase):
+    def setUp(self):
+        from app.modules.dashboard import router as dashboard_router
+
+        dashboard_router._order_paid_at_available_cache = None
+
+    def test_order_activity_at_falls_back_without_paid_at_column(self):
+        from app.modules.dashboard import router as dashboard_router
+
+        inspector = type("Inspector", (), {})()
+        inspector.get_table_names = lambda: ["customer_orders"]
+        inspector.get_columns = lambda _name: [{"name": "updated_at"}, {"name": "created_at"}]
+        db = type("DB", (), {"bind": type("Bind", (), {})()})()
+        with unittest.mock.patch("app.modules.dashboard.router.inspect", return_value=inspector):
+            dashboard_router._order_paid_at_available_cache = None
+            expr = dashboard_router._order_activity_at(db)
+        self.assertIsNotNone(expr)
+
+    def test_order_activity_datetime_prefers_paid_at(self):
+        from app.modules.dashboard.router import _order_activity_datetime
+
+        paid = datetime(2026, 8, 7, 12, 0, 0)
+        updated = datetime(2026, 8, 7, 11, 0, 0)
+        order = type("Order", (), {"paid_at": paid, "updated_at": updated, "created_at": updated})()
+        self.assertEqual(_order_activity_datetime(order), paid)
+
+
+class DashboardAnalyticsTests(unittest.TestCase):
+    def test_dashboard_analytics_returns_json_serializable_payload(self):
+        from app.modules.dashboard import router as dashboard_router
+        from app.modules.permissions.models import Role
+        from fastapi.encoders import jsonable_encoder
+        import json
+
+        user = type("U", (), {"restaurant_id": "resto-1", "role": Role.ADMIN, "is_owner": True, "permissions": []})()
+        db = unittest.mock.MagicMock()
+        db.bind = unittest.mock.MagicMock()
+
+        with unittest.mock.patch.object(dashboard_router, "build_sales_metrics", return_value={
+            "revenue": 100.0,
+            "profit": 40.0,
+            "orders_count": 2,
+            "by_channel": {
+                "REPAS": {"revenue": 60.0, "profit": 24.0, "orders": set()},
+                "BOISSON": {"revenue": 40.0, "profit": 16.0, "orders": set()},
+            },
+            "by_branch": {},
+        }), unittest.mock.patch.object(
+            dashboard_router, "_paid_orders", return_value=[]
+        ), unittest.mock.patch.object(
+            dashboard_router, "read_menu_item_context", return_value={}
+        ), unittest.mock.patch.object(
+            dashboard_router, "compute_stock_alerts", return_value=[]
+        ), unittest.mock.patch.object(
+            dashboard_router, "build_branch_points", return_value=[]
+        ), unittest.mock.patch.object(
+            dashboard_router, "build_weekly_revenue", return_value=[]
+        ):
+            payload = dashboard_router.dashboard_analytics(
+                start_date=datetime(2026, 8, 7, 0, 0, 0),
+                end_date=datetime(2026, 8, 7, 23, 59, 59),
+                branch_id=None,
+                category=None,
+                current_user=user,
+                db=db,
+            )
+
+        json.dumps(jsonable_encoder(payload))
+        self.assertIn("kpis", payload)
+        self.assertEqual(payload["kpis"]["revenue"], 100.0)
 
 
 if __name__ == "__main__":

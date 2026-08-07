@@ -42,6 +42,7 @@ class RestaurantPublic(OrmModel):
     nui: Optional[str] = None
     tax_id: Optional[str] = None
     legal_name: Optional[str] = None
+    receipt_tagline: Optional[str] = None
     bloomar_commission_rate: float = 0
     primary_color: str
     secondary_color: str
@@ -65,6 +66,7 @@ class RestaurantBrandingPublic(OrmModel):
     slug: str
     logo_url: Optional[str] = None
     legal_name: Optional[str] = None
+    receipt_tagline: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
     country: Optional[str] = None
@@ -169,6 +171,7 @@ class RestaurantSettingsIn(BaseModel):
     nui: Optional[str] = Field(default=None, max_length=100)
     tax_id: Optional[str] = Field(default=None, max_length=100)
     legal_name: Optional[str] = Field(default=None, max_length=191, pattern=NAME_PATTERN)
+    receipt_tagline: Optional[str] = Field(default=None, max_length=120)
     primary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")

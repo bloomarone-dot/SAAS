@@ -35,6 +35,7 @@ class Restaurant(Base):
     nui: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tax_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     legal_name: Mapped[str | None] = mapped_column(String(191), nullable=True)
+    receipt_tagline: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Commission Bloomar One prélevée sur le brut des paiements Mobile Money (en %).
     # Réglée par le SUPERADMIN, par tenant. 0 par défaut.
     bloomar_commission_rate: Mapped[float] = mapped_column(Float, default=0, nullable=False)

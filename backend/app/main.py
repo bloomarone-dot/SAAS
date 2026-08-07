@@ -153,6 +153,7 @@ def create_tables() -> None:
     """Cree les tables au demarrage tant qu'Alembic n'est pas installe."""
     Base.metadata.create_all(bind=engine)
     ensure_restaurant_settings_columns()
+    ensure_receipt_taglines()
     ensure_table_columns()
     ensure_menu_category_columns()
     ensure_menu_item_columns()
@@ -319,6 +320,8 @@ def ensure_restaurant_settings_columns() -> None:
         "background_color": "VARCHAR(20) NOT NULL DEFAULT '#FFFFFF'",
         "text_color": "VARCHAR(20) NOT NULL DEFAULT '#0F172A'",
         "button_color": "VARCHAR(20) NOT NULL DEFAULT '#078D50'",
+        "timezone": "VARCHAR(50) NOT NULL DEFAULT 'Africa/Douala'",
+        "receipt_tagline": "VARCHAR(120) NULL",
     }
     missing = [(name, definition) for name, definition in columns.items() if name not in existing]
 
@@ -327,6 +330,31 @@ def ensure_restaurant_settings_columns() -> None:
             connection.execute(text(f"ALTER TABLE restaurants ADD COLUMN {name} {definition}"))
         if "subdomain" in existing or any(name == "subdomain" for name, _definition in missing):
             connection.execute(text("UPDATE restaurants SET subdomain = slug WHERE subdomain IS NULL OR subdomain = ''"))
+
+
+def ensure_receipt_taglines() -> None:
+    """Renseigne les mentions reçu par défaut pour les tenants connus."""
+    inspector = inspect(engine)
+    if "restaurants" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("restaurants")}
+    if "receipt_tagline" not in existing:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE restaurants
+                SET receipt_tagline = 'Halal'
+                WHERE receipt_tagline IS NULL
+                  AND (
+                    slug IN ('delice-cryspy', 'delicecryspy')
+                    OR subdomain = 'delicecryspy'
+                    OR LOWER(name) LIKE '%delice%cryspy%'
+                  )
+                """
+            )
+        )
 
 
 def ensure_order_columns() -> None:

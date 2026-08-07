@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone as dt_timezone
 import calendar
+import logging
 from zoneinfo import ZoneInfo
 
 from app.modules.shared.models import utcnow
 
 from sqlalchemy import MetaData, Table, func, inspect, select
 from sqlalchemy.orm import Session, selectinload
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_db
 from app.dependencies import assert_permission, require_tenant_user
@@ -28,8 +29,10 @@ from app.modules.stock.models import StockItem, StockRecipeIngredient
 from app.modules.users.models import User
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+logger = logging.getLogger(__name__)
 
 ORDER_TABLE_CANDIDATES = ("customer_orders", "orders", "commandes", "restaurant_orders", "sales")
+_order_paid_at_available_cache: bool | None = None
 REVENUE_COLUMN_CANDIDATES = (
     "total_amount",
     "total",
@@ -159,6 +162,41 @@ def _coerce_db_datetime(value: datetime | None) -> datetime | None:
     return value
 
 
+def _order_paid_at_available(db: Session) -> bool:
+    """True si la colonne paid_at existe réellement en base (schéma prod parfois en retard)."""
+    global _order_paid_at_available_cache
+    if _order_paid_at_available_cache is not None:
+        return _order_paid_at_available_cache
+    inspector = inspect(db.bind)
+    if "customer_orders" not in inspector.get_table_names():
+        _order_paid_at_available_cache = False
+        return False
+    existing = {column["name"] for column in inspector.get_columns("customer_orders")}
+    _order_paid_at_available_cache = "paid_at" in existing
+    return _order_paid_at_available_cache
+
+
+def _order_activity_at(db: Session):
+    """Horodatage métier d'une vente encaissée (paid_at si disponible, sinon updated_at)."""
+    if _order_paid_at_available(db):
+        return func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at, CustomerOrder.created_at)
+    return func.coalesce(CustomerOrder.updated_at, CustomerOrder.created_at)
+
+
+def _order_activity_datetime(order: CustomerOrder) -> datetime | None:
+    if order.paid_at:
+        return order.paid_at
+    if order.updated_at:
+        return order.updated_at
+    return order.created_at
+
+
+def _model_to_dict(model) -> dict:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 def _assert_dashboard_reader(user: User) -> None:
     """Accès lecture dashboard : admin/owner ou permission paramètres."""
     role = getattr(user, "role", None)
@@ -197,6 +235,7 @@ def _channel_set(category: str | None) -> set[str]:
 
 
 def _paid_orders(db: Session, restaurant_id: str, start: datetime, end: datetime, branch_id: str | None = None):
+    activity_at = _order_activity_at(db)
     query = (
         db.query(CustomerOrder)
         .options(selectinload(CustomerOrder.items))
@@ -204,8 +243,8 @@ def _paid_orders(db: Session, restaurant_id: str, start: datetime, end: datetime
             CustomerOrder.restaurant_id == restaurant_id,
             CustomerOrder.status.in_(PAID_STATUSES),
             CustomerOrder.deleted_at.is_(None),
-            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start,
-            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end,
+            activity_at >= start,
+            activity_at <= end,
         )
     )
     if branch_id:
@@ -216,7 +255,10 @@ def _paid_orders(db: Session, restaurant_id: str, start: datetime, end: datetime
 def compute_hourly_sales(orders, start_hour: int = 8, end_hour: int = 22) -> list[dict]:
     buckets = {hour: 0.0 for hour in range(start_hour, end_hour + 1)}
     for order in orders:
-        hour = (order.updated_at or order.created_at).hour
+        ref = _order_activity_datetime(order)
+        if not ref:
+            continue
+        hour = ref.hour
         if hour in buckets:
             buckets[hour] += float(order.total_amount or 0)
     return [{"hour": f"{hour:02d}h", "revenue": round(value, 2)} for hour, value in buckets.items()]
@@ -303,7 +345,7 @@ def compute_stock_alerts(db: Session, restaurant_id: str, limit: int = 10) -> li
             alerts.append({
                 "id": item.id,
                 "name": item.name,
-                "current_stock": round(current, 2),
+                "current_stock": float(round(current, 2)),
                 "minimum_stock": threshold,
             })
     alerts.sort(key=lambda a: a["current_stock"] - a["minimum_stock"])
@@ -340,46 +382,59 @@ def dashboard_analytics(
     restaurant_id = current_user.restaurant_id
     start, end = _analytics_bounds(start_date, end_date)
 
-    metrics = build_sales_metrics(db, restaurant_id, start, end)
-    channels = _channel_set(category)
-    revenue, profit, orders_count, meal_revenue, drink_revenue = _scoped_channel_totals(metrics, branch_id, channels)
+    try:
+        metrics = build_sales_metrics(db, restaurant_id, start, end)
+        channels = _channel_set(category)
+        revenue, profit, orders_count, meal_revenue, drink_revenue = _scoped_channel_totals(metrics, branch_id, channels)
 
-    # Comparaison avec la période équivalente précédente (vs hier par défaut).
-    duration = end - start
-    prev_metrics = build_sales_metrics(db, restaurant_id, start - duration, start)
-    prev_revenue, _prev_profit, prev_orders, _pm, _pd = _scoped_channel_totals(prev_metrics, branch_id, channels)
+        # Comparaison avec la période équivalente précédente (vs hier par défaut).
+        duration = end - start
+        prev_metrics = build_sales_metrics(db, restaurant_id, start - duration, start)
+        prev_revenue, _prev_profit, prev_orders, _pm, _pd = _scoped_channel_totals(prev_metrics, branch_id, channels)
 
-    orders = _paid_orders(db, restaurant_id, start, end, branch_id)
-    menu_ctx = read_menu_item_context(db, restaurant_id)
-    average_ticket = round(revenue / orders_count, 0) if orders_count else 0
-    prev_ticket = round(prev_revenue / prev_orders, 0) if prev_orders else 0
+        orders = _paid_orders(db, restaurant_id, start, end, branch_id)
+        menu_ctx = read_menu_item_context(db, restaurant_id)
+        average_ticket = round(revenue / orders_count, 0) if orders_count else 0
+        prev_ticket = round(prev_revenue / prev_orders, 0) if prev_orders else 0
 
-    return {
-        "period": {"start": start.isoformat(), "end": end.isoformat()},
-        "kpis": {
-            "revenue": round(revenue, 2),
-            "revenue_variation": _variation(revenue, prev_revenue),
-            "profit": round(profit, 2),
-            "orders_count": orders_count,
-            "orders_variation": _variation(orders_count, prev_orders),
-            "average_ticket": average_ticket,
-            "average_ticket_variation": _variation(average_ticket, prev_ticket),
-            "margin_rate": round(profit / revenue * 100, 1) if revenue else 0,
-            "clients_served": orders_count,
-        },
-        "hourly_sales": compute_hourly_sales(orders),
-        "sales_chart": build_weekly_revenue(db, restaurant_id, start, end),
-        "meal_vs_drink": {
-            "meal": round(meal_revenue, 2),
-            "drink": round(drink_revenue, 2),
-        },
-        "top_products": compute_top_products(orders, menu_ctx, category),
-        "payment_methods": compute_payment_methods(orders),
-        "employee_performance": compute_employee_performance(db, restaurant_id, orders),
-        "realtime_orders": compute_realtime_orders(db, restaurant_id),
-        "stock_alerts": compute_stock_alerts(db, restaurant_id),
-        "branches": [point.model_dump() for point in build_branch_points(db, restaurant_id, revenue or 1, metrics)],
-    }
+        stock_alerts: list[dict] = []
+        try:
+            stock_alerts = compute_stock_alerts(db, restaurant_id)
+        except Exception:
+            logger.exception("dashboard analytics stock_alerts failed for restaurant %s", restaurant_id)
+
+        return {
+            "period": {"start": start.isoformat(), "end": end.isoformat()},
+            "kpis": {
+                "revenue": round(revenue, 2),
+                "revenue_variation": _variation(revenue, prev_revenue),
+                "profit": round(profit, 2),
+                "orders_count": orders_count,
+                "orders_variation": _variation(orders_count, prev_orders),
+                "average_ticket": average_ticket,
+                "average_ticket_variation": _variation(average_ticket, prev_ticket),
+                "margin_rate": round(profit / revenue * 100, 1) if revenue else 0,
+                "clients_served": orders_count,
+            },
+            "hourly_sales": compute_hourly_sales(orders),
+            "sales_chart": [_model_to_dict(point) for point in build_weekly_revenue(db, restaurant_id, start, end)],
+            "meal_vs_drink": {
+                "meal": round(meal_revenue, 2),
+                "drink": round(drink_revenue, 2),
+            },
+            "top_products": compute_top_products(orders, menu_ctx, category),
+            "payment_methods": compute_payment_methods(orders),
+            "employee_performance": compute_employee_performance(db, restaurant_id, orders),
+            "realtime_orders": compute_realtime_orders(db, restaurant_id),
+            "stock_alerts": stock_alerts,
+            "branches": [_model_to_dict(point) for point in build_branch_points(db, restaurant_id, revenue or 1, metrics)],
+        }
+    except Exception as exc:
+        logger.exception("dashboard analytics failed for restaurant %s", restaurant_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Impossible de calculer les indicateurs du tableau de bord.",
+        ) from exc
 
 
 @router.get("/daily-report")
@@ -614,12 +669,12 @@ def aggregate_cashier_performance(
         .filter(
             CustomerOrder.restaurant_id == restaurant_id,
             CustomerOrder.deleted_at.is_(None),
-            CustomerOrder.status.in_(PAID_STATUSES),
             CustomerOrder.cashier_id.isnot(None),
-            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start,
-            func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end,
+            CustomerOrder.status.in_(PAID_STATUSES),
         )
     )
+    activity_at = _order_activity_at(db)
+    query = query.filter(activity_at >= start, activity_at <= end)
     if cashier_id:
         query = query.filter(CustomerOrder.cashier_id == cashier_id)
     if branch_id:
@@ -674,9 +729,9 @@ def build_sales_metrics(db: Session, restaurant_id: str, start_date: datetime | 
         .filter(CustomerOrder.deleted_at.is_(None))
     )
     if start_date:
-        query = query.filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) >= start_date)
+        query = query.filter(_order_activity_at(db) >= start_date)
     if end_date:
-        query = query.filter(func.coalesce(CustomerOrder.paid_at, CustomerOrder.updated_at) <= end_date)
+        query = query.filter(_order_activity_at(db) <= end_date)
     orders = (
         query.all()
     )
@@ -730,36 +785,70 @@ def empty_channel_metrics() -> dict:
 
 
 def read_recipe_costs(db: Session, restaurant_id: str) -> dict[str, float]:
-    manual_rows = (
-        db.query(MenuItem.id, MenuItem.cost_per_dish)
-        .filter(MenuItem.restaurant_id == restaurant_id, MenuItem.cost_per_dish > 0)
-        .all()
-    )
-    manual_costs = {menu_item_id: float(cost or 0) for menu_item_id, cost in manual_rows}
-    rows = (
-        db.query(
-            StockRecipeIngredient.menu_item_id,
-            func.coalesce(func.sum(StockRecipeIngredient.quantity_per_dish * StockItem.purchase_price), 0),
-        )
-        .join(StockItem, StockItem.id == StockRecipeIngredient.stock_item_id)
-        .filter(StockRecipeIngredient.restaurant_id == restaurant_id)
-        .group_by(StockRecipeIngredient.menu_item_id)
-        .all()
-    )
-    recipe_costs = {menu_item_id: float(cost or 0) for menu_item_id, cost in rows}
+    manual_costs: dict[str, float] = {}
+    recipe_costs: dict[str, float] = {}
+    inspector = inspect(db.bind)
+    tables = set(inspector.get_table_names())
+    if "menu_items" in tables:
+        menu_columns = {column["name"] for column in inspector.get_columns("menu_items")}
+        if "cost_per_dish" in menu_columns:
+            manual_rows = (
+                db.query(MenuItem.id, MenuItem.cost_per_dish)
+                .filter(MenuItem.restaurant_id == restaurant_id, MenuItem.cost_per_dish > 0)
+                .all()
+            )
+            manual_costs = {menu_item_id: float(cost or 0) for menu_item_id, cost in manual_rows}
+    if "stock_recipe_ingredients" in tables and "products" in tables:
+        try:
+            rows = (
+                db.query(
+                    StockRecipeIngredient.menu_item_id,
+                    func.coalesce(func.sum(StockRecipeIngredient.quantity_per_dish * StockItem.purchase_price), 0),
+                )
+                .join(StockItem, StockItem.id == StockRecipeIngredient.stock_item_id)
+                .filter(StockRecipeIngredient.restaurant_id == restaurant_id)
+                .group_by(StockRecipeIngredient.menu_item_id)
+                .all()
+            )
+            recipe_costs = {menu_item_id: float(cost or 0) for menu_item_id, cost in rows}
+        except Exception:
+            logger.exception("read_recipe_costs failed for restaurant %s", restaurant_id)
     return {**recipe_costs, **manual_costs}
 
 
 def read_menu_item_context(db: Session, restaurant_id: str) -> dict[str, tuple[str | None, str | None, str | None, str | None, str | None]]:
-    rows = (
-        db.query(MenuItem.id, MenuItem.name, MenuItem.description, MenuItem.sale_channel, MenuCategory.name, MenuCategory.description)
+    inspector = inspect(db.bind)
+    if "menu_items" not in inspector.get_table_names():
+        return {}
+    existing = {column["name"] for column in inspector.get_columns("menu_items")}
+    has_sale_channel = "sale_channel" in existing
+    base_query = (
+        db.query(MenuItem.id, MenuItem.name, MenuItem.description, MenuCategory.name, MenuCategory.description)
         .outerjoin(MenuCategory, MenuCategory.id == MenuItem.category_id)
         .filter(MenuItem.restaurant_id == restaurant_id)
-        .all()
     )
+    if has_sale_channel:
+        rows = (
+            db.query(
+                MenuItem.id,
+                MenuItem.name,
+                MenuItem.description,
+                MenuItem.sale_channel,
+                MenuCategory.name,
+                MenuCategory.description,
+            )
+            .outerjoin(MenuCategory, MenuCategory.id == MenuItem.category_id)
+            .filter(MenuItem.restaurant_id == restaurant_id)
+            .all()
+        )
+        return {
+            item_id: (name, description, sale_channel, category_name, category_description)
+            for item_id, name, description, sale_channel, category_name, category_description in rows
+        }
+    rows = base_query.all()
     return {
-        item_id: (name, description, sale_channel, category_name, category_description)
-        for item_id, name, description, sale_channel, category_name, category_description in rows
+        item_id: (name, description, None, category_name, category_description)
+        for item_id, name, description, category_name, category_description in rows
     }
 
 
@@ -803,16 +892,20 @@ def build_weekly_revenue(
 
     start = start_date or datetime.combine(days[0], datetime.min.time())
     end = end_date or datetime.combine(days[-1], datetime.max.time())
+    activity_at = _order_activity_at(db)
     orders = (
         db.query(CustomerOrder)
         .filter(CustomerOrder.restaurant_id == restaurant_id)
         .filter(CustomerOrder.status.in_(PAID_STATUSES))
-        .filter(CustomerOrder.updated_at >= start)
-        .filter(CustomerOrder.updated_at <= end)
+        .filter(activity_at >= start)
+        .filter(activity_at <= end)
         .all()
     )
     for order in orders:
-        day = order.updated_at.date()
+        ref = _order_activity_datetime(order)
+        if not ref:
+            continue
+        day = ref.date()
         if day in totals:
             totals[day]["revenue"] += float(order.total_amount or 0)
             totals[day]["orders_count"] += 1
@@ -947,7 +1040,7 @@ def build_recent_activities(db: Session, restaurant_id: str) -> list[AdminDashbo
             CustomerOrder.restaurant_id == restaurant_id,
             CustomerOrder.status.in_(["Payée", "Payee"]),
         )
-        .order_by(CustomerOrder.paid_at.desc())
+        .order_by(_order_activity_at(db).desc())
         .limit(3)
         .all()
     )

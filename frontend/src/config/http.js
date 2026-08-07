@@ -275,10 +275,14 @@ async function request(path, options = {}) {
 
   if (!response.ok) {
     if (responseType === "text") {
-      throw new Error(await readErrorFromTextResponse(response, fallback));
+      const err = new Error(await readErrorFromTextResponse(response, fallback));
+      err.status = response.status;
+      throw err;
     }
     const data = await response.json().catch(() => null);
-    throw new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
+    const err = new Error(formatApiError(data?.detail ?? data?.message ?? data?.error, fallback));
+    err.status = response.status;
+    throw err;
   }
 
   if (typeof window !== "undefined") {

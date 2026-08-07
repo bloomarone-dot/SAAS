@@ -1389,6 +1389,7 @@ function receiptHtml(order, restaurant, currentUser) {
   const restaurantName = (restaurant?.name || restaurant?.legal_name || "").trim() || "Établissement";
   const legalName = (restaurant?.legal_name || "").trim();
   const showLegalName = legalName && legalName.toLowerCase() !== restaurantName.toLowerCase();
+  const receiptTagline = (restaurant?.receipt_tagline || "").trim();
   const rawLogo = restaurant?.logo_url || "";
   const logoUrl = rawLogo && !/^https?:\/\//i.test(rawLogo)
     ? `${getApiBaseUrl()}${rawLogo.startsWith("/") ? "" : "/"}${rawLogo}`
@@ -1463,6 +1464,13 @@ function receiptHtml(order, restaurant, currentUser) {
           .meta { display: grid; grid-template-columns: 26mm 1fr; gap: 3px 2mm; font-size: 12px; }
           .meta strong { white-space: nowrap; font-weight: 800; }
           .title { font-size: 15px; font-weight: 800; letter-spacing: 0.3px; }
+          .tagline {
+            margin: 2px 0 6px;
+            font-size: 14px;
+            font-weight: 900;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+          }
           table { width: 100%; border-collapse: collapse; table-layout: fixed; }
           th {
             padding: 4px 0;
@@ -1504,6 +1512,7 @@ function receiptHtml(order, restaurant, currentUser) {
         <div class="receipt">
           ${logoUrl ? `<p class="center"><img class="logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(restaurantName)}" /></p>` : ""}
           <h1>${escapeHtml(restaurantName)}</h1>
+          ${receiptTagline ? `<p class="center tagline">${escapeHtml(receiptTagline)}</p>` : ""}
           ${showLegalName ? `<p class="center muted">${escapeHtml(legalName)}</p>` : ""}
           ${restaurantLines.map((line) => `<p class="center muted">${escapeHtml(line)}</p>`).join("")}
           ${restaurant?.nui ? `<p class="center"><strong>NUI : ${escapeHtml(restaurant.nui)}</strong></p>` : ""}

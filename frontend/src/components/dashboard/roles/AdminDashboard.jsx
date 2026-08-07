@@ -94,10 +94,12 @@ export function AdminDashboard({ overrides = {} }) {
       if (branchId) query.set("branch_id", branchId);
       setData(await apiFetch(`/api/v1/dashboard/analytics?${query}`, {
         fallback: "Impossible de charger les analyses du tableau de bord.",
+        timeout: 30_000,
       }));
     } catch (error) {
       setData(null);
-      setLoadError(error.message || "Impossible de charger les analyses du tableau de bord.");
+      const detail = error.message || "Impossible de charger les analyses du tableau de bord.";
+      setLoadError(error.status ? `${detail} (HTTP ${error.status})` : detail);
     } finally {
       setIsLoading(false);
     }

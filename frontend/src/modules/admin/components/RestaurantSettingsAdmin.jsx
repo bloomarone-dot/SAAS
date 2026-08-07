@@ -13,6 +13,7 @@ import { PERMISSIONS } from "@/config/menu";
 const emptySettings = {
   name: "",
   legal_name: "",
+  receipt_tagline: "",
   subdomain: "",
   custom_domain: "",
   description: "",
@@ -78,6 +79,7 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
       setForm({
         name: data.name ?? "",
         legal_name: data.legal_name ?? "",
+        receipt_tagline: data.receipt_tagline ?? "",
         subdomain: data.subdomain ?? data.slug ?? "",
         custom_domain: data.custom_domain ?? "",
         description: data.description ?? "",
@@ -209,6 +211,7 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
       const payload = {
         name: form.name.trim(),
         legal_name: optionalText(form.legal_name),
+        receipt_tagline: optionalText(form.receipt_tagline),
         subdomain: optionalText(form.subdomain),
         custom_domain: optionalText(form.custom_domain),
         description: optionalText(form.description),
@@ -302,6 +305,7 @@ export function RestaurantSettingsAdmin({ currentUser, onMessage, onThemeChange 
               <div className="grid gap-4 md:grid-cols-2">
                 <Field name="name" label="Nom du restaurant" value={form.name} onChange={updateField} required disabled={fieldsDisabled} />
                 <Field name="legal_name" label="Raison sociale" value={form.legal_name} onChange={updateField} disabled={fieldsDisabled} />
+                <Field name="receipt_tagline" label="Mention sur le reçu" value={form.receipt_tagline} onChange={updateField} placeholder="ex. Halal" disabled={fieldsDisabled} />
                 <Field name="subdomain" label="Sous-domaine public" value={form.subdomain} onChange={updateField} placeholder="ex: leboncoin" disabled={fieldsDisabled} />
                 <Field name="custom_domain" label="Domaine personnalisé" value={form.custom_domain} onChange={updateField} placeholder="ex: commande.restaurant.cm" disabled={fieldsDisabled} />
                 <Field name="nui" label="NUI (Numéro d’identifiant unique)" value={form.nui} onChange={updateField} disabled={fieldsDisabled} />
