@@ -14,7 +14,11 @@ export const TYPE_PRIORITY = {
   kitchen_status_local: 40,
   order_status: 50,
   close_order: 45,
+  cash_session_open: 55,
   cash_payment: 60,
+  cash_movement: 62,
+  payment_cancel: 63,
+  cash_session_close: 65,
   http: 70,
 };
 
@@ -73,6 +77,8 @@ export function dedupeQueue(queue) {
   const latestItemsByOrder = new Map();
   const latestCashByOrder = new Map();
   const latestStatusByOrder = new Map();
+  const latestCloseBySession = new Map();
+  const latestOpenByRestaurant = new Map();
   const sendKitchenSeen = new Set();
   const kitchenLocalBest = new Map();
 
@@ -100,6 +106,19 @@ export function dedupeQueue(queue) {
       continue;
     }
 
+    if (type === "cash_session_close") {
+      const closeKey = action.idempotencyKey
+        || `cash_session_close:${action.restaurantId || action.tenantId}:${action.payload?.business_date || "today"}`;
+      latestCloseBySession.set(closeKey, action);
+      continue;
+    }
+
+    if (type === "cash_session_open") {
+      const openKey = `${action.restaurantId || action.tenantId}:${action.payload?.cash_register_id || "main"}`;
+      latestOpenByRestaurant.set(openKey, action);
+      continue;
+    }
+
     if ((type === "send_to_kitchen" || type === "send_to_kitchen_after_create") && key) {
       if (sendKitchenSeen.has(key)) continue;
       sendKitchenSeen.add(key);
@@ -119,10 +138,12 @@ export function dedupeQueue(queue) {
     result.push(action);
   }
 
+  for (const action of latestOpenByRestaurant.values()) result.push(action);
   for (const action of latestItemsByOrder.values()) result.push(action);
   for (const action of latestStatusByOrder.values()) result.push(action);
   for (const action of kitchenLocalBest.values()) result.push(action);
   for (const action of latestCashByOrder.values()) result.push(action);
+  for (const action of latestCloseBySession.values()) result.push(action);
 
   return sortQueueForFlush(result);
 }

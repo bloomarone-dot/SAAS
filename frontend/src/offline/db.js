@@ -1,10 +1,9 @@
 /**
- * Couche IndexedDB — Phase 1 offline restaurant.
- * Sans dépendance externe (API native).
+ * Couche IndexedDB — Phase 5 caisse offline.
  */
 
 const DB_NAME = "bloomar_offline_v1";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
   meta: "meta",
@@ -13,6 +12,7 @@ const STORES = {
   orders: "orders",
   kitchenTickets: "kitchenTickets",
   syncQueue: "syncQueue",
+  auditLogs: "auditLogs",
 };
 
 let dbPromise = null;
@@ -28,8 +28,10 @@ function openDb() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onerror = () => reject(request.error || new Error("Ouverture IndexedDB impossible"));
     request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const oldVersion = event.oldVersion || 0;
+
       if (!db.objectStoreNames.contains(STORES.meta)) {
         db.createObjectStore(STORES.meta, { keyPath: "key" });
       }
@@ -52,6 +54,12 @@ function openDb() {
       if (!db.objectStoreNames.contains(STORES.syncQueue)) {
         db.createObjectStore(STORES.syncQueue, { keyPath: "id" });
       }
+
+      if (oldVersion < 2 && !db.objectStoreNames.contains(STORES.auditLogs)) {
+        const audit = db.createObjectStore(STORES.auditLogs, { keyPath: "uuid" });
+        audit.createIndex("tenantId", "tenantId", { unique: false });
+        audit.createIndex("timestamp", "timestamp", { unique: false });
+      }
     };
   });
 
@@ -73,6 +81,25 @@ async function withStore(storeName, mode, fn) {
     let result;
     try {
       result = fn(store);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    tx.oncomplete = () => {
+      Promise.resolve(result).then(resolve).catch(reject);
+    };
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("Transaction IndexedDB annulée"));
+  });
+}
+
+async function withStores(storeNames, mode, fn) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeNames, mode);
+    let result;
+    try {
+      result = fn(tx);
     } catch (error) {
       reject(error);
       return;
@@ -113,4 +140,11 @@ export async function idbGetAllByIndex(storeName, indexName, query) {
   });
 }
 
-export { STORES, openDb };
+export async function idbCountByIndex(storeName, indexName, query) {
+  return withStore(storeName, "readonly", (store) => {
+    const index = store.index(indexName);
+    return reqToPromise(index.count(query));
+  });
+}
+
+export { STORES, openDb, withStores };

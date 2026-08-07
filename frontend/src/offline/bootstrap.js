@@ -28,8 +28,10 @@ import { initOfflineFoundation } from "@/offline/store";
 import { warmupOfflineCache } from "@/offline/warmup";
 import { flushOfflineQueue, getOfflineQueueStats } from "@/offline/sync";
 import { computeAdminAnalyticsLocal } from "@/offline/adminAnalytics";
+import { restoreOfflineState } from "@/offline/restoreState";
 
 export { restoreLocalSession, SYNC_STATUS } from "@/offline/sessionCache";
+export { restoreOfflineState } from "./restoreState";
 
 /**
  * Charge toutes les ressources métier depuis le cache local (IndexedDB + LS).
@@ -133,8 +135,11 @@ export async function bootstrapOfflineFirst({ onSession, onHydrated, apiBaseUrl 
   const restored = restoreLocalSession();
   if (restored?.user) {
     onSession?.(restored.user, { immediate: true, offline: shouldPreferLocalData() });
-    const hydrated = await hydrateLocalWorkspace(restored.user.restaurant_id);
-    onHydrated?.(hydrated);
+    const [hydrated, offlineState] = await Promise.all([
+      hydrateLocalWorkspace(restored.user.restaurant_id),
+      restoreOfflineState(restored.user.restaurant_id, { userId: restored.user.id }).catch(() => null),
+    ]);
+    onHydrated?.({ ...hydrated, offlineState });
 
     refreshSessionBackground({
       onUser: (user) => onSession?.(user, { immediate: false, offline: false }),

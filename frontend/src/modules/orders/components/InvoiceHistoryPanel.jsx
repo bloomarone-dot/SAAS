@@ -5,6 +5,9 @@ import { PeriodFilterBar, periodToApiDates } from "@/components/shared/PeriodFil
 import { AdminFormModal, DashboardSection, FilterBar } from "@/modules/admin/components/AdminUi";
 import { apiFetch } from "@/config/http";
 import { orderApi } from "../services/orderApi";
+import { loadCashierReportMerged } from "@/offline/ops";
+import { cancelLocalPayment } from "@/offline/cashSession";
+import { isNetworkError, shouldPreferLocalData } from "@/utils/network";
 
 function money(value) {
   return `${Number(value || 0).toLocaleString("fr-FR")} FCFA`;
@@ -29,17 +32,32 @@ function orderLabel(order) {
   return order.customer_name || "Client";
 }
 
+function filterReceiptsByPeriod(receipts, period, customPeriod) {
+  const { start_date, end_date } = periodToApiDates(period, customPeriod);
+  if (!start_date && !end_date) return receipts;
+  const start = start_date ? Date.parse(start_date) : 0;
+  const end = end_date ? Date.parse(end_date) : Number.MAX_SAFE_INTEGER;
+  return receipts.filter((order) => {
+    const paidAt = Date.parse(order.paid_at || order.updated_at || order.created_at || 0);
+    return paidAt >= start && paidAt <= end;
+  });
+}
+
 export function InvoiceHistoryPanel({
   title = "Historique des factures",
   description = "Consultez les paiements encaissés, les détails et les remboursements.",
   allowRefund = false,
   adminReviewOnly = false,
   onMessage,
+  restaurantId = null,
+  currentUser = null,
+  localReceipts = null,
 }) {
   const [orders, setOrders] = useState([]);
   const [cashiers, setCashiers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState("");
+  const [offlineSource, setOfflineSource] = useState(false);
   const [period, setPeriod] = useState("today");
   const [customPeriod, setCustomPeriod] = useState({ start: "", end: "" });
   const [cashierFilter, setCashierFilter] = useState("");
@@ -48,6 +66,7 @@ export function InvoiceHistoryPanel({
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   useEffect(() => {
+    if (shouldPreferLocalData()) return;
     apiFetch("/api/v1/users", { fallback: "Impossible de charger le personnel." })
       .then((rows) => setCashiers((rows || []).filter((user) => user.role === "CAISSE" && user.is_active)))
       .catch(() => setCashiers([]));
@@ -55,11 +74,46 @@ export function InvoiceHistoryPanel({
 
   useEffect(() => {
     loadInvoices();
-  }, [period, customPeriod, cashierFilter, paymentFilter]);
+  }, [period, customPeriod, cashierFilter, paymentFilter, restaurantId, localReceipts]);
+
+  useEffect(() => {
+    function refresh() {
+      if (restaurantId) loadInvoices();
+    }
+    window.addEventListener("cash-analytics-changed", refresh);
+    window.addEventListener("cash-session-changed", refresh);
+    return () => {
+      window.removeEventListener("cash-analytics-changed", refresh);
+      window.removeEventListener("cash-session-changed", refresh);
+    };
+  }, [period, customPeriod, cashierFilter, paymentFilter, restaurantId]);
+
+  async function loadLocalInvoices() {
+    if (!restaurantId) return [];
+    const base = Array.isArray(localReceipts)
+      ? localReceipts
+      : (await loadCashierReportMerged(restaurantId)).receipts || [];
+    let rows = filterReceiptsByPeriod(base, period, customPeriod);
+    if (cashierFilter) {
+      rows = rows.filter((order) => String(order.cashier_id || order.assigned_cashier_id) === String(cashierFilter));
+    }
+    if (paymentFilter) {
+      rows = rows.filter((order) => String(order.payment_method || "").includes(paymentFilter));
+    }
+    return rows.sort(
+      (a, b) => new Date(b.paid_at || b.updated_at || 0) - new Date(a.paid_at || a.updated_at || 0),
+    );
+  }
 
   async function loadInvoices() {
     setLoading(true);
     try {
+      if (shouldPreferLocalData() && restaurantId) {
+        const local = await loadLocalInvoices();
+        setOrders(local);
+        setOfflineSource(true);
+        return;
+      }
       const params = {
         ...periodToApiDates(period, customPeriod),
         ...(cashierFilter ? { cashier_id: cashierFilter } : {}),
@@ -67,9 +121,20 @@ export function InvoiceHistoryPanel({
       };
       const data = await orderApi.completedPayments(params);
       setOrders(Array.isArray(data) ? data : []);
+      setOfflineSource(false);
     } catch (error) {
-      onMessage?.(error.message || "Impossible de charger l'historique des factures.");
-      setOrders([]);
+      if (isNetworkError(error) && restaurantId) {
+        try {
+          setOrders(await loadLocalInvoices());
+          setOfflineSource(true);
+        } catch {
+          onMessage?.(error.message || "Impossible de charger l'historique des factures.");
+          setOrders([]);
+        }
+      } else {
+        onMessage?.(error.message || "Impossible de charger l'historique des factures.");
+        setOrders([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -97,7 +162,19 @@ export function InvoiceHistoryPanel({
     if (!window.confirm(`Rembourser la facture ${order.order_number} (${money(order.total_amount)}) ?`)) return;
     setBusyId(order.id);
     try {
-      await orderApi.cancelPayment(order.id);
+      if (shouldPreferLocalData() || String(order.id).startsWith("local_")) {
+        await cancelLocalPayment(order, { restaurantId, cashier: currentUser });
+      } else {
+        try {
+          await orderApi.cancelPayment(order.id);
+        } catch (error) {
+          if (isNetworkError(error) && restaurantId) {
+            await cancelLocalPayment(order, { restaurantId, cashier: currentUser });
+          } else {
+            throw error;
+          }
+        }
+      }
       onMessage?.(`Remboursement enregistré pour ${order.order_number}.`);
       setSelectedOrder(null);
       await loadInvoices();
@@ -116,6 +193,7 @@ export function InvoiceHistoryPanel({
         action={
           <span className="text-sm font-black tabular-nums text-emerald-700">
             Total : {money(totalCollected)} · {filteredOrders.length} facture(s)
+            {offlineSource ? " · cache local" : ""}
           </span>
         }
       >

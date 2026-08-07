@@ -81,7 +81,7 @@ export async function initOfflineFoundation() {
     await idbPut(STORES.meta, {
       key: META_READY_KEY,
       readyAt: new Date().toISOString(),
-      version: 1,
+      version: 2,
     });
 
     foundationReady = true;
@@ -225,6 +225,13 @@ export async function clearLocalOpsData(restaurantId) {
     await idbDelete(STORES.tables, restaurantId);
     await idbDelete(STORES.meta, `cashier_report:${restaurantId}`);
     await idbDelete(STORES.meta, `delivery_areas:${restaurantId}`);
+    const dateKey = new Date().toISOString().slice(0, 10);
+    await idbDelete(STORES.meta, `cash_session:${restaurantId}:${dateKey}`);
+    await idbDelete(STORES.meta, `cash_movements:${restaurantId}:${dateKey}`);
+    await idbDelete(STORES.meta, `cash_session:${restaurantId}:main:${dateKey}`);
+    await idbDelete(STORES.meta, `cash_movements:${restaurantId}:main:${dateKey}`);
+    const auditRows = await idbGetAllByIndex(STORES.auditLogs, "tenantId", restaurantId);
+    for (const row of auditRows) await idbDelete(STORES.auditLogs, row.uuid);
     const orders = await listLocalOrders(restaurantId);
     for (const order of orders) await idbDelete(STORES.orders, order.id);
     const tickets = await listLocalKitchenTickets(restaurantId);

@@ -72,6 +72,7 @@ export {
   hydrateLocalWorkspace,
   refreshSessionBackground,
   runBackgroundSync,
+  restoreOfflineState,
 } from "@/offline/bootstrap";
 
 export { loadLocalFirst, applySyncCache } from "@/offline/localFirst";
@@ -89,6 +90,60 @@ export {
   loadAdminWorkspaceData,
   cacheAdminAnalyticsSnapshot,
 } from "@/offline/adminAnalytics";
+
+export {
+  loadLocalCashSession,
+  loadCashSessionMerged,
+  openLocalCashSession,
+  closeLocalCashSession,
+  resumeLocalCashSession,
+  addLocalCashMovement,
+  cancelLocalPayment,
+  CashSessionConflictError,
+  MOVEMENT_TYPES,
+  DEFAULT_REGISTER_ID,
+} from "@/offline/cashSession";
+
+export {
+  buildCashSessionView,
+  businessDateKey,
+  canOpenCashSession,
+  canCloseCashSession,
+  computeReceiptTotals,
+  sumCashMovementImpact,
+} from "@/offline/cashSessionCore";
+
+export { getDeviceId, withDeviceMeta } from "@/offline/deviceId";
+
+export {
+  appendAuditLog,
+  loadAuditLog,
+  countAuditLog,
+  AUDIT_ACTIONS,
+} from "@/offline/auditLog";
+
+export {
+  nextLocalTicketNumber,
+  formatTicketNumber,
+  peekTicketSequence,
+  getTicketPrefix,
+  saveTicketPrefix,
+} from "@/offline/ticketSequence";
+
+export {
+  CONFLICT_STRATEGIES,
+  resolveOrderItemsConflict,
+  resolvePaymentConflict,
+  resolvePaymentCancelConflict,
+  resolveCashSessionCloseConflict,
+  resolveTicketNumberConflict,
+} from "@/offline/conflictResolution";
+
+export {
+  evaluateCashSessionAccess,
+  applySessionLock,
+  MANAGER_ROLES,
+} from "@/offline/cashSessionLockCore";
 
 export {
   flushOfflineQueue,

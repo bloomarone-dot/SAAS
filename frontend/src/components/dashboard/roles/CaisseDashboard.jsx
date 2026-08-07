@@ -34,6 +34,9 @@ import {
   onRestaurantRealtime,
   isCashierRealtimeEvent,
 } from "@/offline";
+import { cancelLocalPayment } from "@/offline/cashSession";
+import { computeAdminAnalyticsLocal } from "@/offline/adminAnalytics";
+import { appendAuditLog, AUDIT_ACTIONS } from "@/offline/auditLog";
 
 const paymentMethods = [
   { label: "Espèces", icon: "Wallet" },
@@ -161,6 +164,21 @@ export function CaisseDashboard({ overrides = {} }) {
   }, [activeView]);
 
   useEffect(() => {
+    if (!restaurantId) return undefined;
+    function onCashAnalyticsChanged(event) {
+      if (event.detail?.restaurantId && event.detail.restaurantId !== restaurantId) return;
+      loadCashierReport({ silent: true });
+      computeAdminAnalyticsLocal(restaurantId).catch(() => {});
+    }
+    window.addEventListener("cash-analytics-changed", onCashAnalyticsChanged);
+    window.addEventListener("cash-session-changed", onCashAnalyticsChanged);
+    return () => {
+      window.removeEventListener("cash-analytics-changed", onCashAnalyticsChanged);
+      window.removeEventListener("cash-session-changed", onCashAnalyticsChanged);
+    };
+  }, [restaurantId, reportPeriod, reportCustomPeriod]);
+
+  useEffect(() => {
     loadCashierReport();
     loadRestaurant();
     loadPaymentRequests();
@@ -213,7 +231,7 @@ export function CaisseDashboard({ overrides = {} }) {
       setReport(local);
       setSelectedOrderId((current) => current || local.pending_orders?.[0]?.id || "");
       setSelectedReceiptId((current) => current || local.receipts?.[0]?.id || "");
-      setOfflineHint("Mode hors ligne : caisse locale (espèces / carte uniquement).");
+      setOfflineHint("Mode hors ligne : caisse locale (espèces, carte, Mobile Money, mixte).");
       if (!silent) setMessage("");
       return true;
     }
@@ -507,6 +525,7 @@ export function CaisseDashboard({ overrides = {} }) {
       setMessage(`Paiement local validé pour ${result.order.order_number} · ${actualMethod}.`);
       setShowPaymentModal(false);
       setActiveTab("receipts");
+      computeAdminAnalyticsLocal(restaurantId).catch(() => {});
     }
 
     if (shouldPreferLocalData() || isLocalIdSafe(selectedOrder.id)) {
@@ -576,13 +595,39 @@ export function CaisseDashboard({ overrides = {} }) {
     setIsLoading(true);
     setMessage("");
     try {
-      const updated = await orderApi.cancelPayment(order.id);
+      let updated;
+      if (shouldPreferLocalData() || isLocalIdSafe(order.id)) {
+        updated = await cancelLocalPayment(order, {
+          restaurantId,
+          cashier: currentUser,
+        });
+        const local = await loadCashierReportMerged(restaurantId, null, { cashierUserId: cashierScopeId });
+        setReport(local);
+      } else {
+        updated = await orderApi.cancelPayment(order.id);
+        await loadCashierReport();
+      }
       setSelectedOrderId(updated.id);
       setSelectedReceiptId("");
       setMessage(`Paiement annulé pour ${order.order_number}. La commande revient à encaisser.`);
-      await loadCashierReport();
     } catch (error) {
-      setMessage(error.message || "Annulation du paiement impossible.");
+      if (isNetworkError(error) && restaurantId) {
+        try {
+          const updated = await cancelLocalPayment(order, {
+            restaurantId,
+            cashier: currentUser,
+          });
+          const local = await loadCashierReportMerged(restaurantId, null, { cashierUserId: cashierScopeId });
+          setReport(local);
+          setSelectedOrderId(updated.id);
+          setSelectedReceiptId("");
+          setMessage(`Paiement annulé localement pour ${order.order_number}.`);
+        } catch (localError) {
+          setMessage(localError.message || "Annulation du paiement impossible.");
+        }
+      } else {
+        setMessage(error.message || "Annulation du paiement impossible.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -592,6 +637,15 @@ export function CaisseDashboard({ overrides = {} }) {
     if (!order) return;
     const printable = await orderApi.logReceiptPrint(order.id).catch(() => order);
     openPrintWindow(receiptHtml(printable, restaurant, currentUser), `Reçu ${order.order_number}`);
+    if (restaurantId) {
+      appendAuditLog({
+        tenantId: restaurantId,
+        userId: currentUser?.id,
+        action: AUDIT_ACTIONS.RECEIPT_PRINT,
+        resource: order.id,
+        details: { order_number: order.order_number },
+      }).catch(() => {});
+    }
   }
 
   function printCashReport() {
@@ -719,6 +773,9 @@ export function CaisseDashboard({ overrides = {} }) {
             key={`drawer-${report.paid_orders_count || 0}-${report.total_collected || 0}`}
             adminReviewOnly={adminReviewOnly}
             onMessage={setMessage}
+            restaurantId={restaurantId}
+            receipts={report.receipts || []}
+            currentUser={currentUser}
           />
 
           {!adminReviewOnly && paymentRequests.length > 0 && (
@@ -796,6 +853,9 @@ export function CaisseDashboard({ overrides = {} }) {
             allowRefund={!adminReviewOnly}
             adminReviewOnly={adminReviewOnly}
             onMessage={setMessage}
+            restaurantId={restaurantId}
+            currentUser={currentUser}
+            localReceipts={report.receipts}
           />
         </>
       )}
@@ -806,6 +866,9 @@ export function CaisseDashboard({ overrides = {} }) {
             key={`drawer-close-${report.paid_orders_count || 0}-${report.total_collected || 0}`}
             adminReviewOnly={adminReviewOnly}
             onMessage={setMessage}
+            restaurantId={restaurantId}
+            receipts={report.receipts || []}
+            currentUser={currentUser}
           />
 
           <DashboardSection title="Récapitulatif du service">

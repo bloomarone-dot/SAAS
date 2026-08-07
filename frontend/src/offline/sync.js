@@ -5,6 +5,8 @@
 
 import { persistSyncQueue, initOfflineFoundation } from "@/offline/store";
 import { idbGet, idbPut, STORES } from "@/offline/db";
+import { getDeviceId } from "@/offline/deviceId";
+import { appendAuditLog, AUDIT_ACTIONS } from "@/offline/auditLog";
 import {
   MAX_ATTEMPTS,
   MAX_QUEUE_SIZE,
@@ -53,6 +55,8 @@ export function enqueueOfflineAction(action) {
   // Champs PendingOperations — uuid, endpoint, method, payload, retryCount, idempotencyKey
   const entry = {
     ...action,
+    tenantId: action.tenantId || action.restaurantId || null,
+    deviceId: action.deviceId || getDeviceId(),
     uuid:
       action.uuid
       || action.idempotencyKey
@@ -240,6 +244,17 @@ async function runAction(action, { apiFetch, apiFetchPublic, idMap }) {
     try {
       const { remapLocalOrderId } = await import("@/offline/ops");
       await remapLocalOrderId(action.localOrderId, serverOrderId, action.restaurantId);
+      if (result?.order?.order_number && action.payload?.client_order_number) {
+        const localOrder = await idbGet(STORES.orders, serverOrderId);
+        if (localOrder) {
+          await idbPut(STORES.orders, {
+            ...localOrder,
+            client_order_number: action.payload.client_order_number,
+            order_number: action.payload.client_order_number,
+            server_order_number: result.order.order_number,
+          });
+        }
+      }
     } catch {
       // best effort
     }
@@ -335,6 +350,45 @@ async function runAction(action, { apiFetch, apiFetchPublic, idMap }) {
       body: payload,
       fallback: action.errorMessage || "Paiement caisse impossible.",
     });
+    return;
+  }
+
+  if (type === "payment_cancel") {
+    const orderId = resolveOrderId(action, idMap);
+    if (!orderId) {
+      const err = new Error("Commande locale pas encore créée");
+      err.defer = true;
+      throw err;
+    }
+    await apiFetch(`/api/v1/orders/${orderId}/payment-cancel`, {
+      method: "POST",
+      fallback: action.errorMessage || "Annulation paiement impossible.",
+    });
+    return;
+  }
+
+  if (type === "cash_session_open") {
+    const payload = action.payload || action.requests?.[0]?.body || {};
+    await apiFetch("/api/v1/orders/cash-session/open", {
+      method: "POST",
+      body: payload,
+      fallback: action.errorMessage || "Ouverture caisse impossible.",
+    });
+    return;
+  }
+
+  if (type === "cash_session_close") {
+    const payload = action.payload || action.requests?.[0]?.body || {};
+    await apiFetch("/api/v1/orders/cash-session/close", {
+      method: "POST",
+      body: payload,
+      fallback: action.errorMessage || "Clôture caisse impossible.",
+    });
+    return;
+  }
+
+  if (type === "cash_movement") {
+    // Pas d'endpoint serveur — mouvement conservé localement (idempotent).
     return;
   }
 
@@ -540,6 +594,25 @@ export async function flushOfflineQueue(apiBaseUrl) {
       conflicts,
       idMap,
     };
+
+    const tenantId = queue.find((a) => a.tenantId || a.restaurantId)?.tenantId
+      || queue.find((a) => a.restaurantId)?.restaurantId;
+    if (tenantId && synced > 0) {
+      appendAuditLog({
+        tenantId,
+        action: AUDIT_ACTIONS.SYNC_SUCCESS,
+        syncStatus: "SYNCED",
+        details: { synced, conflicts, remaining: result.remaining },
+      }).catch(() => {});
+    }
+    if (tenantId && failed > 0) {
+      appendAuditLog({
+        tenantId,
+        action: AUDIT_ACTIONS.SYNC_ERROR,
+        syncStatus: "LOCAL",
+        details: { failed, remaining: result.remaining },
+      }).catch(() => {});
+    }
 
     emitSyncEvent("offline-sync-finished", result);
     emitSyncEvent("offline-queue-changed", { count: remaining.length });

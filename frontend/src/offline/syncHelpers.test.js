@@ -104,6 +104,28 @@ describe("dedupeQueue", () => {
     assert.equal(tickets.length, 1);
     assert.equal(tickets[0].status, "Prête");
   });
+
+  it("ne garde qu'une clôture de caisse par jour", () => {
+    const out = dedupeQueue([
+      {
+        id: "c1",
+        type: "cash_session_close",
+        restaurantId: "r1",
+        idempotencyKey: "cash_session_close:r1:2026-08-07",
+        payload: { closing_counted: 10000 },
+      },
+      {
+        id: "c2",
+        type: "cash_session_close",
+        restaurantId: "r1",
+        idempotencyKey: "cash_session_close:r1:2026-08-07",
+        payload: { closing_counted: 12000 },
+      },
+    ]);
+    const closes = out.filter((a) => a.type === "cash_session_close");
+    assert.equal(closes.length, 1);
+    assert.equal(closes[0].id, "c2");
+  });
 });
 
 describe("isConflictResolved", () => {

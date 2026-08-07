@@ -21,6 +21,10 @@ import { aggregateDeliveryFees, aggregatePaymentMethods } from "@/modules/orders
 import { KITCHEN_ENABLED } from "@/config/features";
 
 import { SYNC_STATUS } from "@/offline/sessionCache";
+import { getDeviceId, withDeviceMeta } from "@/offline/deviceId";
+import { appendAuditLog, AUDIT_ACTIONS } from "@/offline/auditLog";
+import { nextLocalTicketNumber, newGlobalOrderUuid } from "@/offline/ticketSequence";
+import { resolvePaymentConflict } from "@/offline/conflictResolution";
 
 function stampPendingSync(order) {
   if (!order || typeof order !== "object") return order;
@@ -37,6 +41,12 @@ export function newLocalId(prefix = "local") {
 
 export function isLocalId(id) {
   return String(id || "").startsWith("local_");
+}
+
+function emitCashAnalyticsChanged(restaurantId) {
+  if (typeof window !== "undefined" && restaurantId) {
+    window.dispatchEvent(new CustomEvent("cash-analytics-changed", { detail: { restaurantId } }));
+  }
 }
 
 function nowIso() {
@@ -182,8 +192,12 @@ export async function createLocalTableOrder({
   await initOfflineFoundation();
   const id = newLocalId("local_order");
   const createdAt = nowIso();
+  const orderNumber = await nextLocalTicketNumber(restaurantId);
+  const localUuid = newGlobalOrderUuid();
   const order = stampPendingSync({
     id,
+    local_uuid: localUuid,
+    client_uuid: localUuid,
     restaurantId,
     restaurant_id: restaurantId,
     table_id: table.id,
@@ -192,7 +206,8 @@ export async function createLocalTableOrder({
     server_id: currentUser?.id || null,
     server_name: currentUser ? `${currentUser.first_name || ""} ${currentUser.last_name || ""}`.trim() : null,
     party_size: Math.max(1, Number(partySize || 1)),
-    order_number: `LOC-${String(Date.now()).slice(-6)}`,
+    order_number: orderNumber,
+    client_order_number: orderNumber,
     customer_name: `Table ${table.name || table.number || ""}`.trim(),
     customer_phone: "",
     status: "Nouvelle",
@@ -212,13 +227,24 @@ export async function createLocalTableOrder({
 
   await upsertLocalOrder(order);
 
+  await appendAuditLog({
+    tenantId: restaurantId,
+    userId: currentUser?.id,
+    action: AUDIT_ACTIONS.ORDER_CREATE,
+    resource: id,
+    details: withDeviceMeta({ order_number: orderNumber, fulfillment_type: "Sur place" }),
+  });
+
   enqueueOfflineAction({
     type: "create_table_order",
     label: `Ouverture table ${order.table_name}`,
     localOrderId: id,
     tableId: table.id,
     restaurantId,
+    deviceId: getDeviceId(),
     party_size: order.party_size,
+    payload: withDeviceMeta({ client_order_number: orderNumber }),
+    idempotencyKey: `create_order:${id}`,
     requests: [],
   });
 
@@ -237,11 +263,16 @@ export async function createLocalCashierDelivery({
   await initOfflineFoundation();
   const id = newLocalId("local_order");
   const createdAt = nowIso();
+  const orderNumber = await nextLocalTicketNumber(restaurantId);
+  const localUuid = newGlobalOrderUuid();
   const order = {
     id,
+    local_uuid: localUuid,
+    client_uuid: localUuid,
     restaurantId,
     restaurant_id: restaurantId,
-    order_number: `LOC-LIV-${String(Date.now()).slice(-6)}`,
+    order_number: orderNumber,
+    client_order_number: orderNumber,
     customer_name: payload.customer_name,
     customer_phone: payload.customer_phone,
     customer_address: payload.customer_address || null,
@@ -270,11 +301,20 @@ export async function createLocalCashierDelivery({
     _local: true,
   };
   await upsertLocalOrder(order);
+  await appendAuditLog({
+    tenantId: restaurantId,
+    userId: currentUser?.id,
+    action: AUDIT_ACTIONS.ORDER_CREATE,
+    resource: id,
+    details: withDeviceMeta({ order_number: orderNumber, fulfillment_type: "Livraison" }),
+  });
   enqueueOfflineAction({
     type: "create_cashier_delivery",
     label: `Livraison ${payload.customer_phone}`,
     localOrderId: id,
     restaurantId,
+    deviceId: getDeviceId(),
+    idempotencyKey: `create_delivery:${id}`,
     requests: [{
       path: "/api/v1/orders/cashier-delivery",
       method: "POST",
@@ -339,6 +379,8 @@ export async function remapLocalOrderId(localOrderId, serverOrderId, restaurantI
       ...localOrder,
       id: serverOrderId,
       restaurantId: restaurantId || localOrder.restaurantId || localOrder.restaurant_id,
+      client_order_number: localOrder.client_order_number || localOrder.order_number,
+      order_number: localOrder.order_number,
       _local: false,
       updatedAt: nowIso(),
     });
@@ -706,7 +748,14 @@ function isLocalOrderPayable(order) {
 }
 
 const CASHIER_PAID_STATUSES = new Set(["Payée", "Payee"]);
-const OFFLINE_CASH_METHODS = new Set(["Espèces", "Carte", "Orange Money", "MTN Mobile Money"]);
+const OFFLINE_CASH_METHODS = new Set([
+  "Espèces",
+  "Carte",
+  "Orange Money",
+  "MTN Mobile Money",
+  "Bon d'achat",
+  "Paiement différé",
+]);
 
 function emptyCashierReport() {
   return {
@@ -926,6 +975,10 @@ export async function payLocalCashOrder(order, {
     throw new Error("Mode de paiement non pris en charge hors ligne.");
   }
   if (!order?.id) throw new Error("Commande introuvable.");
+  const conflict = resolvePaymentConflict(order, { payment_method: method });
+  if (conflict.action === "reject_duplicate") {
+    throw new Error(conflict.reason || "Cette commande est déjà encaissée.");
+  }
   const status = normalizeCashierStatus(order.status);
   if (CASHIER_PAID_STATUSES.has(status) || order._paid_offline || order.payment_status === "SUCCESS") {
     throw new Error("Cette commande est déjà encaissée localement.");
@@ -950,6 +1003,7 @@ export async function payLocalCashOrder(order, {
     itemsSubtotal + Number(order.delivery_fee || 0) - discount,
   );
   const paidAt = nowIso();
+  const deviceId = getDeviceId();
   const paid = {
     ...order,
     discount_amount: discount,
@@ -967,7 +1021,20 @@ export async function payLocalCashOrder(order, {
     cashier_name: cashierNameOf(cashier) || order.cashier_name || null,
     restaurantId: rid,
     restaurant_id: rid,
+    deviceId,
     _paid_offline: true,
+    payment_history: [
+      ...(Array.isArray(order.payment_history) ? order.payment_history : []),
+      {
+        action: "paid",
+        payment_method: method,
+        total_amount: totalAmount,
+        discount_amount: discount,
+        paid_at: paidAt,
+        cashier_id: cashier?.id || null,
+        deviceId,
+      },
+    ],
   };
 
   await upsertLocalOrder(paid);
@@ -996,7 +1063,10 @@ export async function payLocalCashOrder(order, {
     localOrderId: order.id,
     orderId: order.id,
     restaurantId: rid,
+    tenantId: rid,
+    deviceId,
     payload,
+    idempotencyKey: `cash_payment:${order.id}`,
     requests: isLocalId(order.id)
       ? []
       : [{
@@ -1006,6 +1076,17 @@ export async function payLocalCashOrder(order, {
           body: payload,
         }],
   });
+
+  await appendAuditLog({
+    tenantId: rid,
+    userId: cashier?.id,
+    action: AUDIT_ACTIONS.PAYMENT,
+    resource: order.id,
+    syncStatus: "PENDING_SYNC",
+    details: withDeviceMeta({ order_number: order.order_number, payload }),
+  });
+
+  emitCashAnalyticsChanged(rid);
 
   return { order: paid, report: nextReport };
 }

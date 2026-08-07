@@ -99,13 +99,52 @@ Le back-office admin calcule tous les KPI localement via `adminAnalyticsCore.js`
 - **Sync** : recalcul local après chaque sync — ne remplace pas les données, merge
 
 
-| Action | Offline (cache OK) |
-|--------|-------------------|
-| Démarrer app | ✅ |
-| Session | ✅ |
-| Menu / tables | ✅ |
-| Commandes | ✅ PENDING_SYNC |
-| Cuisine / bar | ✅ |
-| Caisse espèces | ✅ |
-| Impression | ✅ |
-| Sync auto | ✅ |
+## 9. Phase 5 — Caisse Offline First ✅
+
+Documentation complète : **[CASH_OFFLINE_ARCHITECTURE.md](./CASH_OFFLINE_ARCHITECTURE.md)**
+
+Nouveautés Phase 5b :
+- Verrouillage session caisse (1 session / register / jour)
+- Numérotation tickets `CAM-YYYYMMDD-000001`
+- Device ID permanent sur toutes les ops
+- Journal d'audit local (5000 entrées)
+- Reprise après crash (`restoreOfflineState`)
+- Stratégies de conflit explicites (`conflictResolution.js`)
+- Tests stress 1000 commandes / 10000 PendingOperations
+
+| Fichier | Rôle |
+|---------|------|
+| `offline/cashSessionCore.js` | Calculs purs session |
+| `offline/cashSession.js` | Open/close/lock/movements |
+| `offline/cashSessionLockCore.js` | Verrou multi-appareil |
+| `offline/deviceId.js` | ID appareil permanent |
+| `offline/auditLog.js` | Journal local |
+| `offline/ticketSequence.js` | Séquence tickets |
+| `offline/conflictResolution.js` | Résolution conflits |
+| `offline/restoreState.js` | Reprise crash |
+
+```bash
+cd frontend && npm run test:offline   # 40+ tests incl. stress
+```
+
+### Validation fonctionnelle
+
+| Fonctionnalité | Statut |
+|----------------|--------|
+| Ouverture caisse offline | 🟡 Corrigée |
+| Fermeture caisse offline | 🟡 Corrigée |
+| Paiement espèces offline | 🟢 Déjà OK |
+| Paiement Mobile Money (manuel) offline | 🟢 Déjà OK |
+| Paiement mixte offline | 🟢 Déjà OK |
+| Remboursement / annulation paiement offline | 🟡 Corrigée |
+| Dépense / retrait / ajout fonds offline | 🟡 Corrigée |
+| Rapport caisse CSV / impression offline | 🟢 Déjà OK |
+| Sync open/close session | 🟡 Corrigée |
+| Sync mouvements caisse serveur | 🔴 Pas d'endpoint backend |
+| Mobile Money live (API opérateur) | 🔴 Impossible sans réseau |
+| Demandes paiement serveur (WebSocket) | 🔴 Online only (non bloquant) |
+| Code promo / fidélité preview | 🔴 Online only (non bloquant) |
+
+```bash
+cd frontend && npm run test:offline   # inclut cashSessionCore.test.js
+```
